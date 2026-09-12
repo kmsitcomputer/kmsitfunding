@@ -2,13 +2,15 @@
 
 ## Status
 
-REMEDIATION COMPLETE — PENDING TARGETED RE-AUDIT
+FINAL / LOCKED
 
-This status is NOT a final pass. It means: implementation/remediation work described below is
-complete from the implementing agent's perspective, but independent review and Human approval
-have not yet closed this task. See
-[docs/audits/IMP-000-INDEPENDENT-AUDIT.md](../audits/IMP-000-INDEPENDENT-AUDIT.md) for the audit
-history and current pending items.
+This status reflects the completed chain: implementation work → independent audit → remediation
+(3 passes) → targeted re-audit (3 passes, final result PASS) → Human approval ("saya setuju",
+2026-09-12). It was reached by recording a Human decision, not by AI self-declaration — see
+[docs/audits/IMP-000-INDEPENDENT-AUDIT.md](../audits/IMP-000-INDEPENDENT-AUDIT.md) for the full
+audit chronology and [docs/audits/IMP-000-STAGE-GATE.md](../audits/IMP-000-STAGE-GATE.md) for the
+dedicated stage-gate approval record. This FINAL/LOCKED status applies to IMP-000 only — see
+"IMP-000 Gate vs. IMP-001 Readiness" below.
 
 ## Objective
 
@@ -150,19 +152,27 @@ None.
 ## Gate
 
 ```
-IMPLEMENTATION WORK:      COMPLETE
-INDEPENDENT AUDIT:        COMPLETED — FINDINGS ISSUED (see docs/audits/IMP-000-INDEPENDENT-AUDIT.md)
-REMEDIATION PASS 2:       COMPLETE
-TARGETED RE-AUDIT:        PENDING
-FINAL HUMAN APPROVAL:     PENDING
-IMP-000 FINAL GATE:       NOT YET PASSED
-IMP-001:                  NOT AUTHORIZED
+IMPLEMENTATION WORK:          COMPLETE
+INDEPENDENT AUDIT:            COMPLETE — see docs/audits/IMP-000-INDEPENDENT-AUDIT.md
+REMEDIATION (PASSES 1-3):     COMPLETE
+TARGETED RE-AUDIT (PASS 3):   PASS
+ARCHITECTURE REGRESSION:      PASS
+GOVERNANCE RE-AUDIT GATE:     PASS
+FINAL HUMAN APPROVAL:         APPROVED ("saya setuju", 2026-09-12)
+UNRESOLVED BLOCKER:           0
+UNRESOLVED MAJOR:             0
+GATE-IMPACT MINOR:            0
+IMP-000 FINAL GATE:           PASSED
+IMP-001:                      NOT YET AUTHORIZED
 ```
 
-This document does not self-declare a final PASS, LOCKED, or AUTHORIZED status. The final gate
-requires a targeted independent re-audit finding zero unresolved BLOCKER/MAJOR items, followed by
-recorded Human approval — see
-[docs/audits/STAGE-GATE-APPROVAL-TEMPLATE.md](../audits/STAGE-GATE-APPROVAL-TEMPLATE.md).
+This FINAL/LOCKED status was reached because an independent targeted re-audit (Pass 3) found
+zero unresolved BLOCKER/MAJOR/gate-impact-MINOR items, and a Human then explicitly approved
+IMP-000. No AI agent declared this approval — see
+[docs/audits/IMP-000-STAGE-GATE.md](../audits/IMP-000-STAGE-GATE.md) for the dedicated approval
+record and [docs/audits/IMP-000-INDEPENDENT-AUDIT.md](../audits/IMP-000-INDEPENDENT-AUDIT.md) for
+the full chronology. Reaching this gate does not, by itself, authorize IMP-001 — see the next
+section.
 
 ## IMP-000 Gate vs. IMP-001 Readiness
 

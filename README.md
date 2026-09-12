@@ -9,19 +9,22 @@ payments, ledger accounting, commission, fundraisers, partners, and beneficiary 
 Architecture Baseline:    Externally established / treated as locked input to implementation.
                           See AGENTS.md and authoritative architecture documents when present.
 Implementation Program:   IN PROGRESS
-Current Stage:            IMP-000 — remediation / governance gate pending
-IMP-001:                  NOT AUTHORIZED
+IMPLEMENTATION 00:        FINAL / LOCKED (Human-approved 2026-09-12)
+Next Planned Stage:       IMPLEMENTATION 01 — Core Project Foundation
+IMP-001 Authorization:    PENDING SPECIFICATION / DEFINITION OF READY
 ```
 
 The architecture decisions listed in [AGENTS.md](AGENTS.md) under "Locked Decisions" are treated
 as locked input to implementation and require an approved ACR/ADR to change. This repository does
 not yet contain the authoritative architecture/requirements documents themselves (docs/02-
-architecture/, docs/03-database/, etc. are currently scaffolded but not authored), nor any
-accepted ADR or recorded Human approval — see
-[docs/audits/IMP-000-INDEPENDENT-AUDIT.md](docs/audits/IMP-000-INDEPENDENT-AUDIT.md). No business
+architecture/, docs/03-database/, etc. are currently scaffolded but not authored). No business
 feature (donation, payment, ledger, commission, partner, beneficiary, CMS, theme, or API business
-logic) has been implemented. IMP-000 itself has not passed its final gate and IMP-001 is not
-authorized to begin — see
+logic) has been implemented. IMP-000 (repository bootstrap and governance) has passed its final
+gate with recorded Human approval — see
+[docs/audits/IMP-000-STAGE-GATE.md](docs/audits/IMP-000-STAGE-GATE.md) and
+[docs/audits/IMP-000-INDEPENDENT-AUDIT.md](docs/audits/IMP-000-INDEPENDENT-AUDIT.md). That
+approval closes IMP-000 only — it does not by itself authorize IMP-001, which still needs its own
+implementation specification and Definition of Ready evaluation before work begins — see
 [docs/implementation/IMP-000-repository-bootstrap.md](docs/implementation/IMP-000-repository-bootstrap.md).
 
 ## Where to Start

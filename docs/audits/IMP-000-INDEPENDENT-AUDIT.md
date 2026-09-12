@@ -312,16 +312,82 @@ Files patched (this pass):
 - README.md (replaced the old contradictory hierarchy diagram with a summary of the canonical
   DOCUMENT-AUTHORITY.md model)
 
+## Targeted Re-Audit Pass 3
+
+Independent Reviewer:
+Codex
+
+Finding Status:
+
+```
+IMP000-A01 MAJOR              — RESOLVED
+IMP000-A02 MAJOR              — RESOLVED (no regression)
+IMP000-A03 MAJOR              — RESOLVED
+IMP000-A04 MINOR              — RESOLVED (no regression)
+IMP000-A05 MINOR/GATE-IMPACT  — RESOLVED
+IMP000-A06 MINOR              — RESOLVED (no regression)
+IMP000-A07 EDITORIAL          — RESOLVED (no regression)
+IMP000-R01 MINOR              — RESOLVED (no regression)
+```
+
+Previously Resolved Findings Regressed:
+NO
+
+Architecture Regression: PASS
+Governance Re-Audit Gate: PASS
+IMP-000 Recommendation: READY FOR HUMAN APPROVAL
+
+This result is recorded here as reported to the implementing agent for this finalization task.
+As with the initial audit, no separate commit-scoped transcript of this re-audit pass exists as a
+repository artifact — the finding statuses above are the record of it within this repository.
+
+## Human Gate
+
+Claude did not approve IMP-000. IMP-000 was reviewed and approved by a Human, not by any AI
+agent; this section records that Human decision — it is not a self-approval by any AI agent.
+
+```
+Stage:                            IMPLEMENTATION 00
+Task ID:                          IMP-000
+
+Technical / Governance Re-Audit:  PASS
+Architecture Regression:          PASS
+
+Human Approval:                   APPROVED
+Human Decision:                   "saya setuju"
+Approval Source:                  Explicit Human decision in the project governance conversation.
+Human Approver:                   Project Human Authority
+
+Approval Date:                    2026-09-12
+
+Approval Evidence:
+Explicit Human approval statement: "saya setuju". The Human approval occurred in the project
+governance conversation. That conversation transcript is not represented as a repository
+artifact (no cryptographic signature, ticket, or external record exists) unless separately
+archived by the repository owner.
+
+Reviewed Snapshot:
+Working tree state reviewed by Codex Targeted Re-Audit Pass 3, as reported for this finalization.
+Repository HEAD at the time this Human Gate record was written:
+d4715cb (`docs(governance): remediation pass 3 for IMP-000 targeted re-audit (A01, A03, A05)`) —
+confirmed via `git log -1 --oneline` with a clean working tree (`git status --short` empty).
+
+Final Blocking Findings:
+BLOCKER:            0
+MAJOR:              0
+GATE-IMPACT MINOR:  0
+```
+
+See also [docs/audits/IMP-000-STAGE-GATE.md](IMP-000-STAGE-GATE.md) for the dedicated stage-gate
+record of this approval.
+
 ## Current Status
 
-REMEDIATION IN PROGRESS — PENDING TARGETED RE-AUDIT PASS 3
-
-This status is not an independent verification. Only Codex's targeted re-audit can confirm
-whether A01, A03, and A05 are actually resolved.
+IMP-000: FINAL / LOCKED (Human-approved). IMP-001 remains NOT YET AUTHORIZED — see
+[docs/implementation/IMP-000-repository-bootstrap.md](../implementation/IMP-000-repository-bootstrap.md)
+"IMP-000 Gate vs. IMP-001 Readiness".
 
 ## Human Final Approval
 
-PENDING — no Human approval has been recorded anywhere in this repository. Human Approver,
-Approval Date, and Approval Evidence fields remain unset. See
-[docs/audits/STAGE-GATE-APPROVAL-TEMPLATE.md](STAGE-GATE-APPROVAL-TEMPLATE.md) for the template
-that must be filled in, with real evidence, once a Human reviews this task.
+APPROVED — see "Human Gate" above for full details. This is the first Human approval recorded
+anywhere in this repository.
