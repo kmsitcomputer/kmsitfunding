@@ -28,9 +28,11 @@ All donation settlement is centralized through the primary organization's paymen
 
 ## 2. Human Decision Register
 
-Q1-Q20 in [docs/01-requirements/HUMAN-DECISION-REGISTER.md](HUMAN-DECISION-REGISTER.md) are
+Q1-Q25 in [docs/01-requirements/HUMAN-DECISION-REGISTER.md](HUMAN-DECISION-REGISTER.md) are
 authoritative Human Decisions and are not duplicated here except by direct reference, to avoid
-inconsistent copies. In particular:
+inconsistent copies (Q1-Q20 were materialized alongside this document; Q21-Q25 were added later,
+during IMP-002 specification/readiness work — see that register's own introduction for
+provenance). In particular:
 
 ```
 Q3-A  No Commission                 = SUPERSEDED
