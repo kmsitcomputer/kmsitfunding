@@ -6,9 +6,16 @@ payments, ledger accounting, commission, fundraisers, partners, and beneficiary 
 ## Status
 
 ```
-Stage:    IMPLEMENTATION 00 — Repository Bootstrap & Governance
-Coding:   NOT STARTED
+Architecture Program:    COMPLETE / LOCKED
+Implementation Program:  STARTED
+Current Stage:           IMP-000 — Repository Bootstrap & Implementation Governance
 ```
+
+"Architecture Program: COMPLETE / LOCKED" means the architecture decisions listed in
+[AGENTS.md](AGENTS.md) under "Locked Decisions" are settled and require an approved ACR/ADR to
+change — it does not mean any application feature has been built. No business feature (donation,
+payment, ledger, commission, partner, beneficiary, CMS, theme, or API business logic) has been
+implemented. This stage (IMP-000) covers repository bootstrap and governance only.
 
 ## Where to Start
 

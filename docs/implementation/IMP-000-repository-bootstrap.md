@@ -22,8 +22,6 @@ None yet locked beyond the baseline decisions captured in [AGENTS.md](../../AGEN
 ## Scope
 
 - Repository initialization (git).
-- Top-level repository layout (`docs/`, placeholders for `app/`, `bootstrap/`, `config/`,
-  `database/`, `public/`, `resources/`, `routes/`, `storage/`, `tests/`, `.github/`).
 - `docs/` directory structure across governance, requirements, architecture, database, security,
   RBAC, domains, api, testing, deployment, ADR, decisions, implementation, audits.
 - `AGENTS.md` baseline.

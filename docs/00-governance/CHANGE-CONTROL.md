@@ -7,46 +7,20 @@ rewrite architecture because it is easier to code a different way (e.g. a new pa
 mutable wallet balance, tenant architecture, a microservice split, a new mandatory Redis
 dependency, different Commission logic). Ease of coding is not sufficient justification.
 
-Raise an **ACR — Architecture Change Request** instead.
-
-## ACR Template
-
-```markdown
-# ACR-XXX
-
-## Problem
-Why existing architecture cannot satisfy implementation.
-
-## Existing Rule
-What locked decision is affected.
-
-## Proposed Change
-New behavior.
-
-## Alternatives
-Other approaches evaluated.
-
-## Impact
-Requirements / Database / Security / API / Finance / Testing / Deployment
-
-## Migration Impact
-If applicable.
-
-## Human Decision Required
-YES / NO
-
-## Recommendation
-```
-
-Store ACRs under `docs/adr/` (or `docs/decisions/` while still in draft — promote to `docs/adr/`
-once approved).
+Raise an **ACR — Architecture Change Request** instead, using
+[docs/decisions/ARCHITECTURE-CHANGE-REQUEST-TEMPLATE.md](../decisions/ARCHITECTURE-CHANGE-REQUEST-TEMPLATE.md).
 
 ## ACR to ADR Flow
 
 ```
-ACR -> Review -> Human / Architecture Approval -> ADR -> Updated authoritative docs
-     -> Implementation resumes
+ACR (docs/decisions/) -> Review -> Human / Architecture Approval
+   -> ADR (docs/adr/, using docs/adr/ADR-TEMPLATE.md)
+   -> Updated authoritative docs
+   -> Implementation resumes
 ```
+
+Draft ACRs live under `docs/decisions/`. Once approved, the decision is recorded as an ADR under
+`docs/adr/`.
 
 ## Database Migration Policy
 
