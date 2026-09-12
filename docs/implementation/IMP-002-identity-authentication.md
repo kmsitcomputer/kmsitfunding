@@ -336,9 +336,9 @@ to point at a different email or a different token; a changed email means a NEW 
 
 ### One Active Request Per User (baseline rule)
 
-At most ONE active (`verified_at`, `superseded_at`, and `cancelled_at` all still null, and not
-expired) `EmailChangeRequest` may exist per `User` at a time. Starting a new request MUST,
-atomically:
+At most ONE ACTIVE (`verified_at`, `superseded_at`, `cancelled_at`, and `conflicted_at` all null,
+and `now < expires_at`) `EmailChangeRequest` may exist per `User` at a time. Starting a new request
+MUST, atomically:
 
 ```text
 1. Normalize the new email (see "Email Normalization").
@@ -439,9 +439,9 @@ Conflict finalization then happens as its own, separate, durable transaction:
 ```text
 BEGIN TRANSACTION (conflict finalization)
   lock the EmailChangeRequest row
-  IF the request is still eligible for conflict finalization (verified_at, superseded_at,
-     cancelled_at, and conflicted_at are all still null — i.e. no other action has already
-     resolved it to a different terminal state in the meantime):
+  IF the request is still ACTIVE at finalization time (verified_at, superseded_at, cancelled_at,
+     and conflicted_at are all still null, AND now < expires_at — i.e. no other action or expiry
+     has already resolved it to a terminal state in the meantime):
        set conflicted_at <- now
        set conflict_reason_code <- 'TARGET_EMAIL_ALREADY_IN_USE'
        (this makes the request permanently non-promotable and non-retryable — see "Email Change
@@ -458,6 +458,13 @@ An equivalent implementation (e.g. a single conditional/atomic update guarded by
 columns are null") that provides the same durable, race-safe semantics is acceptable — the
 two-transaction description above is the conceptual model, not a mandated literal sequence of SQL
 statements.
+
+Conflict finalization permits only the transition ACTIVE -> CONFLICTED. If `now >= expires_at`
+before the conflict-finalization transaction performs its guarded write, EXPIRED has already
+become the effective terminal outcome: the finalizer does nothing, `conflicted_at` remains null,
+the canonical email remains unchanged, and the expired verification challenge remains unusable.
+No global priority order is introduced; whichever valid terminal transition commits or becomes
+effective first is preserved by every later conditional finalizer.
 
 `conflict_reason_code` holds only a controlled, internal, non-sensitive value (baseline:
 `TARGET_EMAIL_ALREADY_IN_USE`) — never a raw database constraint name, exception message, or any
@@ -524,10 +531,11 @@ A token issued for request generation N can NEVER promote the email of request g
   token-to-request lookup itself (the token hash is looked up against EmailChangeRequest rows, not
   against a mutable "current pending email" field).
 Conflict finalization (see "Uniqueness Conflict — Durable Terminal State") is itself race-safe: if
-  a request is concurrently cancelled, superseded, or has already been verified/conflicted by the
-  time the conflict-finalization step runs, that pre-existing terminal state is authoritative and
-  is never overwritten by a late-arriving conflict marker — the finalization step is a conditional
-  write ("only if still eligible"), not an unconditional one.
+  a request is concurrently cancelled, superseded, has already been verified/conflicted, or has
+  become expired by the time the conflict-finalization step runs, that pre-existing/effective
+  terminal state is authoritative and is never overwritten by a late-arriving conflict marker —
+  the finalization step is a conditional write ("only if still ACTIVE, including now <
+  expires_at"), not an unconditional one.
 ```
 
 No provider-specific email rewriting is introduced by this lifecycle (see "Email Normalization").
@@ -1404,8 +1412,9 @@ key fields:          id, user_id (FK to users.id), normalized_pending_email,
                      TARGET_EMAIL_ALREADY_IN_USE; never a raw database/exception message),
                      generation (per-user sequence), created_at, updated_at
 unique constraints:  at most one row per user_id with verified_at/superseded_at/cancelled_at/
-                     conflicted_at all null (enforced at the application/transaction level — see
-                     "One Active Request Per User"; CONFLICTED does not count as active)
+                     conflicted_at all null AND now < expires_at (enforced at the application/
+                     transaction level — see "One Active Request Per User"; CONFLICTED and
+                     EXPIRED do not count as ACTIVE)
 security-sensitive:  verification_token_hash (hashed, never plaintext)
 indexes:              user_id, expires_at
 retention concerns:   superseded/cancelled/expired/consumed/conflicted rows may be pruned per a
@@ -1618,6 +1627,16 @@ canonical email change — uniqueness conflict (P2-m01): a target email availabl
   finalization is race-safe against a concurrent cancellation/supersession/verification of the
   same request — an already-reached terminal state is never overwritten; the outward error
   response reveals no database detail or which account owns the target email
+canonical email change — conflict-versus-expiry race (P2-m01 Pass 4): after a uniqueness collision
+  rolls back promotion, if `now >= expires_at` before conflict finalization performs its guarded
+  write, the finalizer finds the request is no longer ACTIVE and does nothing; `conflicted_at`
+  remains null, the effective state is EXPIRED, `users.email` and `email_verified_at` remain
+  unchanged, and the expired verification token cannot be reused. Terminal-race coverage MUST
+  exercise conflict versus cancellation, supersession, verification, and expiry; whichever valid
+  terminal outcome commits or becomes effective first is preserved and never overwritten by a
+  later conflict finalizer. Positive coverage MUST also prove that a request which remains ACTIVE
+  through finalization becomes durably CONFLICTED with reason
+  `TARGET_EMAIL_ALREADY_IN_USE` and cannot be retried, while a new independent request is allowed
 email verification: valid/expired/invalid/replay cases
 Authentication Assurance: STANDARD after login; ELEVATED only after fresh step-up; finite expiry
   with fallback to STANDARD; invalidated by every trigger listed in "Authentication Assurance";
