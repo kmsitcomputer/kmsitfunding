@@ -23,17 +23,23 @@ authority) assigned to IMP-003, and it does NOT implement any business/financial
 ## Human Decisions Incorporated
 
 ```text
+Q7  — Beneficiary Registration Model  = HYBRID BENEFICIARY REGISTRATION — FINAL / LOCKED
+                                         (pre-existing Level 1 entry — see
+                                         docs/01-requirements/HUMAN-DECISION-REGISTER.md; not a
+                                         new decision made by this specification, referenced only)
 Q21 — Login Identifier                = EMAIL AS CANONICAL LOGIN IDENTIFIER — FINAL / LOCKED
 Q22 — Registration Model              = HYBRID REGISTRATION BY ACTOR — FINAL / LOCKED
 Q23 — MFA Policy                      = CONFIGURABLE MFA, TOTP BASELINE — FINAL / LOCKED
 ```
 
-These decisions, together with the Q1-Q20 register in
-[docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md),
-are now authoritative Level 1 input to this specification. Q21-Q23 are recorded here because they
-were supplied directly to this specification task; the canonical register file itself is not
-edited by this document (see "Evidence" in the accompanying remediation audit record for where
-they were communicated).
+Q21-Q23, together with the pre-existing Q1-Q20 register in
+[docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md)
+(which already includes Q7), are now authoritative Level 1 input to this specification. Q21-Q23
+are recorded here because they were supplied directly to this specification task; the canonical
+register file itself was not edited by that task (see "Evidence" in the accompanying remediation
+audit record for where they were communicated). Q7 is listed above only as a reference to an
+already-locked decision this specification must not contradict — it is not renumbered, redefined,
+or reopened here.
 
 ---
 
@@ -76,9 +82,17 @@ authentication, and Q22 (this task) explicitly locks the registration model for 
 actor set (Donor, Fundraiser, Partner Representative, Internal Administrative Identity, Super
 Admin). Combined, these are now sufficient authoritative identification of the actors IMP-002 must
 support — see "Actors" below. This is reconciliation from existing authority, not invention of a
-new actor, removal of one, or renaming one semantically. The one remaining open item (Beneficiary
-— named as a business domain in MASTER-REQUIREMENTS.md §6 but not addressed by Q22) is recorded as
-a non-blocking deferred item, not a Human Decision — see "Actors" and "Deferred Items."
+new actor, removal of one, or renaming one semantically.
+
+**Correction:** an earlier revision of this specification described Beneficiary registration as an
+open/undecided item. That was incorrect and has been corrected. Beneficiary registration is
+already governed by
+[docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md)
+"Q7 — D Hybrid Beneficiary Registration" — a Level 1, FINAL/LOCKED Human Decision. There is no
+open Human Decision regarding Beneficiary registration. What remains open is only *which stage
+implements* the Beneficiary domain's hybrid registration mechanics and whether/how a Beneficiary
+holds a `User` identity — an implementation-ownership question, not a business decision — see
+"Actors" and "Deferred Items."
 
 The absence of a dedicated domain-level Actor Catalog *artifact* under `docs/06-domains/identity/`
 is still true and is still worth closing, but it is correctly classified as a **documentation /
@@ -195,7 +209,7 @@ Staff"/MASTER-REQUIREMENTS.md's `/admin/*`).
 | Partner Representative | YES | YES | **Invitation or domain-driven provisioning only** — no public self-registration baseline (Q22) | YES — Partner Profile owned by Partner module (MODULE-OWNERSHIP.md §7) | IMP-003+ / Partner module (Partner Verification, relationship ownership) | `/partner/*` |
 | Internal Administrative Identity | YES | YES | **Invitation/provisioning only** — no public self-registration (Q22) | Not applicable in the same sense (internal identity; no public-facing representation is implied by this stage) | IMP-003+ (roles/permissions) | `/admin/*` |
 | Super Admin | YES | YES | **Provisioning only** — no public self-registration (Q22) | Not applicable | IMP-003+ | `/admin/*`; RBAC-ARCHITECTURE.md explicitly notes "Super Admin != automatic Financial Authority" — reaffirmed: Super Admin identity provisioning grants no financial or business authority in IMP-002 or later without an explicit Authority Assignment |
-| Beneficiary | Likely YES (DATA-SCOPE-MODEL.md: "Beneficiary -> own application/profile where permitted") | **UNDECIDED — deferred, non-blocking** | **UNDECIDED** — not addressed by Q22 | YES — Beneficiary data is HIGHLY_SENSITIVE per MASTER-REQUIREMENTS.md §10; Profile owned by Beneficiary & Distribution (MODULE-OWNERSHIP.md §14) | IMP-003+ / Beneficiary & Distribution module | Not routed yet (`/beneficiary/*` does not appear in MASTER-REQUIREMENTS.md §3); this gap does not block IMP-002 baseline, which can be extended with a Beneficiary registration model later without reworking the `User` entity — see "Deferred Items" |
+| Beneficiary | Likely YES where the hybrid model requires it (DATA-SCOPE-MODEL.md: "Beneficiary -> own application/profile where permitted") | Governed by Q7 (Hybrid Beneficiary Registration — FINAL/LOCKED); whether that entails a `User` identity is an implementation-ownership question for the Beneficiary domain stage, not open at the business-decision level | **LOCKED by Q7** ("Hybrid Beneficiary Registration" — HUMAN-DECISION-REGISTER.md); exact mechanics deferred to the Beneficiary domain stage's own implementation specification | YES — Beneficiary data is HIGHLY_SENSITIVE per MASTER-REQUIREMENTS.md §10; Profile owned by Beneficiary & Distribution (MODULE-OWNERSHIP.md §14) | IMP-003+ / Beneficiary & Distribution module (business status, eligibility, verification); Identity boundary only, if any, is IMP-002's concern | Not routed yet (`/beneficiary/*` does not appear in MASTER-REQUIREMENTS.md §3). Registration *policy* is not open (Q7); only *which stage implements it* and *whether it needs a `User`* are deferred — see "Deferred Items." IMP-002 does not implement any Beneficiary domain behavior. |
 
 Do NOT create role authorization rules, business authority, or per-actor permission logic from
 this table — it governs authentication/registration eligibility only.
@@ -401,8 +415,21 @@ provisioning is itself a privileged administrative action; IMP-002 does not defi
 
 ### Beneficiary
 
-Deferred — see "Actors" and "Deferred Items." No registration flow is specified for this actor by
-IMP-002.
+The Beneficiary registration *policy* is not open — it is locked by
+[docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md)
+"Q7 — Hybrid Beneficiary Registration" (FINAL/LOCKED). What IMP-002 defers is only the
+*implementation* of that flow: Q7's register entry names the model but not its detailed mechanics
+(which parts are self-service vs. verified/provisioned, and how they interact with an Identity).
+That detail belongs to the Beneficiary & Distribution domain's own implementation specification
+(MODULE-OWNERSHIP.md §14), which must design it consistently with Q7 — not invent a new policy.
+
+IMP-002 itself implements NO Beneficiary domain behavior: no Beneficiary profile, application,
+document, eligibility review, verification workflow, distribution eligibility, business status,
+or approval. If and when the Beneficiary domain stage determines that a Beneficiary must hold an
+authenticated `User` identity, that stage reuses IMP-002's existing Identity/Auth foundation (the
+same way Donor and Fundraiser do) — it does not require a different identity mechanism. Whether
+that is in fact required, and via which of the mechanisms already specified (self-registration,
+invitation, or provisioning), is Q7's hybrid model applied by that later stage, not decided here.
 
 ---
 
@@ -1178,13 +1205,20 @@ decided here.
 NONE.
 ```
 
-Q21 (login identifier), Q22 (registration model), and Q23 (MFA policy) — the three items the prior
-draft correctly flagged as blocking — are now FINAL/LOCKED and fully incorporated above. The
-Actor Catalog artifact gap is reclassified as a non-blocking documentation/materialization gap
-(see "Actor Catalog Artifact Gap"), not a Human Decision. The one remaining open item (Beneficiary
-registration/authentication model) is recorded as non-blocking and deferred (see "Actors" and
-"Deferred Items") because it does not affect the `User` entity design or any baseline flow already
-specified — it only adds a new actor row to the eligibility table when decided.
+Q21 (login identifier), Q22 (registration model), and Q23 (MFA policy) — the three items an
+earlier draft correctly flagged as blocking — are now FINAL/LOCKED and fully incorporated above.
+The Actor Catalog artifact gap is reclassified as a non-blocking documentation/materialization gap
+(see "Actor Catalog Artifact Gap"), not a Human Decision.
+
+**Correction:** an earlier revision of this specification also listed Beneficiary
+registration/authentication as an open item requiring a Human Decision. That was incorrect. Q7 —
+Hybrid Beneficiary Registration is already FINAL/LOCKED in
+[docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md).
+No new Human Decision is required for Beneficiary registration policy. What remains open is only
+an implementation-ownership question (which stage designs Q7's detailed mechanics, and whether a
+`User` identity is required) — recorded under "Deferred Items" as a deferred *implementation*
+item, not a deferred *business decision*, and it does not affect the `User` entity design or any
+baseline flow already specified.
 
 ---
 
@@ -1195,8 +1229,11 @@ specified — it only adds a new actor row to the eligibility table when decided
 [x] Identity model unambiguous               -- PASS (User entity; email as sole login column;
                                                 see "Identity Model")
 [x] Login identifier unambiguous              -- PASS (Q21 — email)
-[x] Registration policy unambiguous            -- PASS (Q22 — hybrid by actor; Beneficiary
-                                                deferred, non-blocking)
+[x] Registration policy unambiguous            -- PASS (Q22 — hybrid by actor for Donor/
+                                                Fundraiser/Partner Representative/Internal
+                                                Administrative Identity/Super Admin; Beneficiary
+                                                policy separately locked by Q7 — implementation
+                                                ownership deferred, non-blocking, not a policy gap)
 [x] Password/reset model unambiguous          -- PASS (framework password-broker direction)
 [x] Verification rules unambiguous            -- PASS (email verification lifecycle specified;
                                                 pre-verification login behavior given an explicit,
@@ -1215,10 +1252,12 @@ specified — it only adds a new actor row to the eligibility table when decided
 [x] No unresolved implementation blocker        -- PASS
 ```
 
-**Definition of Ready: PASS.** All three Human Decisions this specification depended on are
-FINAL/LOCKED and incorporated; the Actor Catalog concern was resolved by reconciliation, not by a
-new decision; the single remaining open item (Beneficiary) is non-blocking and deferred without
-affecting anything already specified.
+**Definition of Ready: PASS.** All three Human Decisions this specification itself depended on
+(Q21-Q23) are FINAL/LOCKED and incorporated; the Actor Catalog concern was resolved by
+reconciliation, not by a new decision; Beneficiary registration policy is separately already
+locked by the pre-existing Q7 (not an open Human Decision at all); the only remaining open item
+for Beneficiary is which later stage implements Q7's mechanics, which is non-blocking and does not
+affect anything IMP-002 itself specifies.
 
 ---
 
@@ -1248,9 +1287,11 @@ tests passing (functional + security, per "Testing Requirements" / "Security Tes
 independent review passing
 ```
 
-Not required at this stage: Beneficiary registration/authentication, `/api/v1` authentication
-mechanism, Audit domain storage, retention/anonymization mechanism, System/Integration Principal
-job plumbing — all recorded under "Deferred Items."
+Not required at this stage: Beneficiary domain implementation (registration mechanics per the
+already-locked Q7, authentication if the Beneficiary domain stage determines it needs one),
+`/api/v1` authentication mechanism, Audit domain storage, retention/anonymization mechanism,
+System/Integration Principal job plumbing — all recorded under "Deferred Items." Beneficiary
+registration *policy* is not deferred — it is already decided (Q7); only its implementation is.
 
 ---
 
@@ -1262,9 +1303,9 @@ Retrofitting a second login identifier later (per Q21's own change-control note)
   contingent.
 The TOTP dependency choice (package vs. minimal direct implementation) should be resolved early in
   implementation to avoid rework of the MFA secret-storage schema.
-An eventual Beneficiary registration decision may require adding a new actor row and a
-  registration flow, but should not require changing the User entity itself, given the module
-  boundaries already established.
+When the Beneficiary domain stage designs Q7's (Hybrid Beneficiary Registration) detailed
+  mechanics, it may add a new actor row and a registration flow, but should not need to change the
+  `User` entity itself, given the module boundaries already established.
 ```
 
 ---
@@ -1272,8 +1313,9 @@ An eventual Beneficiary registration decision may require adding a new actor row
 ## Deferred Items (Non-Blocking)
 
 ```text
-Beneficiary registration/authentication model (actor named in MASTER-REQUIREMENTS.md §6; not
-  addressed by Q22)
+Beneficiary domain implementation of Q7 (Hybrid Beneficiary Registration — already FINAL/LOCKED,
+  see docs/01-requirements/HUMAN-DECISION-REGISTER.md; only its detailed mechanics and stage
+  ownership are deferred, not the policy itself), and whether it requires a `User` identity
 API authentication mechanism (session vs. token vs. OAuth) for future /api/v1
 System Principal / Integration Principal implementation ownership
 Audit domain storage/query mechanism (event emission points are specified; the sink is not built)
