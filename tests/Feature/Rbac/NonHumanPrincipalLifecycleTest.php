@@ -97,7 +97,12 @@ class NonHumanPrincipalLifecycleTest extends TestCase
         $principal = app(PrincipalService::class)->forSystem($systemRow);
 
         DB::listen(function ($query) {
-            if (str_contains($query->sql, 'update "principals"') && str_contains($query->sql, 'disabled_at')) {
+            // Identifier quoting is driver-specific (SQLite/Postgres use
+            // double quotes, MySQL uses backticks) — strip both so this
+            // match works under any grammar.
+            $normalizedSql = str_replace(['"', '`'], '', $query->sql);
+
+            if (str_contains($normalizedSql, 'update principals') && str_contains($normalizedSql, 'disabled_at')) {
                 throw new \RuntimeException('forced failure before final commit');
             }
         });

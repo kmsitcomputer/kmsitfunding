@@ -136,7 +136,12 @@ class PrincipalLifecycleTest extends TestCase
         app(RoleAssignmentService::class)->assign($admin, $principal, $role, ScopeType::GlobalPlatform, null);
 
         DB::listen(function ($query) {
-            if (str_contains($query->sql, 'delete from "users"')) {
+            // Identifier quoting is driver-specific (SQLite/Postgres use
+            // double quotes, MySQL uses backticks) — strip both so this
+            // match works under any grammar.
+            $normalizedSql = str_replace(['"', '`'], '', $query->sql);
+
+            if (str_contains($normalizedSql, 'delete from users')) {
                 throw new \RuntimeException('forced failure before final commit');
             }
         });
