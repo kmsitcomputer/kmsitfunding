@@ -1,7 +1,5 @@
 <?php
 
-use App\Models\User;
-
 return [
 
     /*
@@ -62,9 +60,12 @@ return [
     */
 
     'providers' => [
+        // No Identity/Authentication model exists yet — Identity modeling is deferred to
+        // IMP-002. This 'model' key is intentionally left without a hardcoded class-string
+        // default so config loading does not reference a class that does not exist.
         'users' => [
             'driver' => 'eloquent',
-            'model' => env('AUTH_MODEL', User::class),
+            'model' => env('AUTH_MODEL'),
         ],
 
         // 'users' => [
