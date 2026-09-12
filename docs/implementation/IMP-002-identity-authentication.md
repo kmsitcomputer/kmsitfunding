@@ -229,8 +229,6 @@ primary identifier:    BIGINT unsigned internal key (DATABASE-ARCHITECTURE.md "I
                         Conventions")
 public identifier:     ULID — see "Public ID"
 login identifier:      email (Q21 — canonical, exclusive baseline)
-pending email:         nullable — see "Canonical Email Change Lifecycle" (not the login
-                        identifier until promoted)
 password credential:   hashed only (see "Credential Model")
 contact (optional):    phone — contact data only, never a login identifier
 Identity Lifecycle:    ACTIVE | DISABLED (Q24 — persistent; see "Account / Security Model")
@@ -239,12 +237,19 @@ verification state:    email_verified_at (Q24 — a timestamp, not a lifecycle e
                         phone_verified_at (only if phone is collected)
 MFA state:             mfa_enabled flag; TOTP secret and recovery codes live in separate storage
                         (see "MFA Secret Storage" / "Database Design Requirements")
-security metadata:     failed-login counters and transient-lockout timestamp (brute-force
-                        protection — see "Account / Security Model"; NOT a persistent lifecycle
-                        state), last-login metadata
+last-login metadata:    last_login_at (nullable timestamp) — informational only, not a security
+                        restriction
 timestamps:            created_at / updated_at (framework standard)
 soft-delete/retention: NOT soft-deleted by default — see "Retention Boundary"
 ```
+
+`User` does NOT own a pending/candidate email — that lives entirely in the separate
+`EmailChangeRequest` entity (see "Canonical Email Change Lifecycle"), precisely so a stale
+verification token can never be checked against a mutable "current pending email" field on `User`.
+
+`User` does NOT own transient brute-force/rate-limit state (no `failed_login_attempts`, no
+`locked_until`) — per Q24 (M05), that state belongs to the authentication rate-limiter
+infrastructure, not to persistent identity data. See "Account / Security Model."
 
 No `remember_token` field is part of the IMP-002 baseline — see "Remember-Me (Deferred)."
 
@@ -292,61 +297,152 @@ provider-specific mailbox rewriting. Email identity semantics remain provider-ne
 
 ---
 
-## Canonical Email Change Lifecycle (M01)
+## Canonical Email Change Lifecycle (M01 — Request-Versioned)
 
 Email is the login identifier (Q21), so changing it is a sensitive operation with its own
-deterministic lifecycle — not merely "update a column."
+deterministic lifecycle. **This pass replaces the prior `users.pending_email` design**, which
+allowed a stale-token race (a verification challenge was not bound to an exact, immutable request
+version), **with a dedicated, immutable `EmailChangeRequest` entity.** No `pending_email` column
+exists on `User` — see "Database Design Requirements."
+
+### `EmailChangeRequest` (conceptual — no migration created)
 
 ```text
-1. Principal is authenticated (STANDARD assurance at minimum to initiate the request).
-2. A sensitive email change requires fresh credential confirmation; if the approved security
-   policy requires ELEVATED assurance for this class of change (see "Authentication Assurance"),
-   ELEVATED must be satisfied before the request proceeds.
-3. The requested new email is normalized (see "Email Normalization").
-4. The normalized new email is checked for uniqueness against all existing canonical emails
-   (application-level check first; see step 6 for the final authority).
-5. The new email is stored as `pending_email` — it does NOT become the canonical login email yet.
-6. The database unique constraint on the canonical email column remains the final race-safe
-   authority: promotion (step 8) is rejected at the database level if a collision has since
-   arisen, even if the application-level check in step 4 passed.
-7. A verification message is sent to the new (pending) email — reusing the same verification
-   mechanism as initial registration.
-8. The canonical login email is NOT considered changed, and the old email remains fully valid for
-   login and password reset, until verification of the new email succeeds.
-9. On successful verification, promotion is atomic (see "Transaction Boundaries"):
-   - the old canonical email is replaced by the (now-verified) `pending_email`;
-   - `pending_email` is cleared;
-   - `email_verified_at` is updated to reflect the new email's verification time;
-   - the current session's ID is rotated;
-   - all other active sessions for the identity are invalidated;
-   - any persistent/remember-me credential is invalidated (moot under the IMP-002 baseline, since
-     remember-me is deferred — see "Remember-Me (Deferred)" — but specified now so a future
-     enablement does not need to revisit this lifecycle);
-   - any password-reset token outstanding against the OLD email is invalidated — after promotion,
-     the old email is no longer a valid password-reset lookup target for this identity;
-   - the change is audited (see "Audit Events").
-10. Rollback/cancellation: an expired or cancelled pending-email verification leaves the existing
-    canonical email unchanged and valid; a failed uniqueness or verification check must not
-    corrupt the current identity's canonical email in any way.
+id                       internal identifier
+user_id                  FK to users.id
+normalized_pending_email the exact email this specific request is for (immutable once created)
+verification_token_hash  the verification challenge for THIS request only, stored hashed
+requested_at             timestamp
+expires_at               timestamp
+verified_at              nullable — set on successful promotion
+superseded_at            nullable — set when a later request replaces this one before it verifies
+cancelled_at             nullable — set on explicit cancellation
+generation               a monotonically increasing per-user version/sequence number
+                         (e.g. an integer that increments with every new request for that user) —
+                         used so a verifier can trivially confirm "is this the request's own,
+                         unambiguous identity," independent of timestamps
 ```
 
-No provider-specific email rewriting is introduced by this lifecycle (see "Email Normalization").
+Every field above except `verified_at`/`superseded_at`/`cancelled_at` is immutable once the row is
+created — a request is never edited in place to point at a different email or a different token;
+a changed email means a NEW request row.
+
+### One Active Request Per User (baseline rule)
+
+At most ONE active (`verified_at`, `superseded_at`, and `cancelled_at` all still null, and not
+expired) `EmailChangeRequest` may exist per `User` at a time. Starting a new request MUST,
+atomically:
+
+```text
+1. Normalize the new email (see "Email Normalization").
+2. Validate it differs from the current canonical email.
+3. Check application-level availability (uniqueness) against existing canonical emails.
+4. Mark any existing active request for this User as SUPERSEDED (superseded_at = now),
+   immediately and unconditionally — this happens BEFORE or atomically WITH creating the new
+   request, never after, so there is never a moment with two simultaneously active requests.
+5. Create the new EmailChangeRequest row with a new cryptographically secure verification token
+   (stored hashed), the next `generation` value, and its own `expires_at`.
+6. Send the verification message for THIS request's token to THIS request's
+   normalized_pending_email only.
+```
+
+Once superseded, a request's token is immediately and permanently unusable — there is no grace
+period during which both the old and new tokens verify successfully.
+
+### Verification Token Binding (mandatory checks)
+
+When a verification attempt is made, the verifier MUST check ALL of the following before
+promoting anything — never "token hash matches something, therefore promote whatever
+`users.pending_email` currently holds" (that pattern, possible under the prior design, is
+explicitly prohibited):
+
+```text
+the request belongs to the intended User (the token lookup resolves to a specific
+  EmailChangeRequest row, and that row's user_id is used — never inferred separately)
+the request is the CURRENT active request for that User (compare against the latest
+  non-superseded, non-cancelled row, or equivalently check this request's own
+  superseded_at/cancelled_at are null)
+the request is not superseded
+the request is not cancelled
+the request is not expired (now < expires_at)
+the request is not already consumed (verified_at is null)
+the presented token matches THIS exact request's verification_token_hash
+the email being promoted is THIS exact request's normalized_pending_email — never a different
+  email read from anywhere else (there is no "current pending email" to read separately; the
+  request row IS the source of truth for which email a given token promotes)
+```
+
+A token that matches a *superseded, cancelled, expired, or already-consumed* request fails all of
+the above and MUST be rejected with the generic error described in "Privacy" — it can never
+promote any email, including whatever the User's CURRENT active request (if any) is pending
+toward.
+
+### Success Semantics (atomic promotion)
+
+On successful verification, execute atomically (see "Transaction Boundaries"):
+
+```text
+BEGIN TRANSACTION
+  lock the User row
+  lock the EmailChangeRequest row
+  re-check the request is still the current active, non-expired, non-consumed request for this
+    User (defends against a race between the initial checks above and acquiring the lock)
+  re-check the target canonical email is still unique across all Users (application check);
+    the database's unique constraint on users.email remains the final authority regardless
+  promote: users.email <- request.normalized_pending_email
+  set users.email_verified_at <- now
+  set request.verified_at <- now (the request becomes CONSUMED — a consumed request can never be
+    used again, even if somehow re-presented)
+  supersede/cancel any other still-active EmailChangeRequest row for this User, if one somehow
+    exists (defensive — the "one active request" rule should already prevent this)
+  rotate the current session's ID
+  invalidate all of the User's OTHER active sessions
+  invalidate ELEVATED Authentication Assurance
+  invalidate any password-reset token outstanding against the OLD email (it is no longer a valid
+    reset-lookup target for this identity after promotion)
+  emit an audit event (email change completed)
+COMMIT
+```
+
+If the target email's uniqueness re-check fails (another identity acquired it since the request
+was created): the transaction fails, the User's canonical email is UNCHANGED, the request is
+marked in a failed/conflicted state (not `verified_at`, so it can never be retried — a fresh
+change request is required), and a generic safe error is returned (see "Privacy"). This is a
+concurrency outcome, not a new Human Decision.
+
+### Cancellation / Expiry / Supersession
+
+```text
+A CANCELLED request cannot verify (cancelled_at is set).
+An EXPIRED request cannot verify (now >= expires_at).
+A SUPERSEDED request cannot verify (superseded_at is set) — this is what makes "starting a new
+  request immediately invalidates the previous challenge" true.
+A CONSUMED (verified_at set) request cannot verify again — replay of an already-used token is
+  rejected.
+None of the above ever mutates the User's canonical email. The existing canonical email remains
+  active and (already) verified until a new request successfully completes the "Success
+  Semantics" promotion above — there is no partial or provisional email state visible outside the
+  EmailChangeRequest row itself.
+```
 
 ### Concurrency
 
 ```text
-Two identities can never hold the same normalized canonical email — enforced by the database
-  unique constraint (step 6 above), which is authoritative regardless of what any
-  application-level pre-check found.
-Two concurrent pending-email requests for the same identity: the most recently confirmed
-  verification wins; an application MAY choose to invalidate a prior unconfirmed pending-email
-  token when a new change request is made (reasonable default, not mandated).
-A pending email that collides with another identity's canonical (or another pending) email at
-  promotion time fails safely — the requesting identity's canonical email is unchanged, and a
-  generic error is shown (see "Privacy" — this is not an enumeration risk, since the requester is
-  already authenticated and initiated the request themselves, but the response still should not
-  gratuitously confirm which existing account holds the colliding email).
+Two Users can never hold the same normalized canonical email — enforced by the database's unique
+  constraint on users.email, authoritative regardless of any application-level pre-check.
+Two concurrent verification attempts against the SAME request: transaction locking (see "Success
+  Semantics") ensures exactly one succeeds; the second sees the request already CONSUMED (or the
+  lock forces it to re-check and find verified_at already set) and fails safely.
+A new email-change request ALWAYS supersedes (invalidates) any prior active request for that
+  User, unconditionally — this is mandatory, not a "may," precisely to close the stale-token race
+  that was IMP002-RDY-M01.
+A token issued for request generation N can NEVER promote the email of request generation N+1, or
+  vice versa — each token is permanently bound to the exact request it was issued for via the
+  token-to-request lookup itself (the token hash is looked up against EmailChangeRequest rows, not
+  against a mutable "current pending email" field).
 ```
+
+No provider-specific email rewriting is introduced by this lifecycle (see "Email Normalization").
 
 ---
 
@@ -621,15 +717,16 @@ audit:                    reset requested, reset completed, and invalid/expired 
                          audited
 ```
 
-### Interaction with Email Change (task item 19)
+### Interaction with Email Change
 
 ```text
-Password reset always targets the CURRENT canonical login email — never a `pending_email` that
-  has not yet been promoted (see "Canonical Email Change Lifecycle").
+Password reset always targets the CURRENT canonical login email (users.email) — never a pending
+  candidate held on an EmailChangeRequest row, which is not the login identifier until its
+  promotion transaction completes (see "Canonical Email Change Lifecycle").
 Once a canonical email change completes (promotion), the OLD email immediately stops being a
   valid password-reset lookup target for that identity, and any reset token that was outstanding
   against the old email is invalidated as part of the promotion transaction (already specified in
-  "Canonical Email Change Lifecycle," step 9).
+  "Canonical Email Change Lifecycle > Success Semantics").
 ```
 
 ---
@@ -770,10 +867,18 @@ no mandatory external service (must run locally, stateless)
 no mandatory daemon
 supports secure secret generation
 supports a configurable verification window (clock-drift tolerance)
+exposes enough information/validation control (e.g. the accepted time-step/counter, or an
+  equivalent verification result detail) for the application to enforce the mandatory replay
+  policy in "TOTP Replay Protection" below — a package that makes that guarantee impossible is
+  NOT an acceptable choice, regardless of its other merits
 acceptable security history (no known unpatched, unaddressed vulnerabilities)
 license compatible with this project
 pinned and reviewed during implementation authorization, not installed by this specification
 ```
+
+Package choice cannot weaken this security contract: the replay-prevention requirement below is
+mandatory for the IMP-002 baseline, not an optional enhancement contingent on what a chosen
+library happens to support.
 
 ### Enrollment
 
@@ -802,22 +907,38 @@ a narrow, rate-limited verification window is allowed per the selected library's
 repeated failed challenges are rate-limited/throttled the same way login failures are
 ```
 
-### TOTP Replay Protection (task item 12)
+### TOTP Replay Protection (M04 — Mandatory)
 
-For each of the following sensitive TOTP uses, the specification requires tracking sufficient
-challenge/session state (e.g. recording the most recently accepted code/step per identity per
-challenge context) to prevent the SAME code from being immediately reusable within the same
-accepted time window, where the selected library/application design supports it deterministically:
+For each of the following sensitive contexts, replay prevention is REQUIRED — not conditional on
+what a chosen library happens to support (see "Implementation Contract," which requires the
+selected library to expose enough information to make this enforceable):
 
 ```text
 MFA enrollment confirmation
 ELEVATED assurance step-up via TOTP
-MFA disable/reset confirmation
+MFA disable confirmation
+MFA reset confirmation
 ```
 
-This is scoped narrowly to these sensitive challenge contexts — it is NOT a global, permanent,
-cross-context OTP ledger, and the design must remain compatible with shared hosting (no
-additional daemon or external state store beyond the database/cache already in use).
+The implementation MUST prevent a successful re-use of the same accepted TOTP value within the
+same accepted time step, for the same (User, security context/challenge) pair, once that code has
+already been successfully consumed for that context. Conceptually, this requires tracking, per
+User and per sensitive-challenge context, the most recently accepted time-step/counter (or an
+equivalent challenge-specific consumption record / session-bound security nonce) — the exact
+storage shape is an implementation-time decision (see "Database Design Requirements >
+MFA secret / recovery storage," `last_accepted_step`), not fixed here. This is scoped narrowly to
+the four contexts above — it is NOT a global, permanent, cross-context OTP ledger — and the design
+must remain deterministic, transaction-safe where needed, testable, and shared-hosting-compatible
+(no additional daemon or external state store beyond the database/cache already in use).
+
+### Concurrent TOTP Replay
+
+If two requests submit the SAME valid TOTP code concurrently for the same sensitive challenge
+(enrollment activation, ELEVATED step-up, or MFA disable/reset), EXACTLY ONE may produce the
+security transition (enable MFA, grant ELEVATED, or disable/reset MFA); the other MUST fail as
+replay/already-consumed. This is enforced via transaction/atomic state semantics at implementation
+time (e.g. an atomic "mark this step consumed" write guarded so a second concurrent writer sees it
+already consumed) — the same pattern already required for recovery-code consumption above.
 
 ### Recovery
 
@@ -841,12 +962,28 @@ regeneration invalidates ALL previous recovery codes, generates a new set, displ
 disabling or resetting MFA (e.g. after device loss) requires BOTH fresh credential confirmation
   AND ELEVATED assurance (or the equivalent strongest mechanism the approved assurance
   architecture supports) — this is stricter than a single-factor check, consistent with MFA
-  reset being one of the most sensitive operations in this specification
+  reset being one of the most sensitive operations in this specification; this requirement is not
+  weakened for any self-service path
 administrative (non-self-service) MFA reset authority belongs to a future IMP-003+ Authority
   Assignment; IMP-002 defines only the identity-initiated self-service path plus this boundary
-on reset/disable: the TOTP secret is invalidated, recovery codes are invalidated, ELEVATED
-  assurance is invalidated, other sessions are invalidated where security policy requires it, and
-  the event is audited
+```
+
+On successful reset/disable, the following are ALL REQUIRED, deterministically (not conditionally
+"where security policy requires it"):
+
+```text
+the current TOTP secret is invalidated
+old recovery codes are invalidated
+ELEVATED Authentication Assurance is invalidated
+ALL of the User's OTHER active sessions are invalidated
+if the current session is retained (i.e. this was a self-service action performed from within an
+  active session), that session's ID is securely rotated and its assurance falls back to STANDARD
+  — it does not simply "keep going" post-reset
+for an administrative/security-recovery path where the acting requester's session is not the
+  target User's own ordinary session (an IMP-003+-authorized scenario), ALL of the target User's
+  sessions are invalidated, including what would otherwise have been "the current session" in the
+  self-service case
+an audit event is emitted
 ```
 
 ### MFA Secret Storage
@@ -900,8 +1037,33 @@ SUSPENDED    temporarily blocked from authenticating (e.g. abuse/fraud signal); 
 ### 4. Transient Brute-Force Lockout (NOT persistent lifecycle state)
 
 Repeated failed login/MFA attempts trigger rate limiting/throttling (see "Rate Limiting / Abuse
-Control") — this is time-bounded, tracked via counters/timestamps, and is explicitly NOT a
-persistent `LOCKED` lifecycle value. It denies authentication only for its own duration.
+Control") — this is time-bounded, tracked via the Authentication Security / Rate Limiter
+infrastructure (Laravel's `RateLimiter` / cache-backed throttling — see "Database Design
+Requirements > Authentication Rate-Limiter State"), and is explicitly NOT a persistent `LOCKED`
+lifecycle value stored on `User`. It denies authentication only for its own duration, then expires
+on its own — no `failed_login_attempts` or `locked_until` column exists on `users` (M05; see
+"Identity Model" and "Database Design Requirements").
+
+Rate-limiter keys MAY combine, depending on the flow: the normalized login email, the requesting
+IP/address context, the authentication flow being throttled (login, MFA challenge, etc.), and the
+User identity once known. No specific key scheme or numeric limit is fixed by this specification;
+implementation chooses secure, configurable defaults. This uses the existing database/file cache
+store already configured by IMP-001 — no mandatory Redis.
+
+### Rate Limit vs. Suspension — Explicit Distinction
+
+```text
+RATE LIMIT / THROTTLE                   SUSPENDED
+= transient, automated protection       = persistent security restriction
+= expires according to limiter policy   = requires an authorized transition/recovery to clear
+= NOT User lifecycle/schema state       = an explicit `security_restriction` value on User
+```
+
+Too many failed logins (or failed MFA challenges) MUST NOT automatically mutate
+`security_restriction` to `SUSPENDED` — that would silently convert a transient, self-expiring
+protection into a persistent security state without an authorized decision to do so. No such
+automatic policy is introduced by this specification; a future, explicitly authorized deterministic
+security policy (per "Transition Rules" below) could choose to do so, but that is not decided here.
 
 ### Authentication Effect
 
@@ -1120,19 +1282,39 @@ Specification only — no migration is created by this document.
 purpose:            canonical Identity + Authentication record
 ownership:           Identity & Organization
 key fields:          id (BIGINT unsigned PK), public_id (ULID),
-                     email (canonical, normalized, unique), pending_email (nullable, normalized,
-                     see "Canonical Email Change Lifecycle"), email_verified_at (nullable
+                     email (canonical, normalized, unique), email_verified_at (nullable
                      timestamp), password (hashed),
                      identity_status (ACTIVE | DISABLED), security_restriction (NONE |
-                     SUSPENDED), failed_login_attempts (int), locked_until (nullable timestamp —
-                     transient brute-force lockout only, not a lifecycle value),
-                     last_login_at (nullable timestamp), mfa_enabled (boolean), phone (nullable,
-                     optional), phone_verified_at (nullable, optional), created_at, updated_at
+                     SUSPENDED), last_login_at (nullable timestamp), mfa_enabled (boolean),
+                     phone (nullable, optional), phone_verified_at (nullable, optional),
+                     created_at, updated_at
 unique constraints:  email (canonical normalized representation), public_id
 security-sensitive:  password (hashed; never logged)
 indexes:              email (unique), public_id (unique), identity_status, security_restriction
 retention concerns:   no default soft-delete; closure/anonymization mechanism deferred
-NOT included:         remember_token (see "Remember-Me (Deferred)")
+NOT included:         remember_token (see "Remember-Me (Deferred)"); pending_email (see
+                     "EmailChangeRequest" below); failed_login_attempts, locked_until (M05 — see
+                     "Authentication Rate-Limiter State" below — these are never persistent User
+                     columns)
+```
+
+### `EmailChangeRequest` (M01 — separate table, not a `users` column)
+
+```text
+purpose:            immutable, per-request email-change challenge — see "Canonical Email Change
+                     Lifecycle" for the full field list and lifecycle rules
+ownership:           Identity & Organization
+key fields:          id, user_id (FK to users.id), normalized_pending_email,
+                     verification_token_hash, requested_at, expires_at, verified_at (nullable),
+                     superseded_at (nullable), cancelled_at (nullable), generation (per-user
+                     sequence)
+unique constraints:  at most one row per user_id with verified_at/superseded_at/cancelled_at all
+                     null (enforced at the application/transaction level — see "One Active
+                     Request Per User")
+security-sensitive:  verification_token_hash (hashed, never plaintext)
+indexes:              user_id, expires_at
+retention concerns:   superseded/cancelled/expired/consumed rows may be pruned; no financial/
+                     audit-history implication
 ```
 
 ### Password reset support
@@ -1152,11 +1334,30 @@ purpose:            TOTP secret and recovery-code storage, separate from `users`
 key fields:          user_id (FK to users.id), secret (encrypted at rest — recoverable, never
                      hashed), pending_secret (encrypted, nullable — see "Enrollment"),
                      recovery_codes (each stored hashed, individually markable as used),
-                     created_at, updated_at
+                     last_accepted_step (per-challenge-context replay guard — see "TOTP Replay
+                     Protection"; conceptual only, exact shape is an implementation-time,
+                     library-informed decision), created_at, updated_at
 unique constraints:  one active secret per user_id (baseline)
 security-sensitive:  secret (encrypted), pending_secret (encrypted), recovery_codes (hashed) —
                      the most sensitive columns in the entire IMP-002 schema
 indexes:              user_id
+```
+
+### Authentication Rate-Limiter State (M05 — not a database table by default)
+
+```text
+purpose:            transient brute-force/abuse protection counters (failed-login count,
+                     temporary lockout window) for login, MFA challenges, and other throttled
+                     flows
+ownership:           Authentication Security / Rate Limiter infrastructure — explicitly NOT the
+                     `users` table (see "Account / Security Model")
+storage:             Laravel's framework `RateLimiter` / cache-backed throttling, using the
+                     database or file cache store IMP-001 already configured — not a dedicated
+                     migration-created table, and not a User column. If a durable store is later
+                     needed beyond the cache's own TTL semantics, that is an implementation-time
+                     detail, not a schema requirement of this specification.
+retention concerns:   entries expire according to limiter policy; expiry never mutates
+                     `users.identity_status` or `users.security_restriction`
 ```
 
 ### Invitation storage
@@ -1189,7 +1390,9 @@ ALREADY EXISTS. `user_id` becomes populated once `User` exists; no schema change
 
 ```text
 Foreign keys:        any later module referencing User does so via its internal BIGINT id.
-Case/normalization:  email and pending_email normalized before uniqueness comparison and storage.
+Case/normalization:  users.email and EmailChangeRequest.normalized_pending_email are both
+                     normalized before uniqueness comparison and storage (see "Email
+                     Normalization").
 Money/DECIMAL:       not applicable.
 ```
 
@@ -1202,15 +1405,21 @@ account/identity creation (self-registration, invitation acceptance, or provisio
   the first Super Admin bootstrap) — transactional
 password change / password reset completion (rehash + session rotation + other-session
   invalidation + assurance invalidation + reset-token invalidation) — transactional
-canonical email change promotion (old->new email swap + pending_email clear + verification
-  timestamp update + session rotation + other-session invalidation + stale reset-token
-  invalidation) — transactional
+canonical email change promotion: locks User + EmailChangeRequest rows, re-checks the request is
+  still current/unexpired/unconsumed, re-checks target-email uniqueness, promotes
+  users.email <- request.normalized_pending_email, sets email_verified_at, marks the request
+  consumed, rotates the session, invalidates other sessions, invalidates ELEVATED assurance,
+  invalidates stale reset tokens against the old email — transactional (see "Canonical Email
+  Change Lifecycle > Success Semantics")
+email-change request creation: supersedes any prior active request for the User and creates the
+  new request atomically, so there is never a window with two simultaneously active requests —
+  transactional
 email verification completion (mark verified + invalidate verification token) — transactional
 MFA enrollment completion (pending secret confirmation + activation + recovery-code generation)
   — transactional
 MFA recovery-code consumption — transactional (exactly one consumer succeeds under concurrency)
-MFA reset/disable (secret/recovery invalidation + assurance invalidation + audit event) —
-  transactional
+MFA reset/disable (secret/recovery invalidation + assurance invalidation + other-session
+  invalidation + current-session rotation + audit event) — transactional
 invitation acceptance (token consumption + User creation or binding + credential establishment)
   — transactional
 persistent security-state transition (ACTIVE<->DISABLED, NONE<->SUSPENDED) — transactional
@@ -1233,6 +1442,10 @@ invitation acceptance race:      see "Invitation Boundary > Lifecycle Rules"
 MFA enrollment race:             starting new enrollment invalidates any previous unconfirmed
                                 pending secret; no window has two simultaneously valid secrets
 MFA recovery-code race:          exactly one concurrent consumption attempt succeeds
+TOTP replay race:                exactly one concurrent submission of the same accepted code
+                                succeeds for enrollment activation, ELEVATED step-up, or MFA
+                                disable/reset — see "TOTP Replay Protection" / "Concurrent TOTP
+                                Replay"
 first-bootstrap race:            the durable one-time guard ensures at most one bootstrap
                                 succeeds even under a concurrent double-invocation of the command
 concurrent account updates:      standard optimistic handling (`updated_at` check) is sufficient;
@@ -1290,20 +1503,37 @@ password change: other sessions invalidated, current session rotated, ELEVATED r
   tokens invalidated
 password reset: generic response regardless of existence; single-use; expiry; same invalidation
   consequences as password change; old email stops being a valid reset target after email change
-canonical email change: pending email does not become login-valid until verified; promotion is
-  atomic; old email invalidated as login/reset target after promotion; rollback leaves current
-  email unchanged
+canonical email change (request-versioned, M01): a new EmailChangeRequest immediately supersedes
+  the prior active request, and the prior request's token can no longer verify anything (not even
+  the newer pending email); an expired/cancelled/superseded/already-consumed request's token is
+  always rejected; a token for one request can never promote a different request's email; two
+  rapid successive change requests (A then B) leave A's token non-functional while B's may
+  succeed; concurrent verification attempts against the same request resolve to exactly one
+  success; a target-email uniqueness collision at promotion time leaves the current canonical
+  email unchanged and fails safely; successful promotion is atomic (session rotation, other-
+  session invalidation, ELEVATED invalidation, stale reset-token invalidation, audit)
 email verification: valid/expired/invalid/replay cases
 Authentication Assurance: STANDARD after login; ELEVATED only after fresh step-up; finite expiry
   with fallback to STANDARD; invalidated by every trigger listed in "Authentication Assurance";
   new session does not inherit prior ELEVATED
 MFA: enrollment not enabled until TOTP-confirmed; abandoned enrollment safe; secret encrypted;
   recovery codes hashed and shown once; recovery replay rejected; regeneration invalidates old
-  codes; TOTP challenge throttled; replay protection on enrollment/step-up/reset confirmations;
-  disable/reset requires fresh credential + ELEVATED
+  codes; TOTP challenge throttled; disable/reset requires fresh credential + ELEVATED and
+  deterministically invalidates ALL other sessions, rotates the current session, invalidates
+  ELEVATED assurance, and invalidates the TOTP secret and old recovery codes (not merely "where
+  security policy requires it")
+MFA replay (M04, mandatory — not conditional): the SAME accepted TOTP code cannot be reused to
+  elevate assurance twice, disable MFA twice, reset MFA twice, or activate enrollment twice; of
+  two concurrent submissions of the same accepted code for the same sensitive challenge, exactly
+  one succeeds and the other fails as replay/already-consumed; a genuinely new valid TOTP code in
+  a later permitted time-step works normally according to policy; a recovery code remains
+  independently single-use regardless of TOTP replay state
 Q24 account/security model: DISABLED/SUSPENDED deny auth; unverified email is not confused with
-  lifecycle status; transient lockout not persisted as lifecycle state; business-approval status
-  never appears on User
+  lifecycle status; the `users` schema contains no `failed_login_attempts` and no `locked_until`;
+  failed-login throttling works entirely through the rate-limiter/cache mechanism, never by
+  mutating `users`; limiter expiration never changes `identity_status` or `security_restriction`;
+  SUSPENDED remains distinct from, and is never auto-triggered by, transient throttling; business-
+  approval status never appears on User
 Q25 bootstrap: first bootstrap succeeds with no default credential; a second initial bootstrap
   attempt is rejected; no public route can create a Super Admin; no RBAC schema is introduced by
   IMP-002
@@ -1376,17 +1606,25 @@ referenced, not reopened. The Actor Catalog artifact gap remains a non-blocking 
 [x] Login identifier unambiguous                    -- PASS (Q21)
 [x] Registration policy unambiguous                  -- PASS (Q22; Beneficiary via Q7, deferred
                                                     implementation only)
-[x] Email-change lifecycle deterministic             -- PASS (see "Canonical Email Change
-                                                    Lifecycle")
+[x] Email-change lifecycle deterministic             -- PASS (request-versioned
+                                                    EmailChangeRequest entity; exact
+                                                    token-to-request binding; supersession is
+                                                    mandatory, not optional — see "Canonical
+                                                    Email Change Lifecycle")
 [x] Invitation issuer/revocation model defined        -- PASS (see "Invitation Boundary")
 [x] Password/reset model unambiguous                 -- PASS
 [x] Password-change session consequences defined      -- PASS
 [x] Verification rules unambiguous                   -- PASS
 [x] Authentication Assurance lifecycle executable     -- PASS (fields, lifetime, invalidation
                                                     triggers all specified)
-[x] MFA contract unambiguous                          -- PASS (maintained-library requirement;
-                                                    enrollment/recovery/reset/replay all defined)
-[x] Q24 account/security model fully applied          -- PASS
+[x] MFA contract unambiguous                          -- PASS (maintained-library requirement
+                                                    that must support mandatory, non-conditional
+                                                    replay protection; enrollment/recovery/reset/
+                                                    concurrent-replay all defined)
+[x] Q24 account/security model fully applied          -- PASS (no failed_login_attempts/
+                                                    locked_until on `users`; rate-limiter state
+                                                    explicitly separated from persistent identity
+                                                    state)
 [x] Q25 first-bootstrap model fully applied            -- PASS
 [x] Remember-me explicitly deferred                    -- PASS
 [x] Security restrictions mapped                      -- PASS
@@ -1408,20 +1646,24 @@ referenced, not reopened. The Actor Catalog artifact gap remains a non-blocking 
 ## Definition of Done
 
 ```text
-identity schema implemented (users incl. pending_email/identity_status/security_restriction,
-  password-reset, MFA secret/recovery, invitation, bootstrap-guard tables)
+identity schema implemented: `users` (identity_status/security_restriction, NO
+  failed_login_attempts/locked_until/pending_email columns), a separate EmailChangeRequest table,
+  password-reset, MFA secret/recovery (with replay-guard state), invitation, and bootstrap-guard
+  tables
 secure email + password authentication implemented
 approved registration models implemented per actor
-canonical email change lifecycle implemented (pending email, re-verification, atomic promotion,
-  session/reset-token invalidation)
+canonical email-change lifecycle implemented via request-versioned EmailChangeRequest rows
+  (supersession on new request, exact request/token binding, atomic promotion, session/reset-token
+  invalidation) — no `users.pending_email` column
 email verification implemented as specified
 password reset implemented securely, with full session/assurance invalidation
 TOTP MFA capability implemented via a maintained library (enrollment, verification, recovery,
-  reset, replay protection)
+  reset, and MANDATORY replay protection for enrollment/step-up/reset confirmations, including
+  under concurrent replay)
 Authentication Assurance lifecycle implemented (finite ELEVATED lifetime, all invalidation
   triggers wired)
-Q24 account/security model implemented (no persistent LOCKED status; brute-force lockout is
-  transient only)
+Q24 account/security model implemented (no persistent LOCKED status on `users`; brute-force
+  lockout lives entirely in rate-limiter/cache infrastructure, never as a `users` column)
 Q25 first Super Admin bootstrap CLI implemented, with durable one-time guard and no plaintext
   credential anywhere
 remember-me NOT implemented (explicitly deferred)
@@ -1441,7 +1683,9 @@ independent review passing
 
 ```text
 The TOTP library selection should be resolved early in implementation to avoid rework of the MFA
-  secret-storage schema.
+  secret-storage schema. Since the library must also support the mandatory replay-protection
+  contract (see "MFA > Implementation Contract"), not every popular TOTP package may qualify —
+  this should be verified before committing to a specific dependency.
 Retrofitting remember-me later requires re-auditing every session-invalidation trigger in this
   specification to add persistent-credential invalidation at each one — feasible, but should be
   treated as a specification update, not a silent addition.
