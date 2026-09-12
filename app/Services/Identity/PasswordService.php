@@ -27,12 +27,23 @@ class PasswordService
 
     public function changePassword(Request $request, User $user, string $newPassword): void
     {
-        DB::transaction(function () use ($user, $newPassword) {
+        // IMP002-IMPL-M07: the credential mutation and the other-session
+        // invalidation are both plain DB writes on this connection — commit
+        // them as ONE transaction so a failure partway through can never
+        // leave the new password committed while a stale session remains
+        // valid, or vice versa. Current-session ID regeneration and
+        // ELEVATED-assurance invalidation are framework session-store
+        // operations, not DB rows this transaction can enforce atomically —
+        // they run immediately after commit (see "Security Transition
+        // Atomicity" in docs/audits/IMP-002-IMPLEMENTATION-REMEDIATION-1.md).
+        DB::transaction(function () use ($request, $user, $newPassword) {
             $user->forceFill(['password' => Hash::make($newPassword)])->save();
             Password::deleteToken($user);
+            $this->sessions->invalidateAllExcept($user, $request->session()->getId());
         });
 
-        $this->applyPostChangeInvalidation($request, $user);
+        $request->session()->regenerate();
+        $this->assurance->invalidate();
 
         $this->audit->record('password_changed', $user);
     }
@@ -53,23 +64,21 @@ class PasswordService
         $status = Password::reset(
             ['email' => $email, 'password' => $newPassword, 'password_confirmation' => $newPassword, 'token' => $token],
             function (User $user, string $password) use ($request) {
-                DB::transaction(function () use ($user, $password) {
+                // Same reasoning as changePassword(): the credential mutation
+                // and other-session invalidation are one transaction; current-
+                // session rotation and assurance invalidation follow after commit.
+                DB::transaction(function () use ($request, $user, $password) {
                     $user->forceFill(['password' => Hash::make($password)])->save();
+                    $this->sessions->invalidateAllExcept($user, $request->session()->getId());
                 });
 
-                $this->applyPostChangeInvalidation($request, $user);
+                $request->session()->regenerate();
+                $this->assurance->invalidate();
 
                 $this->audit->record('password_reset_completed', $user);
             }
         );
 
         return $status === Password::PASSWORD_RESET;
-    }
-
-    private function applyPostChangeInvalidation(Request $request, User $user): void
-    {
-        $this->sessions->invalidateAllExcept($user, $request->session()->getId());
-        $request->session()->regenerate();
-        $this->assurance->invalidate();
     }
 }

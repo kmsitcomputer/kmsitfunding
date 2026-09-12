@@ -5,19 +5,20 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Services\Identity\AssuranceService;
 use App\Services\Identity\MfaService;
-use App\Services\Identity\SessionInvalidator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Authenticated MFA management: enrollment, disable/reset, recovery-code
- * regeneration (Q23). Disable/reset requires fresh credential confirmation
- * AND ELEVATED assurance — enforced via the `elevated.assurance` middleware
- * plus an explicit fresh-password check here.
+ * Authenticated MFA management: enrollment, ELEVATED step-up, disable/reset,
+ * recovery-code regeneration (Q23). Disable/reset require fresh credential
+ * confirmation AND ELEVATED assurance (enforced via the `elevated.assurance`
+ * middleware) AND a fresh, replay-guarded proof of the active factor itself
+ * (TOTP code or recovery code) — see MfaService::disable()/reset().
  */
 class MfaController extends Controller
 {
@@ -32,11 +33,23 @@ class MfaController extends Controller
     {
         $request->validate(['code' => ['required', 'string']]);
 
+        // IMP002-IMPL-M03: an authenticated identity must not be able to
+        // brute-force TOTP enrollment confirmation without throttle.
+        $key = 'mfa-enrollment-confirm:'.$request->user()->id.'|'.$request->ip();
+
+        if (RateLimiter::tooManyAttempts($key, (int) config('identity.rate_limits.mfa_enrollment_confirm'))) {
+            throw ValidationException::withMessages(['code' => 'Too many attempts. Please try again later.']);
+        }
+
         $result = $mfa->confirmEnrollment($request->user(), $request->string('code')->toString());
 
         if (! $result['success']) {
+            RateLimiter::hit($key, 60);
+
             throw ValidationException::withMessages(['code' => 'That code is invalid or your enrollment has expired.']);
         }
+
+        RateLimiter::clear($key);
 
         return redirect()->route('dashboard')->with([
             'status' => 'mfa-enrolled',
@@ -44,27 +57,82 @@ class MfaController extends Controller
         ]);
     }
 
-    public function disable(
-        Request $request,
-        MfaService $mfa,
-        SessionInvalidator $sessions,
-        AssuranceService $assurance,
-    ): RedirectResponse {
-        $request->validate(['current_password' => ['required', 'string']]);
+    /**
+     * ELEVATED step-up via a fresh TOTP challenge — the second of the two
+     * mechanisms ("Authentication Assurance") that can satisfy ELEVATED,
+     * alongside fresh password confirmation (ConfirmablePasswordController).
+     * Replay-guarded under its own context ('elevate'), distinct from the
+     * login-time challenge.
+     */
+    public function elevate(Request $request, MfaService $mfa, AssuranceService $assurance): RedirectResponse
+    {
+        $request->validate(['code' => ['required', 'string']]);
+
+        if (! $mfa->verifyChallenge($request->user(), 'elevate', $request->string('code')->toString())) {
+            throw ValidationException::withMessages(['code' => 'That code is invalid.']);
+        }
+
+        $assurance->elevate();
+
+        return redirect()->intended(route('dashboard'));
+    }
+
+    public function disable(Request $request, MfaService $mfa): RedirectResponse
+    {
+        $request->validate([
+            'current_password' => ['required', 'string'],
+            'code' => ['nullable', 'string'],
+            'recovery_code' => ['nullable', 'string'],
+        ]);
 
         if (! Hash::check($request->string('current_password')->toString(), $request->user()->password)) {
             throw ValidationException::withMessages(['current_password' => 'The provided password does not match your current password.']);
         }
 
-        $user = $request->user();
+        $disabled = $mfa->disable(
+            $request,
+            $request->user(),
+            $request->string('code')->toString() ?: null,
+            $request->string('recovery_code')->toString() ?: null,
+        );
 
-        $mfa->disable($user);
-
-        $sessions->invalidateAllExcept($user, $request->session()->getId());
-        $request->session()->regenerate();
-        $assurance->invalidate();
+        if (! $disabled) {
+            throw ValidationException::withMessages(['code' => 'A current authentication code or recovery code is required to disable MFA.']);
+        }
 
         return back()->with('status', 'mfa-disabled');
+    }
+
+    /**
+     * Self-service reset: same effect as disable(), but intended for an
+     * identity that still holds its device and wants to rotate its factor in
+     * one step (invalidate current secret, then immediately re-enroll via
+     * enroll()), rather than a lost-device/administrative recovery scenario.
+     */
+    public function reset(Request $request, MfaService $mfa): RedirectResponse
+    {
+        $request->validate([
+            'current_password' => ['required', 'string'],
+            'code' => ['nullable', 'string'],
+            'recovery_code' => ['nullable', 'string'],
+        ]);
+
+        if (! Hash::check($request->string('current_password')->toString(), $request->user()->password)) {
+            throw ValidationException::withMessages(['current_password' => 'The provided password does not match your current password.']);
+        }
+
+        $reset = $mfa->reset(
+            $request,
+            $request->user(),
+            $request->string('code')->toString() ?: null,
+            $request->string('recovery_code')->toString() ?: null,
+        );
+
+        if (! $reset) {
+            throw ValidationException::withMessages(['code' => 'A current authentication code or recovery code is required to reset MFA.']);
+        }
+
+        return back()->with('status', 'mfa-reset');
     }
 
     public function regenerateRecoveryCodes(Request $request, MfaService $mfa): RedirectResponse

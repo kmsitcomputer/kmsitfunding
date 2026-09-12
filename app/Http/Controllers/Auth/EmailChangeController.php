@@ -32,9 +32,15 @@ class EmailChangeController extends Controller
 
         $result = $emailChange->requestChange($request->user(), $request->string('email')->toString());
 
-        // Sent to the NEW (pending) email address only — never the old one.
-        Notification::route('mail', $result['request']->normalized_pending_email)
-            ->notify(new ConfirmEmailChange($result['request'], $result['plain_token']));
+        // IMP002-IMPL-M02: the outward response is identical whether a request
+        // was actually created or the target email was already unavailable —
+        // never reveal canonical email occupancy. Only send the confirmation
+        // when a request actually exists to confirm.
+        if ($result['status'] === 'requested') {
+            // Sent to the NEW (pending) email address only — never the old one.
+            Notification::route('mail', $result['request']->normalized_pending_email)
+                ->notify(new ConfirmEmailChange($result['request'], $result['plain_token']));
+        }
 
         return back()->with('status', 'email-change-requested');
     }
@@ -45,10 +51,14 @@ class EmailChangeController extends Controller
 
         $result = $emailChange->verify($request, $request->user(), $emailChangeRequest->id, $token);
 
+        // IMP002-IMPL-M02: every non-promotion outcome (invalid token, expired,
+        // cancelled, superseded, or a uniqueness conflict) returns the SAME
+        // generic outward status — never disclose that the target email
+        // belongs to another identity. Internal audit/request state remains
+        // precise (see EmailChangeService::verify()/finalizeConflict()).
         return match ($result['status']) {
             'promoted' => redirect()->route('dashboard')->with('status', 'email-change-completed'),
-            'conflicted' => redirect()->route('dashboard')->with('status', 'email-change-conflicted'),
-            default => redirect()->route('dashboard')->with('status', 'email-change-invalid'),
+            default => redirect()->route('dashboard')->with('status', 'email-change-failed'),
         };
     }
 }

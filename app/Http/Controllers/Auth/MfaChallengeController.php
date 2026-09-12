@@ -33,7 +33,13 @@ class MfaChallengeController extends Controller
             'recovery' => ['sometimes', 'boolean'],
         ]);
 
-        $key = 'mfa-challenge:'.$request->ip();
+        // IMP002-IMPL-M03: keyed by the pending (internal, never-exposed) user
+        // id AND the IP — not IP alone, so one abusive IP cannot exhaust the
+        // shared budget for every pending MFA challenge in flight from that
+        // address, and a challenge for a different pending identity is not
+        // throttled by an unrelated one's failures.
+        $pendingUserId = $request->session()->get('identity.pending_mfa_user_id', 'none');
+        $key = 'mfa-challenge:'.$pendingUserId.'|'.$request->ip();
 
         if (RateLimiter::tooManyAttempts($key, (int) config('identity.rate_limits.mfa_challenge'))) {
             throw ValidationException::withMessages(['code' => 'Too many attempts. Please try again later.']);

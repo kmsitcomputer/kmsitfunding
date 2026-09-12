@@ -77,8 +77,13 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
     Route::get('/account/mfa/enroll', [MfaController::class, 'enroll'])->name('mfa.enroll');
     Route::post('/account/mfa/confirm', [MfaController::class, 'confirm'])->name('mfa.confirm');
 
+    // ELEVATED step-up via a fresh TOTP challenge — the second mechanism
+    // (alongside password confirmation) that can earn ELEVATED assurance.
+    Route::post('/account/mfa/elevate', [MfaController::class, 'elevate'])->name('mfa.elevate');
+
     Route::middleware('elevated.assurance')->group(function () {
         Route::delete('/account/mfa', [MfaController::class, 'disable'])->name('mfa.disable');
+        Route::post('/account/mfa/reset', [MfaController::class, 'reset'])->name('mfa.reset');
         Route::post('/account/mfa/recovery-codes', [MfaController::class, 'regenerateRecoveryCodes'])->name('mfa.recovery-codes.regenerate');
     });
 });

@@ -60,4 +60,33 @@ class BootstrapSuperAdminTest extends TestCase
             $this->assertFalse(Schema::hasTable($table));
         }
     }
+
+    /**
+     * IMP002-IMPL-M09 — the durable one-time guard must survive deletion of
+     * the User it was created for. The permanent fact the guard preserves is
+     * "an initial bootstrap has occurred," never "the original bootstrap User
+     * still exists" — deleting that User must not resurrect the ability to
+     * bootstrap a second Super Admin identity.
+     */
+    public function test_bootstrap_guard_survives_deletion_of_the_bootstrapped_user(): void
+    {
+        $this->artisan('identity:bootstrap-super-admin')
+            ->expectsQuestion('Super Admin email', 'root@example.com')
+            ->expectsQuestion('Super Admin password', 'a-very-strong-password-123')
+            ->expectsQuestion('Confirm password', 'a-very-strong-password-123')
+            ->assertExitCode(0);
+
+        $this->assertSame(1, SuperAdminBootstrap::count());
+
+        User::where('email', 'root@example.com')->first()->delete();
+
+        $this->assertSame(1, SuperAdminBootstrap::count(), 'The guard row must survive User deletion.');
+        $this->assertNull(SuperAdminBootstrap::first()->user_id);
+
+        $this->artisan('identity:bootstrap-super-admin')
+            ->assertExitCode(1);
+
+        $this->assertSame(1, SuperAdminBootstrap::count());
+        $this->assertDatabaseMissing('users', ['email' => 'second@example.com']);
+    }
 }

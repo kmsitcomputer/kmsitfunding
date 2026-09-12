@@ -5,9 +5,12 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\RegisterUserRequest;
 use App\Services\Identity\AuthenticationService;
+use App\Services\Identity\EmailNormalizer;
 use App\Services\Identity\RegistrationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -29,10 +32,23 @@ class RegisteredUserController extends Controller
         RegisterUserRequest $request,
         RegistrationService $registration,
         AuthenticationService $auth,
+        EmailNormalizer $normalizer,
     ): RedirectResponse {
+        $key = 'registration:'.$normalizer->normalize($request->string('email')->toString()).'|'.$request->ip();
+
+        if (RateLimiter::tooManyAttempts($key, (int) config('identity.rate_limits.registration'))) {
+            throw ValidationException::withMessages([
+                'email' => 'Too many registration attempts. Please try again later.',
+            ]);
+        }
+
+        RateLimiter::hit($key, 60);
+
         $registration->register($request->string('email')->toString(), $request->string('password')->toString());
 
         $auth->attemptPassword($request, $request->string('email')->toString(), $request->string('password')->toString());
+
+        RateLimiter::clear($key);
 
         return redirect()->route('dashboard');
     }

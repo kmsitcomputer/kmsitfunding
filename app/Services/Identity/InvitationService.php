@@ -58,19 +58,25 @@ class InvitationService
     public function revoke(Invitation $invitation, ?User $revoker): bool
     {
         return DB::transaction(function () use ($invitation, $revoker) {
-            $invitation->refresh();
+            // IMP002-IMPL-M08: lock the row exactly like accept() does, so
+            // acceptance and revocation cannot race each other into both
+            // succeeding — whichever terminal transition's transaction commits
+            // first wins, and the other re-checks isActive() under the same
+            // lock and fails safely.
+            /** @var Invitation|null $locked */
+            $locked = Invitation::where('id', $invitation->id)->lockForUpdate()->first();
 
-            if (! $invitation->isActive()) {
+            if ($locked === null || ! $locked->isActive()) {
                 return false;
             }
 
-            $invitation->forceFill([
+            $locked->forceFill([
                 'revoked_at' => now(),
                 'revoker_user_id' => $revoker?->id,
             ])->save();
 
             $this->audit->record('invitation_revoked', $revoker, [
-                'invitation_public_id' => $invitation->public_id,
+                'invitation_public_id' => $locked->public_id,
             ]);
 
             return true;

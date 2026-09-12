@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Services\Identity\EmailNormalizer;
 use App\Services\Identity\PasswordService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,7 @@ class NewPasswordController extends Controller
         ]);
     }
 
-    public function store(Request $request, PasswordService $passwords): RedirectResponse
+    public function store(Request $request, PasswordService $passwords, EmailNormalizer $normalizer): RedirectResponse
     {
         $request->validate([
             'token' => ['required'],
@@ -29,9 +30,12 @@ class NewPasswordController extends Controller
             'password' => ['required', 'confirmed', Password::defaults()],
         ]);
 
+        // IMP002-IMPL-M06: normalize before completing the reset, exactly as
+        // the reset request itself normalizes — " user@example.com " must
+        // resolve to the same canonical identity either way (Q21).
         $succeeded = $passwords->completeReset(
             $request,
-            $request->string('email')->toString(),
+            $normalizer->normalize($request->string('email')->toString()),
             $request->string('token')->toString(),
             $request->string('password')->toString(),
         );

@@ -4,6 +4,7 @@ namespace App\Services\Identity;
 
 use App\Models\MfaSecret;
 use App\Models\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -15,22 +16,30 @@ use PragmaRX\Google2FA\Google2FA;
  * docs/implementation/IMP-002-identity-authentication.md for the selection rationale
  * — no custom TOTP cryptography).
  *
- * Replay protection (M04, mandatory): `MfaSecret.accepted_steps` tracks, per
- * sensitive context (enrollment_confirm / elevate / disable / reset), the last
- * TOTP timestamp accepted for that context, using google2fa's `verifyKeyNewer()`
- * — the same accepted code can never be reused within its own time step for the
- * same (User, context) pair. Consumption is guarded by a row lock so concurrent
- * submissions of the same code resolve to exactly one success.
+ * Replay protection (M04, mandatory) covers all four required contexts —
+ * enrollment_confirm, elevate, disable, reset — via `MfaSecret.accepted_steps`,
+ * which tracks the last accepted TOTP time-step per (User, context) pair using
+ * google2fa's `verifyKeyNewer()`. Consumption is guarded by a row lock so
+ * concurrent submissions of the same code resolve to exactly one success.
  */
 class MfaService
 {
     public function __construct(
         private readonly Google2FA $google2fa,
         private readonly IdentityAuditLogger $audit,
+        private readonly AssuranceService $assurance,
+        private readonly SessionInvalidator $sessions,
     ) {}
 
     public function startEnrollment(User $user): array
     {
+        // IMP002-IMPL-M05: starting (re-)enrollment changes the identity's MFA
+        // security configuration. A previously-earned ELEVATED assurance is no
+        // longer trusted from this point, regardless of whether the new
+        // enrollment is ever confirmed — invalidate it immediately, not only
+        // once confirmation completes.
+        $this->assurance->invalidate();
+
         $secret = $this->google2fa->generateSecretKey();
 
         $mfa = MfaSecret::firstOrNew(['user_id' => $user->id]);
@@ -159,19 +168,69 @@ class MfaService
     }
 
     /**
-     * Reset/disable MFA. Deterministic consequences (M04): TOTP secret and
-     * recovery codes invalidated. Session/assurance invalidation is the
-     * caller's responsibility (see MfaController / PasswordConfirmation
-     * middleware), since that spans concerns beyond this service.
+     * Self-service disable. IMP002-IMPL-M04: requires the identity to prove
+     * current possession of the active factor (a fresh, replay-guarded TOTP
+     * code for context 'disable', or a recovery code) — this IS the "disable
+     * confirmation" the mandatory replay-protection contract requires; a
+     * missing/invalid proof fails without disabling anything. Fresh password
+     * and ELEVATED assurance are enforced by the caller (MfaController) before
+     * this is ever reached.
+     *
+     * @return bool whether the proof succeeded and MFA was disabled
      */
-    public function disable(User $user): void
+    public function disable(Request $request, User $user, ?string $code, ?string $recoveryCode): bool
     {
-        DB::transaction(function () use ($user) {
+        return $this->confirmAndInvalidate($request, $user, 'disable', $code, $recoveryCode);
+    }
+
+    /**
+     * Self-service reset — functionally identical consequence to disable()
+     * (old secret and recovery codes invalidated, sessions/assurance reset),
+     * but audited/keyed under its own replay context ('reset') so an identity
+     * that still holds its current device can rotate its factor without an
+     * administrator, then immediately re-enroll via startEnrollment().
+     * Administrative (non-self-service) reset authority remains an IMP-003+
+     * concern — this is not that.
+     *
+     * @return bool whether the proof succeeded and MFA was reset
+     */
+    public function reset(Request $request, User $user, ?string $code, ?string $recoveryCode): bool
+    {
+        return $this->confirmAndInvalidate($request, $user, 'reset', $code, $recoveryCode);
+    }
+
+    private function confirmAndInvalidate(Request $request, User $user, string $context, ?string $code, ?string $recoveryCode): bool
+    {
+        $confirmed = match (true) {
+            $code !== null && $code !== '' => $this->verifyChallenge($user, $context, $code),
+            $recoveryCode !== null && $recoveryCode !== '' => $this->consumeRecoveryCode($user, $recoveryCode),
+            default => false,
+        };
+
+        if (! $confirmed) {
+            return false;
+        }
+
+        // IMP002-IMPL-M07: the credential/security mutation (secret + recovery
+        // codes gone, mfa_enabled false) and the other-session invalidation are
+        // both plain DB writes — committed as ONE transaction so a failure
+        // partway through cannot leave MFA disabled/reset while an old session
+        // is still valid, or vice versa. Current-session ID rotation is a
+        // framework session-store operation, not a DB row this connection's
+        // transaction can enforce atomically (see PasswordService for the
+        // same reasoning) — it is performed immediately after commit.
+        DB::transaction(function () use ($request, $user) {
             MfaSecret::where('user_id', $user->id)->delete();
             $user->forceFill(['mfa_enabled' => false])->save();
+            $this->sessions->invalidateAllExcept($user, $request->session()->getId());
         });
 
+        $request->session()->regenerate();
+        $this->assurance->invalidate();
+
         $this->audit->record('mfa_reset_or_disabled', $user);
+
+        return true;
     }
 
     private function verifyWithReplayGuard(MfaSecret $mfa, string $context, string $secret, string $code): ?int

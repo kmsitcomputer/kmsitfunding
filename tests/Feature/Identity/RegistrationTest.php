@@ -7,6 +7,7 @@ use App\Services\Identity\RegistrationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\RateLimiter;
 use Tests\TestCase;
 
 class RegistrationTest extends TestCase
@@ -59,5 +60,31 @@ class RegistrationTest extends TestCase
         $user = app(RegistrationService::class)->register('  Mixed.Case@Example.COM  ', 'correct-horse-battery-staple');
 
         $this->assertSame('mixed.case@example.com', $user->email);
+    }
+
+    /**
+     * IMP002-IMPL-M03 — self-registration must be rate-limited. Pre-fill the
+     * exact bucket the controller itself keys on (normalized email + IP)
+     * rather than relying on FormRequest's own duplicate-email rejection
+     * (which would short-circuit before the limiter is ever reached), so this
+     * proves the limiter wiring itself, not just uniqueness validation.
+     */
+    public function test_registration_is_rate_limited(): void
+    {
+        $limit = (int) config('identity.rate_limits.registration');
+        $key = 'registration:brand-new@example.com|127.0.0.1';
+
+        for ($i = 0; $i < $limit; $i++) {
+            RateLimiter::hit($key, 60);
+        }
+
+        $response = $this->post('/register', [
+            'email' => 'brand-new@example.com',
+            'password' => 'correct-horse-battery-staple',
+            'password_confirmation' => 'correct-horse-battery-staple',
+        ]);
+
+        $response->assertSessionHasErrors('email');
+        $this->assertDatabaseMissing('users', ['email' => 'brand-new@example.com']);
     }
 }
