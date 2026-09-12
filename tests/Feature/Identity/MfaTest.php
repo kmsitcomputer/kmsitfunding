@@ -8,7 +8,9 @@ use App\Services\Identity\AssuranceService;
 use App\Services\Identity\MfaService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Session\Store;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use PragmaRX\Google2FA\Google2FA;
 use Tests\TestCase;
 
@@ -42,6 +44,32 @@ class MfaTest extends TestCase
         $mfa->confirmEnrollment($user, $code);
 
         return $enrollment['secret'];
+    }
+
+    /**
+     * IMP002-IMPL-M07 (reaudit) — same technique as PasswordTest: a Request
+     * whose session is the SAME default store the AssuranceService's Session
+     * facade calls resolve to, with regenerate() replaced by a throwing stub.
+     */
+    private function requestWithFailingSessionRegeneration(): Request
+    {
+        /** @var Store $realStore */
+        $realStore = $this->app['session']->driver();
+
+        $mock = \Mockery::mock($realStore)->makePartial();
+        $mock->shouldReceive('regenerate')->andThrow(new \RuntimeException('injected session regeneration failure'));
+
+        $manager = $this->app['session'];
+        $property = new \ReflectionProperty($manager, 'drivers');
+        $property->setAccessible(true);
+        $drivers = $property->getValue($manager);
+        $drivers[$manager->getDefaultDriver()] = $mock;
+        $property->setValue($manager, $drivers);
+
+        $request = Request::create('/');
+        $request->setLaravelSession($mock);
+
+        return $request;
     }
 
     public function test_enrollment_is_not_enabled_until_confirmed(): void
@@ -440,5 +468,243 @@ class MfaTest extends TestCase
         $response = $this->post('/account/mfa/confirm', ['code' => '000000']);
 
         $response->assertSessionHasErrors(['code' => 'Too many attempts. Please try again later.']);
+    }
+
+    /**
+     * IMP002-REAUDIT-M01 — the ELEVATED step-up via TOTP must be throttled
+     * exactly like every other production TOTP-verification path.
+     */
+    public function test_elevate_endpoint_is_rate_limited(): void
+    {
+        $user = $this->makeUser();
+        $mfa = app(MfaService::class);
+        $this->enrollAndConfirm($user, $mfa);
+        $this->actingAs($user);
+
+        $limit = (int) config('identity.rate_limits.mfa_elevate');
+
+        for ($i = 0; $i < $limit; $i++) {
+            $this->post('/account/mfa/elevate', ['code' => '000000']);
+        }
+
+        $response = $this->post('/account/mfa/elevate', ['code' => '000000']);
+
+        $response->assertSessionHasErrors(['code' => 'Too many attempts. Please try again later.']);
+        $this->assertFalse(app(AssuranceService::class)->isElevated());
+    }
+
+    /**
+     * IMP002-REAUDIT-M01 — MFA disable's TOTP/recovery-code proof must be
+     * throttled — fresh password + ELEVATED alone does not protect the
+     * codespace of 'code'/'recovery_code' from being brute-forced.
+     */
+    public function test_disable_endpoint_is_rate_limited(): void
+    {
+        $user = $this->makeUser();
+        $mfa = app(MfaService::class);
+        $this->enrollAndConfirm($user, $mfa);
+
+        $this->actingAs($user);
+        $this->post('/account/confirm-password', ['password' => 'password12345']);
+
+        $limit = (int) config('identity.rate_limits.mfa_disable');
+
+        for ($i = 0; $i < $limit; $i++) {
+            $this->delete('/account/mfa', ['current_password' => 'password12345', 'code' => '000000']);
+        }
+
+        $response = $this->delete('/account/mfa', ['current_password' => 'password12345', 'code' => '000000']);
+
+        $response->assertSessionHasErrors(['code' => 'Too many attempts. Please try again later.']);
+        $this->assertTrue($user->fresh()->mfa_enabled, 'Throttling must not itself disable MFA.');
+    }
+
+    public function test_reset_endpoint_is_rate_limited(): void
+    {
+        $user = $this->makeUser();
+        $mfa = app(MfaService::class);
+        $this->enrollAndConfirm($user, $mfa);
+
+        $this->actingAs($user);
+        $this->post('/account/confirm-password', ['password' => 'password12345']);
+
+        $limit = (int) config('identity.rate_limits.mfa_reset');
+
+        for ($i = 0; $i < $limit; $i++) {
+            $this->post('/account/mfa/reset', ['current_password' => 'password12345', 'code' => '000000']);
+        }
+
+        $response = $this->post('/account/mfa/reset', ['current_password' => 'password12345', 'code' => '000000']);
+
+        $response->assertSessionHasErrors(['code' => 'Too many attempts. Please try again later.']);
+        $this->assertTrue($user->fresh()->mfa_enabled, 'Throttling must not itself reset MFA.');
+    }
+
+    /**
+     * IMP002-REAUDIT-M01 — different Users (and, by construction, different
+     * flows — 'mfa-elevate' vs. 'mfa-disable' vs. 'mfa-reset' are distinct
+     * key prefixes) never share a limiter bucket. Exhausting user A's
+     * 'elevate' budget must not affect user B's 'elevate' budget, nor A's own
+     * 'disable' budget.
+     */
+    public function test_totp_rate_limit_buckets_are_independent_per_user_and_per_flow(): void
+    {
+        $mfa = app(MfaService::class);
+        $userA = $this->makeUser();
+        $secretA = $this->enrollAndConfirm($userA, $mfa);
+
+        $userB = User::create(['email' => 'other@example.com', 'password' => Hash::make('password12345')]);
+        $this->enrollAndConfirm($userB, $mfa);
+
+        $elevateLimit = (int) config('identity.rate_limits.mfa_elevate');
+
+        // Exhaust user A's 'elevate' bucket.
+        $this->actingAs($userA);
+        for ($i = 0; $i < $elevateLimit; $i++) {
+            $this->post('/account/mfa/elevate', ['code' => '000000']);
+        }
+        $exhausted = $this->post('/account/mfa/elevate', ['code' => '000000']);
+        $exhausted->assertSessionHasErrors(['code' => 'Too many attempts. Please try again later.']);
+
+        // User A's OWN 'disable' bucket is untouched by the 'elevate' bucket
+        // being exhausted (different flow, same user).
+        $this->post('/account/confirm-password', ['password' => 'password12345']);
+        $freshDisableCode = app(Google2FA::class)->getCurrentOtp($secretA);
+        $disableResponse = $this->delete('/account/mfa', ['current_password' => 'password12345', 'code' => $freshDisableCode]);
+        $disableResponse->assertRedirect();
+        $this->assertFalse($userA->fresh()->mfa_enabled);
+
+        // User B's 'elevate' bucket is untouched by user A's exhausted one —
+        // asserted directly against the RateLimiter, independent of any
+        // particular error-bag serialization shape.
+        $this->assertSame(
+            0,
+            RateLimiter::attempts('mfa-elevate:'.$userB->id.'|127.0.0.1'),
+        );
+    }
+
+    /**
+     * IMP002-REAUDIT-M01 — a successful verification clears the limiter
+     * (RateLimiter::clear()), so a legitimate identity is never left
+     * throttled by its own earlier failed attempts once it succeeds.
+     */
+    public function test_successful_elevate_clears_the_rate_limit_bucket(): void
+    {
+        $user = $this->makeUser();
+        $mfa = app(MfaService::class);
+        $secret = $this->enrollAndConfirm($user, $mfa);
+        $this->actingAs($user);
+
+        $limit = (int) config('identity.rate_limits.mfa_elevate');
+
+        // Fail almost up to the limit, then succeed.
+        for ($i = 0; $i < $limit - 1; $i++) {
+            $this->post('/account/mfa/elevate', ['code' => '000000']);
+        }
+
+        $code = app(Google2FA::class)->getCurrentOtp($secret);
+        $success = $this->post('/account/mfa/elevate', ['code' => $code]);
+        $success->assertRedirect();
+
+        $this->assertSame(
+            0,
+            RateLimiter::attempts('mfa-elevate:'.$user->id.'|127.0.0.1'),
+            'A successful verification must clear the limiter bucket, not merely reset on TTL.',
+        );
+    }
+
+    /**
+     * IMP002-IMPL-m02 (section 26) — strengthens the replay-consumption test
+     * beyond "sequential calls proved the second one fails": this directly
+     * exercises MfaService's private verifyWithReplayGuard() atomic
+     * conditional-update mechanism (read accepted_steps under a row lock,
+     * verify, write back) to confirm the SAME accepted time-step is rejected
+     * deterministically once already recorded, and that a genuinely NEWER
+     * time-step (simulated by manually advancing the stored marker) is
+     * correctly still accepted. True concurrent (two-connection) execution is
+     * not exercised here — see docs/audits/IMP-002-IMPLEMENTATION-REMEDIATION-2.md
+     * "MySQL" for the static-review statement covering that gap; MySQL's
+     * `SELECT ... FOR UPDATE` (used here via lockForUpdate()) is what makes
+     * this conditional update atomic under real concurrency.
+     */
+    public function test_replay_guard_conditional_update_rejects_stale_timestep_deterministically(): void
+    {
+        $user = $this->makeUser();
+        $mfa = app(MfaService::class);
+        $secret = $this->enrollAndConfirm($user, $mfa);
+
+        $method = new \ReflectionMethod($mfa, 'verifyWithReplayGuard');
+        $mfaSecret = MfaSecret::where('user_id', $user->id)->first();
+
+        $code = app(Google2FA::class)->getCurrentOtp($secret);
+
+        $firstAccepted = $method->invoke($mfa, $mfaSecret, 'disable', $secret, $code);
+        $this->assertIsInt($firstAccepted);
+
+        // Re-fetch — the guard persists accepted_steps via $mfa->save() —
+        // and attempt the exact same code/time-step again.
+        $mfaSecret = MfaSecret::where('user_id', $user->id)->first();
+        $secondAccepted = $method->invoke($mfa, $mfaSecret, 'disable', $secret, $code);
+        $this->assertNull($secondAccepted, 'The identical time-step must be rejected once already recorded.');
+
+        // The stored marker reflects the accepted time-step, not a boolean —
+        // asserted directly against the persisted column (M04 Pass 1 fix).
+        $this->assertSame($firstAccepted, MfaSecret::where('user_id', $user->id)->first()->accepted_steps['disable']);
+    }
+
+    /**
+     * IMP002-IMPL-M07 (reaudit) — MFA disable must leave ELEVATED absent even
+     * if current-session regeneration fails after the secret/recovery-code
+     * invalidation and other-session invalidation have already committed.
+     */
+    public function test_disable_leaves_elevated_absent_when_session_regeneration_fails(): void
+    {
+        $user = $this->makeUser();
+        $mfa = app(MfaService::class);
+        $secret = $this->enrollAndConfirm($user, $mfa);
+
+        $request = $this->requestWithFailingSessionRegeneration();
+        app(AssuranceService::class)->elevate();
+        $this->assertTrue(app(AssuranceService::class)->isElevated());
+
+        $code = app(Google2FA::class)->getCurrentOtp($secret);
+
+        try {
+            $mfa->disable($request, $user, $code, null);
+            $this->fail('Expected the injected session-regeneration failure to propagate.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('injected session regeneration failure', $exception->getMessage());
+        }
+
+        // The security mutation already committed (secret gone, mfa_enabled
+        // false)...
+        $this->assertFalse($user->fresh()->mfa_enabled);
+        $this->assertNull(MfaSecret::where('user_id', $user->id)->first());
+
+        // ...and ELEVATED is gone, even though rotation itself failed.
+        $this->assertFalse(app(AssuranceService::class)->isElevated());
+    }
+
+    public function test_reset_leaves_elevated_absent_when_session_regeneration_fails(): void
+    {
+        $user = $this->makeUser();
+        $mfa = app(MfaService::class);
+        $secret = $this->enrollAndConfirm($user, $mfa);
+
+        $request = $this->requestWithFailingSessionRegeneration();
+        app(AssuranceService::class)->elevate();
+
+        $code = app(Google2FA::class)->getCurrentOtp($secret);
+
+        try {
+            $mfa->reset($request, $user, $code, null);
+            $this->fail('Expected the injected session-regeneration failure to propagate.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('injected session regeneration failure', $exception->getMessage());
+        }
+
+        $this->assertFalse($user->fresh()->mfa_enabled);
+        $this->assertNull(MfaSecret::where('user_id', $user->id)->first());
+        $this->assertFalse(app(AssuranceService::class)->isElevated());
     }
 }

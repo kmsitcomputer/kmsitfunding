@@ -68,9 +68,23 @@ class MfaController extends Controller
     {
         $request->validate(['code' => ['required', 'string']]);
 
+        // IMP002-REAUDIT-M01: every production TOTP-verification path must be
+        // throttled, not only enrollment/login. Keyed by flow + authenticated
+        // User id + IP — never by email, and never shared with an unrelated
+        // MFA flow's bucket.
+        $key = 'mfa-elevate:'.$request->user()->id.'|'.$request->ip();
+
+        if (RateLimiter::tooManyAttempts($key, (int) config('identity.rate_limits.mfa_elevate'))) {
+            throw ValidationException::withMessages(['code' => 'Too many attempts. Please try again later.']);
+        }
+
         if (! $mfa->verifyChallenge($request->user(), 'elevate', $request->string('code')->toString())) {
+            RateLimiter::hit($key, 60);
+
             throw ValidationException::withMessages(['code' => 'That code is invalid.']);
         }
+
+        RateLimiter::clear($key);
 
         $assurance->elevate();
 
@@ -89,6 +103,15 @@ class MfaController extends Controller
             throw ValidationException::withMessages(['current_password' => 'The provided password does not match your current password.']);
         }
 
+        // IMP002-REAUDIT-M01: throttle the TOTP/recovery-code proof itself —
+        // fresh password confirmation alone does not protect the codespace
+        // against a brute-forced 'code'/'recovery_code' value.
+        $key = 'mfa-disable:'.$request->user()->id.'|'.$request->ip();
+
+        if (RateLimiter::tooManyAttempts($key, (int) config('identity.rate_limits.mfa_disable'))) {
+            throw ValidationException::withMessages(['code' => 'Too many attempts. Please try again later.']);
+        }
+
         $disabled = $mfa->disable(
             $request,
             $request->user(),
@@ -97,8 +120,12 @@ class MfaController extends Controller
         );
 
         if (! $disabled) {
+            RateLimiter::hit($key, 60);
+
             throw ValidationException::withMessages(['code' => 'A current authentication code or recovery code is required to disable MFA.']);
         }
+
+        RateLimiter::clear($key);
 
         return back()->with('status', 'mfa-disabled');
     }
@@ -121,6 +148,12 @@ class MfaController extends Controller
             throw ValidationException::withMessages(['current_password' => 'The provided password does not match your current password.']);
         }
 
+        $key = 'mfa-reset:'.$request->user()->id.'|'.$request->ip();
+
+        if (RateLimiter::tooManyAttempts($key, (int) config('identity.rate_limits.mfa_reset'))) {
+            throw ValidationException::withMessages(['code' => 'Too many attempts. Please try again later.']);
+        }
+
         $reset = $mfa->reset(
             $request,
             $request->user(),
@@ -129,8 +162,12 @@ class MfaController extends Controller
         );
 
         if (! $reset) {
+            RateLimiter::hit($key, 60);
+
             throw ValidationException::withMessages(['code' => 'A current authentication code or recovery code is required to reset MFA.']);
         }
+
+        RateLimiter::clear($key);
 
         return back()->with('status', 'mfa-reset');
     }

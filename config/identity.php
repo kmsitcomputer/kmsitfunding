@@ -57,6 +57,9 @@ return [
         'verification_resend' => (int) env('IDENTITY_RATE_LIMIT_VERIFICATION_RESEND', 5),
         'mfa_challenge' => (int) env('IDENTITY_RATE_LIMIT_MFA_CHALLENGE', 5),
         'mfa_enrollment_confirm' => (int) env('IDENTITY_RATE_LIMIT_MFA_ENROLLMENT_CONFIRM', 10),
+        'mfa_elevate' => (int) env('IDENTITY_RATE_LIMIT_MFA_ELEVATE', 5),
+        'mfa_disable' => (int) env('IDENTITY_RATE_LIMIT_MFA_DISABLE', 5),
+        'mfa_reset' => (int) env('IDENTITY_RATE_LIMIT_MFA_RESET', 5),
         'invitation_acceptance' => (int) env('IDENTITY_RATE_LIMIT_INVITATION_ACCEPTANCE', 10),
     ],
 

@@ -3,9 +3,13 @@
 namespace Tests\Feature\Identity;
 
 use App\Models\User;
+use App\Services\Identity\AssuranceService;
+use App\Services\Identity\PasswordService;
 use App\Services\Identity\SessionInvalidator;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
+use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
@@ -16,6 +20,36 @@ use Tests\TestCase;
 class PasswordTest extends TestCase
 {
     use RefreshDatabase;
+
+    /**
+     * IMP002-IMPL-M07 (reaudit) — builds a Request whose session is the SAME
+     * default session-store instance the AssuranceService's Session facade
+     * calls resolve to (so ELEVATED state set/read through the facade and
+     * through this request agree), but with `regenerate()` replaced by a
+     * throwing stub. This proves the fail-closed invariant: ELEVATED must
+     * already be gone by the time regenerate() is even attempted, so a
+     * regeneration failure can never leave it behind.
+     */
+    private function requestWithFailingSessionRegeneration(): Request
+    {
+        /** @var Store $realStore */
+        $realStore = $this->app['session']->driver();
+
+        $mock = \Mockery::mock($realStore)->makePartial();
+        $mock->shouldReceive('regenerate')->andThrow(new \RuntimeException('injected session regeneration failure'));
+
+        $manager = $this->app['session'];
+        $property = new \ReflectionProperty($manager, 'drivers');
+        $property->setAccessible(true);
+        $drivers = $property->getValue($manager);
+        $drivers[$manager->getDefaultDriver()] = $mock;
+        $property->setValue($manager, $drivers);
+
+        $request = Request::create('/');
+        $request->setLaravelSession($mock);
+
+        return $request;
+    }
 
     public function test_reset_link_request_returns_generic_response_regardless_of_existence(): void
     {
@@ -205,6 +239,56 @@ class PasswordTest extends TestCase
             Hash::check('old-password-123', $user->fresh()->password),
             'The password must remain unchanged when the same-transaction session invalidation fails.',
         );
+    }
+
+    /**
+     * IMP002-IMPL-M07 (reaudit) — the fail-closed ordering fix: ELEVATED is
+     * invalidated BEFORE the fallible session()->regenerate() call. Force
+     * regenerate() itself to throw AFTER the credential mutation has already
+     * committed, and prove ELEVATED is absent regardless — a session-rotation
+     * failure must never leave a retained session still trusted as ELEVATED.
+     */
+    public function test_password_change_leaves_elevated_absent_when_session_regeneration_fails(): void
+    {
+        $user = User::create(['email' => 'user@example.com', 'password' => Hash::make('old-password-123')]);
+
+        $request = $this->requestWithFailingSessionRegeneration();
+        app(AssuranceService::class)->elevate();
+        $this->assertTrue(app(AssuranceService::class)->isElevated());
+
+        try {
+            app(PasswordService::class)->changePassword($request, $user, 'new-password-456');
+            $this->fail('Expected the injected session-regeneration failure to propagate.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('injected session regeneration failure', $exception->getMessage());
+        }
+
+        // The credential mutation (a DB write, already committed before the
+        // fallible regenerate() call) took effect...
+        $this->assertTrue(Hash::check('new-password-456', $user->fresh()->password));
+
+        // ...and ELEVATED is gone, even though rotation itself failed.
+        $this->assertFalse(app(AssuranceService::class)->isElevated());
+    }
+
+    public function test_password_reset_leaves_elevated_absent_when_session_regeneration_fails(): void
+    {
+        $user = User::create(['email' => 'user@example.com', 'password' => Hash::make('old-password-123')]);
+        $token = Password::createToken($user);
+
+        $request = $this->requestWithFailingSessionRegeneration();
+        app(AssuranceService::class)->elevate();
+        $this->assertTrue(app(AssuranceService::class)->isElevated());
+
+        try {
+            app(PasswordService::class)->completeReset($request, 'user@example.com', $token, 'new-password-456');
+            $this->fail('Expected the injected session-regeneration failure to propagate.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('injected session regeneration failure', $exception->getMessage());
+        }
+
+        $this->assertTrue(Hash::check('new-password-456', $user->fresh()->password));
+        $this->assertFalse(app(AssuranceService::class)->isElevated());
     }
 
     public function test_session_invalidator_leaves_current_session_untouched(): void

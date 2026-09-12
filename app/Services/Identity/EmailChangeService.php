@@ -66,13 +66,17 @@ class EmailChangeService
                 ->lockForUpdate()
                 ->max('generation') ?? 0;
 
-            // Unconditionally supersede any prior active request BEFORE/atomically
-            // with creating the new one — mandatory, not optional (M01).
+            // Unconditionally supersede any prior ACTIVE request BEFORE/
+            // atomically with creating the new one — mandatory, not optional
+            // (M01). IMP002-REAUDIT-m01: "active" here explicitly excludes an
+            // already-expired request (expires_at > now()) — an EXPIRED
+            // request must remain EXPIRED, never rewritten to SUPERSEDED.
             EmailChangeRequest::where('user_id', $user->id)
                 ->whereNull('verified_at')
                 ->whereNull('superseded_at')
                 ->whereNull('cancelled_at')
                 ->whereNull('conflicted_at')
+                ->where('expires_at', '>', now())
                 ->update(['superseded_at' => now()]);
 
             $request = EmailChangeRequest::create([
@@ -123,9 +127,21 @@ class EmailChangeService
     {
         try {
             return DB::transaction(function () use ($httpRequest, $user, $requestId, $plainToken) {
+                // IMP002-REAUDIT-m01: lock the User row FIRST, exactly like
+                // requestChange() does. Previously this locked the
+                // EmailChangeRequest row first and only acquired the User
+                // row's lock implicitly via the later UPDATE — the opposite
+                // order from requestChange() (User -> Request), which is an
+                // opposing-lock-order deadlock risk under MySQL when a
+                // promotion and a concurrent request-creation/replacement
+                // transaction race each other. One global order everywhere:
+                // User, then EmailChangeRequest.
+                /** @var User $lockedUser */
+                $lockedUser = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
+
                 /** @var EmailChangeRequest|null $emailChangeRequest */
                 $emailChangeRequest = EmailChangeRequest::where('id', $requestId)
-                    ->where('user_id', $user->id)
+                    ->where('user_id', $lockedUser->id)
                     ->lockForUpdate()
                     ->first();
 
@@ -138,16 +154,16 @@ class EmailChangeService
 
                 $targetEmail = $emailChangeRequest->normalized_pending_email;
 
-                if (User::where('email', $targetEmail)->where('id', '!=', $user->id)->exists()) {
+                if (User::where('email', $targetEmail)->where('id', '!=', $lockedUser->id)->exists()) {
                     // Force a rollback — nothing in this transaction, including a
                     // conflict marker, may be persisted from here (P2-m01).
                     throw new EmailChangeConflictException;
                 }
 
-                $oldEmail = $user->email;
+                $oldEmail = $lockedUser->email;
 
                 try {
-                    $user->forceFill([
+                    $lockedUser->forceFill([
                         'email' => $targetEmail,
                         'email_verified_at' => now(),
                     ])->save();
@@ -169,23 +185,35 @@ class EmailChangeService
 
                 $emailChangeRequest->forceFill(['verified_at' => now()])->save();
 
-                EmailChangeRequest::where('user_id', $user->id)
+                // Active-only supersession (IMP002-REAUDIT-m01): only a still-
+                // ACTIVE competing request is superseded — the explicit
+                // expires_at guard ensures an already-EXPIRED request is
+                // never rewritten to SUPERSEDED.
+                EmailChangeRequest::where('user_id', $lockedUser->id)
                     ->where('id', '!=', $emailChangeRequest->id)
                     ->whereNull('verified_at')
                     ->whereNull('superseded_at')
                     ->whereNull('cancelled_at')
                     ->whereNull('conflicted_at')
+                    ->where('expires_at', '>', now())
                     ->update(['superseded_at' => now()]);
 
-                $this->sessions->invalidateAllExcept($user, $httpRequest->session()->getId());
-                $httpRequest->session()->regenerate();
+                $this->sessions->invalidateAllExcept($lockedUser, $httpRequest->session()->getId());
+                // IMP002-REAUDIT (M07 follow-up): invalidate assurance before
+                // the fallible regenerate() call, consistent with
+                // PasswordService/MfaService — here both calls are already
+                // inside this same DB transaction, so a regenerate() failure
+                // rolls back the whole promotion regardless of ordering; this
+                // ordering is kept identical to the other services purely for
+                // a single consistent invariant across the codebase.
                 $this->assurance->invalidate();
+                $httpRequest->session()->regenerate();
 
                 // The old email is no longer a valid password-reset lookup target for
                 // this identity after promotion — invalidate any outstanding token.
                 DB::table('password_reset_tokens')->where('email', $oldEmail)->delete();
 
-                $this->audit->record('email_change_completed', $user, ['generation' => $emailChangeRequest->generation]);
+                $this->audit->record('email_change_completed', $lockedUser, ['generation' => $emailChangeRequest->generation]);
 
                 return 'promoted';
             });

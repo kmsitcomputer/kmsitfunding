@@ -48,6 +48,21 @@ class EmailChangeTest extends TestCase
         $method->invoke($service, $requestId);
     }
 
+    /**
+     * IMP002-IMPL-m02 (section 23) — invokes attemptPromotion() directly via
+     * reflection so a test can pause exactly at the rollback/finalization
+     * boundary (mutate the row between the two calls) rather than merely
+     * pre-setting a final state before calling verify() once.
+     *
+     * @return string 'promoted'|'invalid'|'conflict'
+     */
+    private function callAttemptPromotion(EmailChangeService $service, Request $httpRequest, User $user, int $requestId, string $plainToken): string
+    {
+        $method = new \ReflectionMethod($service, 'attemptPromotion');
+
+        return $method->invoke($service, $httpRequest, $user, $requestId, $plainToken);
+    }
+
     public function test_new_request_supersedes_prior_active_request_and_old_token_fails(): void
     {
         $user = $this->makeUser();
@@ -187,6 +202,112 @@ class EmailChangeTest extends TestCase
         $fresh = $change['request']->fresh();
         $this->assertNull($fresh->conflicted_at);
         $this->assertNull($fresh->conflict_reason_code);
+        $this->assertSame('old@example.com', $user->fresh()->email);
+    }
+
+    /**
+     * IMP002-IMPL-m02 (section 23) — the FULL conceptual sequence: the
+     * request is ACTIVE and the target is available at creation time; another
+     * User claims the target; the promotion transaction detects the exact DB
+     * unique collision and rolls back completely; ONLY THEN — between the
+     * rollback and finalization — does the request separately become
+     * expired; finalization must refuse ACTIVE -> CONFLICTED because
+     * `now >= expires_at` by the time it runs. This exercises the actual
+     * rollback/finalizer BOUNDARY (attemptPromotion() then a state mutation
+     * then finalizeConflict(), as two separate reflected calls) rather than
+     * pre-setting expires_at before calling verify() once.
+     */
+    public function test_conflict_rollback_then_expiry_then_finalization_leaves_request_expired(): void
+    {
+        $user = $this->makeUser();
+        $service = app(EmailChangeService::class);
+
+        $change = $service->requestChange($user, 'taken@example.com');
+        User::create(['email' => 'taken@example.com', 'password' => Hash::make('password12345')]);
+
+        // Step 1: promotion attempt — the DB unique collision rolls it back,
+        // returning 'conflict'. Nothing is persisted yet.
+        $promotionOutcome = $this->callAttemptPromotion(
+            $service, $this->requestWithSession(), $user, $change['request']->id, $change['plain_token'],
+        );
+        $this->assertSame('conflict', $promotionOutcome);
+        $this->assertNull($change['request']->fresh()->conflicted_at);
+
+        // Step 2: BETWEEN rollback and finalization, the request expires.
+        $change['request']->forceFill(['expires_at' => now()->subSecond()])->save();
+
+        // Step 3: finalization runs — must refuse to mark it CONFLICTED.
+        $method = new \ReflectionMethod($service, 'finalizeConflict');
+        $method->invoke($service, $change['request']->id);
+
+        $fresh = $change['request']->fresh();
+        $this->assertNull($fresh->conflicted_at);
+        $this->assertNull($fresh->conflict_reason_code);
+        $this->assertSame('old@example.com', $user->fresh()->email);
+    }
+
+    /**
+     * IMP002-IMPL-m02 (section 18/section 24 Case A) — an already-EXPIRED
+     * request must never be rewritten to SUPERSEDED merely because a new
+     * request is created afterward for the same User.
+     */
+    public function test_expired_request_is_never_rewritten_to_superseded_by_a_new_request(): void
+    {
+        $user = $this->makeUser();
+        $service = app(EmailChangeService::class);
+
+        $first = $service->requestChange($user, 'first@example.com');
+        $first['request']->forceFill(['expires_at' => now()->subMinute()])->save();
+
+        $second = $service->requestChange($user, 'second@example.com');
+
+        $firstFresh = $first['request']->fresh();
+        $this->assertNull($firstFresh->superseded_at, 'An EXPIRED request must remain EXPIRED, never rewritten to SUPERSEDED.');
+        $this->assertTrue($firstFresh->isExpired());
+        $this->assertTrue($second['request']->fresh()->isActive());
+    }
+
+    /**
+     * IMP002-IMPL-m02 (section 24, Case A) — verification commits FIRST; a
+     * replacement request created afterward must see the old request as
+     * terminal (VERIFIED) and simply proceed independently — it must not
+     * resurrect or otherwise interact with the already-consumed row.
+     */
+    public function test_verification_committed_first_then_replacement_created_afterward(): void
+    {
+        $user = $this->makeUser();
+        $service = app(EmailChangeService::class);
+
+        $change = $service->requestChange($user, 'first@example.com');
+        $verifyResult = $service->verify($this->requestWithSession(), $user, $change['request']->id, $change['plain_token']);
+        $this->assertSame('promoted', $verifyResult['status']);
+
+        $replacement = $service->requestChange($user, 'second@example.com');
+
+        $this->assertSame('requested', $replacement['status']);
+        $this->assertTrue($replacement['request']->fresh()->isActive());
+        $this->assertNotNull($change['request']->fresh()->verified_at);
+        $this->assertNull($change['request']->fresh()->superseded_at, 'A VERIFIED request must never be rewritten to SUPERSEDED.');
+    }
+
+    /**
+     * IMP002-IMPL-m02 (section 24, Case B) — replacement commits FIRST,
+     * marking the old request SUPERSEDED; a verification attempt against the
+     * old request's now-stale token afterward must be rejected.
+     */
+    public function test_replacement_committed_first_then_verification_of_old_token_is_rejected(): void
+    {
+        $user = $this->makeUser();
+        $service = app(EmailChangeService::class);
+
+        $original = $service->requestChange($user, 'first@example.com');
+        $service->requestChange($user, 'second@example.com');
+
+        $this->assertNotNull($original['request']->fresh()->superseded_at);
+
+        $result = $service->verify($this->requestWithSession(), $user, $original['request']->id, $original['plain_token']);
+
+        $this->assertSame('failed', $result['status']);
         $this->assertSame('old@example.com', $user->fresh()->email);
     }
 

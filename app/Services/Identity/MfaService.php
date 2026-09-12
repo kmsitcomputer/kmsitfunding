@@ -225,8 +225,12 @@ class MfaService
             $this->sessions->invalidateAllExcept($user, $request->session()->getId());
         });
 
-        $request->session()->regenerate();
+        // IMP002-REAUDIT (M07 follow-up): same fail-closed ordering as
+        // PasswordService — invalidate ELEVATED before the fallible
+        // regenerate() call, so a session-rotation failure can never leave a
+        // retained session still carrying pre-transition ELEVATED assurance.
         $this->assurance->invalidate();
+        $request->session()->regenerate();
 
         $this->audit->record('mfa_reset_or_disabled', $user);
 

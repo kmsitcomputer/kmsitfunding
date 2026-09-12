@@ -42,8 +42,14 @@ class PasswordService
             $this->sessions->invalidateAllExcept($user, $request->session()->getId());
         });
 
-        $request->session()->regenerate();
+        // IMP002-REAUDIT (M07 follow-up): invalidate ELEVATED in the current
+        // session's in-memory attributes BEFORE the fallible regenerate()
+        // call, not after. If regenerate() throws, the assurance keys are
+        // already cleared — the retained session can never go on carrying
+        // pre-transition ELEVATED assurance just because rotation failed.
+        // Do not depend on regenerate() succeeding to remove ELEVATED.
         $this->assurance->invalidate();
+        $request->session()->regenerate();
 
         $this->audit->record('password_changed', $user);
     }
@@ -72,8 +78,10 @@ class PasswordService
                     $this->sessions->invalidateAllExcept($user, $request->session()->getId());
                 });
 
-                $request->session()->regenerate();
+                // Same fail-closed ordering as changePassword() — see the
+                // comment there.
                 $this->assurance->invalidate();
+                $request->session()->regenerate();
 
                 $this->audit->record('password_reset_completed', $user);
             }
