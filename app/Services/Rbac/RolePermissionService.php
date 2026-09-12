@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * The canonical, authoritative Role -> Permission grant/revoke mutation
- * service (`IMP003-IMPL-M03`). Application code must never treat
- * `$role->permissions()->attach()/detach()/sync()` or a raw
+ * service (`IMP003-IMPL-M03`, `IMP003-REAUDIT1-M01`). Application code must
+ * never treat `$role->permissions()->attach()/detach()/sync()` or a raw
  * `role_permissions` table write as the authorized business interface for a
  * runtime request — this service is that interface. Direct pivot mutation
  * remains acceptable ONLY for internal setup/seeding code that runs with no
@@ -26,6 +26,15 @@ class RolePermissionService
         private readonly RbacAuditLogger $audit,
     ) {}
 
+    /**
+     * Lock order for a NEW grant: acting Principal -> target Role (reloaded
+     * + lifecycle-validated) -> target Permission (reloaded + lifecycle-
+     * validated) -> active grant slot -> mutation -> audit -> commit. A
+     * retired Role or a deprecated Permission never receives a NEW grant
+     * (`IMP003-REAUDIT1-M01`) — retirement/deprecation only ever blocks NEW
+     * assignments, never retroactively revokes an existing one (see
+     * "Permission Registry").
+     */
     public function grant(Principal $actor, Role $role, Permission $permission): void
     {
         DB::transaction(function () use ($actor, $role, $permission) {
@@ -33,28 +42,57 @@ class RolePermissionService
 
             $this->guard->ensureAuthorized($lockedActor, PermissionRegistry::RBAC_PERMISSION_ASSIGN);
 
-            // Self-expansion protection: granting a Permission to a Role the
-            // acting Principal itself currently holds would let it acquire
-            // that Permission's effective privilege without a distinct
-            // grantor — the same absolute rule as Self Role
-            // Assignment/Self Authority Grant, applied to this indirect path.
-            $actorHoldsRole = PrincipalRoleAssignment::where('principal_id', $lockedActor->id)
-                ->where('role_id', $role->id)
-                ->whereNull('revoked_at')
-                ->exists();
+            // Reload + lock the target Role from the DB — a caller-supplied
+            // (possibly stale) Role instance must never be trusted for the
+            // retirement check below.
+            $lockedRole = Role::whereKey($role->id)->lockForUpdate()->firstOrFail();
 
-            if ($actorHoldsRole) {
+            if ($lockedRole->retired_at !== null) {
                 throw new \RuntimeException(
-                    'Granting a Permission to a Role the acting Principal itself holds is denied '.
-                    '(Self-Escalation Protection — indirect self-expansion via Role-Permission grant).'
+                    "Role '{$lockedRole->code}' is retired — no new Permission grant is allowed."
                 );
             }
 
-            $lockedRole = Role::whereKey($role->id)->lockForUpdate()->firstOrFail();
+            // Same reload + lock discipline for the target Permission.
+            $lockedPermission = Permission::whereKey($permission->id)->lockForUpdate()->firstOrFail();
+
+            if ($lockedPermission->deprecated_at !== null) {
+                throw new \RuntimeException(
+                    "Permission '{$lockedPermission->code}' is deprecated — no new grant is allowed."
+                );
+            }
+
+            // Approved conditional Self-Escalation rule (see "Role ->
+            // Permission Assignment"): granting a Permission to a Role the
+            // actor itself holds is denied ONLY when that grant would
+            // actually expand the actor's own effective authority — i.e.
+            // only when the actor does not ALREADY effectively hold that
+            // Permission (directly or via any other currently-assigned
+            // Role). If the actor already effectively has it, this grant
+            // changes nothing about their own authority and may proceed.
+            $actorAlreadyHasPermission = (new AuthorizationContext($lockedActor))
+                ->activeRoleAssignmentsGranting($lockedPermission->code)
+                ->isNotEmpty();
+
+            if (! $actorAlreadyHasPermission) {
+                $actorHoldsTargetRole = PrincipalRoleAssignment::where('principal_id', $lockedActor->id)
+                    ->where('role_id', $lockedRole->id)
+                    ->whereNull('revoked_at')
+                    ->exists();
+
+                if ($actorHoldsTargetRole) {
+                    throw new \RuntimeException(
+                        "Granting Permission '{$lockedPermission->code}', which the acting Principal does ".
+                        "not already effectively hold, to Role '{$lockedRole->code}' — a Role that Principal ".
+                        'itself holds — is denied (Self-Escalation Protection: this grant would expand the '.
+                        "actor's own effective authority)."
+                    );
+                }
+            }
 
             $alreadyActive = DB::table('role_permissions')
                 ->where('role_id', $lockedRole->id)
-                ->where('permission_id', $permission->id)
+                ->where('permission_id', $lockedPermission->id)
                 ->whereNull('revoked_at')
                 ->lockForUpdate()
                 ->exists();
@@ -67,7 +105,7 @@ class RolePermissionService
 
             DB::table('role_permissions')->insert([
                 'role_id' => $lockedRole->id,
-                'permission_id' => $permission->id,
+                'permission_id' => $lockedPermission->id,
                 'granted_at' => $now,
                 'granted_by_principal_id' => $lockedActor->id,
                 'created_at' => $now,
@@ -77,11 +115,19 @@ class RolePermissionService
             $this->audit->record('role_permission_granted', [
                 'actor_principal_id' => $lockedActor->id,
                 'role_id' => $lockedRole->id,
-                'permission_id' => $permission->id,
+                'permission_id' => $lockedPermission->id,
             ]);
         });
     }
 
+    /**
+     * Revocation is NOT blocked by Role retirement or Permission
+     * deprecation — those states only ever prevent a NEW grant (see
+     * `grant()`); closing an existing historical grant (e.g. security
+     * cleanup) must remain possible regardless of either lifecycle state.
+     * Target Role/Permission are still reloaded + locked (defense against a
+     * stale caller-supplied model), just never lifecycle-rejected here.
+     */
     public function revoke(Principal $actor, Role $role, Permission $permission): void
     {
         DB::transaction(function () use ($actor, $role, $permission) {
@@ -90,12 +136,13 @@ class RolePermissionService
             $this->guard->ensureAuthorized($lockedActor, PermissionRegistry::RBAC_PERMISSION_REVOKE);
 
             $lockedRole = Role::whereKey($role->id)->lockForUpdate()->firstOrFail();
+            $lockedPermission = Permission::whereKey($permission->id)->lockForUpdate()->firstOrFail();
 
             $now = now();
 
             $updated = DB::table('role_permissions')
                 ->where('role_id', $lockedRole->id)
-                ->where('permission_id', $permission->id)
+                ->where('permission_id', $lockedPermission->id)
                 ->whereNull('revoked_at')
                 ->update([
                     'revoked_at' => $now,
@@ -107,7 +154,7 @@ class RolePermissionService
                 $this->audit->record('role_permission_revoked', [
                     'actor_principal_id' => $lockedActor->id,
                     'role_id' => $lockedRole->id,
-                    'permission_id' => $permission->id,
+                    'permission_id' => $lockedPermission->id,
                 ]);
             }
         });

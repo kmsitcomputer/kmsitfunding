@@ -37,20 +37,46 @@ class PrincipalService
         );
     }
 
+    /**
+     * `IMP003-REAUDIT1-M02`: if $systemPrincipal is ALREADY deactivated, the
+     * freshly-created Principal must never come back authorization-enabled
+     * — a deactivated catalog identity can never have a live-looking
+     * canonical Principal, regardless of which order creation and
+     * deactivation happen to occur in.
+     */
     public function forSystem(SystemPrincipal $systemPrincipal): Principal
     {
-        return Principal::firstOrCreate(
-            ['system_principal_id' => $systemPrincipal->id],
-            ['principal_kind' => PrincipalKind::System],
-        );
+        return DB::transaction(function () use ($systemPrincipal) {
+            $principal = Principal::firstOrCreate(
+                ['system_principal_id' => $systemPrincipal->id],
+                ['principal_kind' => PrincipalKind::System],
+            );
+
+            if ($principal->wasRecentlyCreated && $systemPrincipal->deactivated_at !== null) {
+                $principal->forceFill(['disabled_at' => $systemPrincipal->deactivated_at])->save();
+            }
+
+            return $principal;
+        });
     }
 
+    /**
+     * See `forSystem()` — identical invariant for Integration Principal.
+     */
     public function forIntegration(IntegrationPrincipal $integrationPrincipal): Principal
     {
-        return Principal::firstOrCreate(
-            ['integration_principal_id' => $integrationPrincipal->id],
-            ['principal_kind' => PrincipalKind::Integration],
-        );
+        return DB::transaction(function () use ($integrationPrincipal) {
+            $principal = Principal::firstOrCreate(
+                ['integration_principal_id' => $integrationPrincipal->id],
+                ['principal_kind' => PrincipalKind::Integration],
+            );
+
+            if ($principal->wasRecentlyCreated && $integrationPrincipal->deactivated_at !== null) {
+                $principal->forceFill(['disabled_at' => $integrationPrincipal->deactivated_at])->save();
+            }
+
+            return $principal;
+        });
     }
 
     /**
@@ -119,12 +145,17 @@ class PrincipalService
     }
 
     /**
-     * Canonical System Principal deactivation (`IMP003-IMPL-M04`) — a
-     * one-way transition. Within ONE transaction: authorize the acting
-     * Principal, lock the catalog row AND its linked canonical `principals`
-     * row, then set `system_principals.deactivated_at` and
-     * `principals.disabled_at` together. No reactivation is implemented —
-     * the specification does not define one.
+     * Canonical System Principal deactivation (`IMP003-IMPL-M04`,
+     * `IMP003-REAUDIT1-M02`) — a one-way transition. Within ONE
+     * transaction: authorize the acting Principal, lock the catalog row,
+     * ENSURE the canonical `principals` row exists (the same lazy/
+     * idempotent creation `forSystem()` itself uses — a catalog identity
+     * that was never explicitly resolved to a Principal before being
+     * deactivated must still end up with one, disabled, rather than
+     * silently deactivating only half the lifecycle), lock it, then set
+     * `system_principals.deactivated_at` and `principals.disabled_at`
+     * together. No reactivation is implemented — the specification does
+     * not define one.
      */
     public function deactivateSystem(Principal $actor, SystemPrincipal $systemPrincipal): void
     {
@@ -139,21 +170,22 @@ class PrincipalService
                 throw new \RuntimeException('System Principal is already deactivated.');
             }
 
-            $lockedPrincipal = Principal::where('system_principal_id', $lockedCatalog->id)->lockForUpdate()->first();
+            Principal::firstOrCreate(
+                ['system_principal_id' => $lockedCatalog->id],
+                ['principal_kind' => PrincipalKind::System],
+            );
+            $lockedPrincipal = Principal::where('system_principal_id', $lockedCatalog->id)->lockForUpdate()->firstOrFail();
 
             $now = now();
 
             $lockedCatalog->forceFill(['deactivated_at' => $now])->save();
-
-            if ($lockedPrincipal !== null) {
-                $lockedPrincipal->forceFill(['disabled_at' => $now])->save();
-            }
+            $lockedPrincipal->forceFill(['disabled_at' => $now])->save();
 
             $this->audit->record('non_human_principal_deactivated', [
                 'actor_principal_id' => $lockedActor->id,
                 'kind' => 'system',
                 'system_principal_id' => $lockedCatalog->id,
-                'principal_id' => $lockedPrincipal?->id,
+                'principal_id' => $lockedPrincipal->id,
             ]);
         });
     }
@@ -175,21 +207,22 @@ class PrincipalService
                 throw new \RuntimeException('Integration Principal is already deactivated.');
             }
 
-            $lockedPrincipal = Principal::where('integration_principal_id', $lockedCatalog->id)->lockForUpdate()->first();
+            Principal::firstOrCreate(
+                ['integration_principal_id' => $lockedCatalog->id],
+                ['principal_kind' => PrincipalKind::Integration],
+            );
+            $lockedPrincipal = Principal::where('integration_principal_id', $lockedCatalog->id)->lockForUpdate()->firstOrFail();
 
             $now = now();
 
             $lockedCatalog->forceFill(['deactivated_at' => $now])->save();
-
-            if ($lockedPrincipal !== null) {
-                $lockedPrincipal->forceFill(['disabled_at' => $now])->save();
-            }
+            $lockedPrincipal->forceFill(['disabled_at' => $now])->save();
 
             $this->audit->record('non_human_principal_deactivated', [
                 'actor_principal_id' => $lockedActor->id,
                 'kind' => 'integration',
                 'integration_principal_id' => $lockedCatalog->id,
-                'principal_id' => $lockedPrincipal?->id,
+                'principal_id' => $lockedPrincipal->id,
             ]);
         });
     }

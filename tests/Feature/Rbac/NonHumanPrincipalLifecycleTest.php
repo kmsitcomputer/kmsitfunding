@@ -139,4 +139,110 @@ class NonHumanPrincipalLifecycleTest extends TestCase
 
         $this->assertNull($systemRow->fresh()->deactivated_at);
     }
+
+    // --- IMP003-REAUDIT1-M02 ---
+
+    public function test_system_deactivation_with_no_existing_principal_creates_it_disabled(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $systemRow = SystemPrincipal::create(['code' => 'lifecycle_system_7']);
+
+        // Deliberately never call forSystem() first — no principals row
+        // exists yet for this catalog identity.
+        $this->assertNull(Principal::where('system_principal_id', $systemRow->id)->first());
+
+        app(PrincipalService::class)->deactivateSystem($actor, $systemRow);
+
+        $systemRow->refresh();
+        $principal = Principal::where('system_principal_id', $systemRow->id)->first();
+
+        $this->assertNotNull($systemRow->deactivated_at);
+        $this->assertNotNull($principal, 'Deactivation must ensure a canonical Principal exists.');
+        $this->assertNotNull($principal->disabled_at);
+        $this->assertFalse($principal->canAuthorize());
+    }
+
+    public function test_integration_deactivation_with_no_existing_principal_creates_it_disabled(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $integrationRow = IntegrationPrincipal::create(['code' => 'lifecycle_integration_7']);
+
+        $this->assertNull(Principal::where('integration_principal_id', $integrationRow->id)->first());
+
+        app(PrincipalService::class)->deactivateIntegration($actor, $integrationRow);
+
+        $integrationRow->refresh();
+        $principal = Principal::where('integration_principal_id', $integrationRow->id)->first();
+
+        $this->assertNotNull($integrationRow->deactivated_at);
+        $this->assertNotNull($principal);
+        $this->assertNotNull($principal->disabled_at);
+        $this->assertFalse($principal->canAuthorize());
+    }
+
+    public function test_for_system_after_catalog_deactivation_cannot_produce_an_enabled_principal(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $systemRow = SystemPrincipal::create(['code' => 'lifecycle_system_8']);
+
+        // Deactivate BEFORE any Principal has ever been resolved for it.
+        app(PrincipalService::class)->deactivateSystem($actor, $systemRow);
+        $this->assertSame(
+            1,
+            Principal::where('system_principal_id', $systemRow->id)->count(),
+            'Deactivation itself already created the Principal — sanity check.'
+        );
+
+        // A later forSystem() call (e.g. an incoming job event still
+        // referencing this now-retired identity) must not resurrect it as
+        // authorization-enabled.
+        $principal = app(PrincipalService::class)->forSystem($systemRow->fresh());
+
+        $this->assertNotNull($principal->disabled_at);
+        $this->assertFalse($principal->canAuthorize());
+    }
+
+    public function test_for_system_first_resolution_after_deactivation_with_no_prior_principal_is_disabled(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $bootstrapUser = User::create(['email' => 'bootstrap-deactivate@example.com', 'password' => Hash::make('correct-horse-battery-staple')]);
+        app(PrincipalService::class)->forUser($bootstrapUser);
+
+        $systemRow = SystemPrincipal::create(['code' => 'lifecycle_system_9']);
+        // Simulate a catalog identity that was deactivated via some path
+        // that guarantees the catalog row's own state (deactivateSystem
+        // always creates the Principal — this directly forces the raw
+        // catalog-deactivated-with-no-Principal precondition instead).
+        $systemRow->forceFill(['deactivated_at' => now()])->save();
+
+        $this->assertNull(Principal::where('system_principal_id', $systemRow->id)->first());
+
+        $principal = app(PrincipalService::class)->forSystem($systemRow);
+
+        $this->assertNotNull($principal->disabled_at, 'A Principal first created for an already-deactivated catalog row must be born disabled.');
+        $this->assertFalse($principal->canAuthorize());
+    }
+
+    public function test_for_integration_first_resolution_after_deactivation_with_no_prior_principal_is_disabled(): void
+    {
+        $integrationRow = IntegrationPrincipal::create(['code' => 'lifecycle_integration_9']);
+        $integrationRow->forceFill(['deactivated_at' => now()])->save();
+
+        $this->assertNull(Principal::where('integration_principal_id', $integrationRow->id)->first());
+
+        $principal = app(PrincipalService::class)->forIntegration($integrationRow);
+
+        $this->assertNotNull($principal->disabled_at);
+        $this->assertFalse($principal->canAuthorize());
+    }
+
+    public function test_active_system_catalog_still_resolves_an_enabled_principal(): void
+    {
+        $systemRow = SystemPrincipal::create(['code' => 'lifecycle_system_10']);
+
+        $principal = app(PrincipalService::class)->forSystem($systemRow);
+
+        $this->assertNull($principal->disabled_at);
+        $this->assertTrue($principal->canAuthorize());
+    }
 }

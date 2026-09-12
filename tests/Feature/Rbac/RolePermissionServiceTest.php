@@ -2,8 +2,10 @@
 
 namespace Tests\Feature\Rbac;
 
+use App\Enums\ScopeType;
 use App\Models\Rbac\Permission;
 use App\Models\Rbac\Principal;
+use App\Models\Rbac\PrincipalRoleAssignment;
 use App\Models\Rbac\Role;
 use App\Models\User;
 use App\Services\Identity\AssuranceService;
@@ -132,5 +134,136 @@ class RolePermissionServiceTest extends TestCase
             1,
             DB::table('role_permissions')->where('role_id', $role->id)->where('permission_id', $permission->id)->whereNull('revoked_at')->count(),
         );
+    }
+
+    // --- IMP003-REAUDIT1-M01 ---
+
+    public function test_grant_to_retired_role_is_denied(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_retired', 'name' => 'RP Role Retired']);
+        $role->forceFill(['retired_at' => now()])->save();
+        $permission = Permission::create(['code' => 'rp.test.retired_role', 'description' => 'test']);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('is retired');
+
+        app(RolePermissionService::class)->grant($actor, $role, $permission);
+    }
+
+    public function test_grant_deprecated_permission_is_denied(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_6', 'name' => 'RP Role 6']);
+        $permission = Permission::create(['code' => 'rp.test.deprecated', 'description' => 'test']);
+        $permission->forceFill(['deprecated_at' => now()])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('is deprecated');
+
+        app(RolePermissionService::class)->grant($actor, $role, $permission);
+    }
+
+    public function test_revocation_of_a_grant_involving_a_retired_role_still_succeeds(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_7', 'name' => 'RP Role 7']);
+        $permission = Permission::create(['code' => 'rp.test.perm7', 'description' => 'test']);
+        app(RolePermissionService::class)->grant($actor, $role, $permission);
+
+        // Retire the Role AFTER the grant already exists — revocation of an
+        // existing historical grant must remain possible; retirement only
+        // blocks NEW grants.
+        $role->forceFill(['retired_at' => now()])->save();
+
+        app(RolePermissionService::class)->revoke($actor, $role, $permission);
+
+        $this->assertSame(
+            1,
+            DB::table('role_permissions')->where('role_id', $role->id)->where('permission_id', $permission->id)->whereNotNull('revoked_at')->count(),
+        );
+    }
+
+    public function test_revocation_of_a_grant_involving_a_deprecated_permission_still_succeeds(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_8', 'name' => 'RP Role 8']);
+        $permission = Permission::create(['code' => 'rp.test.perm8', 'description' => 'test']);
+        app(RolePermissionService::class)->grant($actor, $role, $permission);
+
+        $permission->forceFill(['deprecated_at' => now()])->save();
+
+        app(RolePermissionService::class)->revoke($actor, $role, $permission);
+
+        $this->assertSame(
+            1,
+            DB::table('role_permissions')->where('role_id', $role->id)->where('permission_id', $permission->id)->whereNotNull('revoked_at')->count(),
+        );
+    }
+
+    public function test_actor_holding_target_role_but_already_possessing_permission_via_another_role_may_grant_it(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $selfRole = Role::where('code', 'test_rbac_root')->firstOrFail();
+        $permission = Permission::create(['code' => 'rp.test.via_other_role', 'description' => 'test']);
+
+        // A second Role the actor does NOT yet hold — granting a brand-new
+        // Permission to it is not self-expansion (actor doesn't hold it).
+        $secondRole = Role::create(['code' => 'rp_role_second', 'name' => 'RP Role Second']);
+        app(RolePermissionService::class)->grant($actor, $secondRole, $permission);
+
+        // Now give the actor $secondRole directly — the actor effectively
+        // holds $permission via $secondRole from this point on.
+        $this->grantRoleToPrincipalDirectly($actor, $secondRole);
+
+        // Granting that SAME permission to $selfRole (which the actor also
+        // holds) no longer expands the actor's authority — already-held via
+        // $secondRole — so this must be ALLOWED.
+        app(RolePermissionService::class)->grant($actor, $selfRole, $permission);
+
+        $this->assertTrue($selfRole->permissions()->where('permissions.id', $permission->id)->exists());
+    }
+
+    public function test_stale_caller_supplied_role_cannot_bypass_retirement(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_stale', 'name' => 'RP Role Stale']);
+        $permission = Permission::create(['code' => 'rp.test.stale_role', 'description' => 'test']);
+
+        // The caller holds a stale in-memory copy taken BEFORE retirement.
+        $staleRole = Role::find($role->id);
+        $role->forceFill(['retired_at' => now()])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('is retired');
+
+        app(RolePermissionService::class)->grant($actor, $staleRole, $permission);
+    }
+
+    public function test_stale_caller_supplied_permission_cannot_bypass_deprecation(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_9', 'name' => 'RP Role 9']);
+        $permission = Permission::create(['code' => 'rp.test.stale_permission', 'description' => 'test']);
+
+        $stalePermission = Permission::find($permission->id);
+        $permission->forceFill(['deprecated_at' => now()])->save();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('is deprecated');
+
+        app(RolePermissionService::class)->grant($actor, $role, $stalePermission);
+    }
+
+    private function grantRoleToPrincipalDirectly(Principal $principal, Role $role): void
+    {
+        PrincipalRoleAssignment::create([
+            'principal_id' => $principal->id,
+            'role_id' => $role->id,
+            'scope_type' => ScopeType::GlobalPlatform->value,
+            'scope_id' => null,
+            'starts_at' => now(),
+            'assigned_by_principal_id' => null,
+        ]);
     }
 }
