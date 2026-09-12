@@ -579,7 +579,8 @@ Authority Types by this document — the registry that will hold them is.
 
 ```
 authority_assignments (authority_type_id FK, principal_id FK->principals.id, scope_type
-  (non-null), scope_id, starts_at, ends_at nullable, revoked_at nullable, assigned_by, revoked_by,
+  (non-null), scope_id, starts_at, ends_at nullable, revoked_at nullable,
+  assigned_by_principal_id FK->principals.id, revoked_by_principal_id FK->principals.id,
   timestamps) — see "Database Contract > `authority_assignments`" for the full, corrected
   contract (principal_id is a real FK per IMP003-READY-M04; scope_type is never null per
   IMP003-READY-M02)
@@ -989,9 +990,8 @@ purpose:      canonical authorization-identity registry — every Role/Authority
               "assignment references nonexistent principal" a database-level impossibility, not
               merely an application-level convention
 key fields:   principal_kind (string enum: 'human' | 'system' | 'integration'),
-              human_user_id (BIGINT unsigned, nullable, UNIQUE, FK -> users.id, nullOnDelete —
-                same deletion pattern IMP-002 Remediation Pass 2 already established for
-                super_admin_bootstraps.user_id),
+              human_user_id (BIGINT unsigned, nullable, UNIQUE, FK -> users.id, `IMP003-REAUDIT2-M02`:
+                RESTRICT (NO ACTION), NOT nullOnDelete — see "Human User FK Strategy" below),
               system_principal_id (BIGINT unsigned, nullable, UNIQUE, FK -> system_principals.id),
               integration_principal_id (BIGINT unsigned, nullable, UNIQUE,
                 FK -> integration_principals.id),
@@ -1056,29 +1056,66 @@ Human disable/deactivate (while the User still exists): a 'human' principal (tom
               authorization via the existing Security Restriction check, and can become
               authorizable again if the User is re-enabled); TOMBSTONED is permanent and only
               follows actual User deletion (see below).
-Human tombstone transition (User deletion — `§7`): a SINGLE transaction, opened by whichever
-              IMP-002 workflow is about to delete the User row:
-                1. SELECT ... FOR UPDATE the `principals` row for this human_user_id (lock first).
-                2. Revoke every currently-active `principal_role_assignments`/
-                   `authority_assignments` row referencing this principal_id (set revoked_at =
-                   now(), revoked_by_user_id = the acting administrator, or a distinguished
-                   "identity-lifecycle" system actor reference where no human administrator
-                   directly triggered it — e.g. a self-service account-deletion flow) — this is
-                   the "revoke/disable all effective authorization" step.
-                3. In ONE UPDATE statement, set BOTH `tombstoned_at = now()` AND
-                   `human_user_id = NULL` on the `principals` row together — a single statement
-                   guarantees the row satisfies the CHECK constraint's "tombstoned" branch the
-                   instant it takes effect; there is no intermediate state where tombstoned_at is
-                   set but human_user_id is still populated (which the CHECK would reject).
-                4. Commit this transaction, THEN proceed with the actual `DELETE FROM users`
-                   (IMP-002's own deletion path). Because human_user_id was already nulled in step
-                   3, the FK's `nullOnDelete` action has nothing left to do when the User row is
-                   later deleted — no reliance on cascade-vs-application-code ordering.
-              This sequence is valid at every point under MySQL 8: no transaction ever leaves the
-              `principals` row in a state that violates its own CHECK constraint.
-Deletion protection: `human_user_id` uses `nullOnDelete()` as a BACKSTOP (in case some future
-              deletion path ever bypasses the tombstone transition above) — the row is NEVER
-              hard-deleted and NEVER re-linked to a different User afterward.
+Canonical User Deletion Transaction (`IMP003-REAUDIT2-M01`/`M02` — atomic, replaces the earlier
+              two-transaction "tombstone, commit, then delete" sequence, which left a window where
+              the tombstone could commit while the subsequent `DELETE FROM users` still failed,
+              leaving an inconsistent half-deleted identity):
+
+```
+BEGIN TRANSACTION
+  1. SELECT ... FOR UPDATE the `users` row being deleted (lock first).
+  2. SELECT ... FOR UPDATE the linked `principals` row for this human_user_id (lock second).
+  3. Validate deletion preconditions (at minimum: the principal is not already tombstoned; any
+     additional precondition a later stage requires — e.g. an outstanding financial hold — is
+     that stage's own concern, not invented here).
+  4. Revoke every currently-active `principal_role_assignments` row referencing this principal_id
+     (set revoked_at = now(), revoked_by_principal_id = the acting administrator's Principal, or a
+     distinguished System Principal reference where no human administrator directly triggered it
+     — e.g. a self-service account-deletion flow).
+  5. Revoke every currently-active `authority_assignments` row referencing this principal_id, same
+     rule.
+  6. ONE UPDATE statement sets BOTH `tombstoned_at = now()` AND `human_user_id = NULL` on the
+     `principals` row together — the row satisfies the CHECK constraint's "tombstoned" branch the
+     instant this single statement takes effect; there is no intermediate state where
+     tombstoned_at is set but human_user_id is still populated (which the CHECK would reject).
+  7. `DELETE FROM users WHERE id = ...` — this now succeeds cleanly: human_user_id was already
+     nulled in step 6, so by the time this DELETE runs, no `principals` row references this
+     User's id any more, and the FK (RESTRICT/NO ACTION — see below) has nothing left to restrict.
+  8. COMMIT.
+ROLLBACK the ENTIRE transaction if ANY step fails — steps 1-7 either all take effect together, or
+  none of them do. There is no intermediate commit between the tombstone mutation and the User
+  deletion; they are the SAME transaction.
+```
+
+Failure behavior (`§5`): if step 7 (`DELETE FROM users`) fails for any reason (an unrelated FK
+elsewhere, a database error, an application-level abort), the transaction ROLLS BACK entirely —
+the User row remains live, the `principals` row remains live and NOT tombstoned (its `revoked_at`/
+`tombstoned_at`/`human_user_id` mutations from steps 4-6 are undone by the rollback exactly like
+any other transactional write), and every role/authority assignment that steps 4-5 revoked is
+restored to its prior state. No half-deleted identity, no orphaned tombstone, no detached
+principal can result from this transaction.
+
+Human User FK Strategy (`IMP003-REAUDIT2-M02`): `human_user_id -> users.id` uses **RESTRICT (NO
+ACTION)**, not `nullOnDelete`. The earlier draft's `nullOnDelete` claim was invalid on its own
+terms — an FK-triggered `SET NULL` can only touch the `human_user_id` column; it cannot also set
+`tombstoned_at` in the same automatic action, so a bypass deletion relying on that cascade would
+leave the row violating its own CHECK constraint (human_user_id null while tombstoned_at is still
+null) rather than producing a valid tombstone. With RESTRICT/NO ACTION instead:
+
+```
+A direct `DELETE FROM users` for a User whose linked `principals` row is still LIVE (non-
+  tombstoned, human_user_id populated) is REJECTED by the database itself (an ordinary FK
+  violation) — the canonical transaction above is the ONLY path that can ever remove that link,
+  because it is the only path that nulls human_user_id (inside the SAME transaction, before the
+  DELETE) rather than relying on the database to do it automatically.
+This is a deliberate, explicit, and honestly-documented invariant — "bypass deletion -> database
+  REJECT" — rather than a claim that the database can silently produce a valid tombstoned
+  principal on its own, which it cannot.
+```
+
+Deletion protection: once tombstoned, the `principals` row is NEVER hard-deleted and NEVER
+              re-linked to a different User afterward — its historical/attribution value (see
+              "Attribution" below) is permanent.
 Orphan / tombstoned principal cannot authorize: a principal with `tombstoned_at` set (equivalently,
               principal_kind='human' with human_user_id null) MUST fail Applicable Subject
               Context Resolution (Step 0) deterministically — DENY, never "no restriction". It
@@ -1127,21 +1164,30 @@ forbids. **Corrected: durable, self-contained history, independent of IMP-004:**
 
 ```
 purpose:      Role -> Permission grant
-key fields:   role_id FK->roles, permission_id FK->permissions, granted_at, granted_by_user_id
-              FK->users nullable, revoked_at (nullable), revoked_by_user_id FK->users nullable,
-              timestamps
+key fields:   role_id FK->roles, permission_id FK->permissions, granted_at, granted_by_principal_id
+              FK->principals.id (nullable ONLY for system-seeded grants — the Permission Registry
+              seeder itself is not attributed to any acting Principal, since it runs as part of
+              deployment/migration, not an RBAC action taken by anyone; every grant performed
+              through the ordinary assignment service has a non-null grantor), revoked_at
+              (nullable), revoked_by_principal_id FK->principals.id nullable, timestamps
 unique:       (role_id, permission_id) WHERE revoked_at IS NULL — enforced via the same
               generated-column technique specified for the assignment tables below (a grant that
               has been revoked no longer occupies the uniqueness slot, so the SAME role/permission
               pair can be re-granted later as a NEW row, while history is preserved)
 indexes:      role_id, permission_id
-deletion:     NEVER hard-deleted — revocation sets `revoked_at`/`revoked_by_user_id`; "active"
+deletion:     NEVER hard-deleted — revocation sets `revoked_at`/`revoked_by_principal_id`; "active"
               grant = revoked_at IS NULL; this alone (not an audit-log entry elsewhere) is what
               lets IMP-003 answer "what did this Role's permission set look like historically"
               without depending on IMP-004 existing
 audit:        permission granted-to-role / revoked-from-role (emitted in ADDITION to, not instead
               of, this table's own durable columns)
 ```
+
+`IMP003-REAUDIT2-M03`: `granted_by_principal_id`/`revoked_by_principal_id` reference `principals.id`,
+not `users.id` — a canonical Principal survives its underlying human User's deletion (via the
+Canonical User Deletion Transaction's tombstone step above), so this attribution remains
+historically reconstructable even after the acting administrator's own User row is gone. See
+"Attribution" below for the full rule applied consistently across every authorization table.
 
 ### `principal_role_assignments`
 
@@ -1152,10 +1198,16 @@ key fields:   principal_id (BIGINT unsigned, FK -> principals.id — see "IMP003
               FK->roles, scope_type (string, NEVER null — one of the 10 DATA-SCOPE-MODEL taxonomy
               values, see "Scope Type / Scope Target Matrix"), scope_id (nullable BIGINT,
               polymorphic target — null ONLY for GLOBAL_PLATFORM/ORGANIZATION/OWN, per that same
-              matrix), starts_at, ends_at (nullable), revoked_at (nullable), assigned_by_user_id
-              FK->users nullable, revoked_by_user_id FK->users nullable, timestamps
+              matrix), starts_at, ends_at (nullable), revoked_at (nullable), assigned_by_principal_id
+              FK->principals.id (nullable ONLY for the one documented Q25 Bridge exception — see
+              "Super Admin Canonical Authorization"; every ordinary Role assignment requires a
+              non-null grantor Principal), revoked_by_principal_id FK->principals.id nullable,
+              timestamps
 FK:           principal_id -> principals.id (real FK, enforced by the database — closes
-              IMP003-READY-M04); role_id -> roles.id (real FK)
+              IMP003-READY-M04); role_id -> roles.id (real FK); assigned_by_principal_id/
+              revoked_by_principal_id -> principals.id (real FK — `IMP003-REAUDIT2-M03`, replaces
+              the earlier direct `-> users.id` attribution, which would have been orphaned by a
+              grantor's own later User deletion)
 CHECK:        scope_id NULL/NOT-NULL matches scope_type per the "Scope Type / Scope Target Matrix"
               (see "Scope Uniqueness Normalization" immediately below for how this feeds the
               uniqueness key)
@@ -1215,9 +1267,10 @@ value). This means an assignment that has EXPIRED but was never explicitly revok
 its active uniqueness slot (`active_assignment_key` remains non-null, since `revoked_at` is still
 null) — this is intentional and deterministic, not an oversight: **renewal/replacement of an
 expired-but-unrevoked assignment for the same (principal, role, scope) MUST, within ONE
-transaction, first REVOKE the existing row (`revoked_at = now()`, `revoked_by_user_id` = a
-sentinel/system actor or the renewing Principal, as appropriate) and only THEN insert the new
-row** — this is the exact same "supersede, then create" pattern IMP-002's `EmailChangeRequest`
+transaction, first REVOKE the existing row (`revoked_at = now()`, `revoked_by_principal_id` = the
+renewing Principal, or a distinguished System Principal reference where the renewal is itself
+system-initiated) and only THEN insert the new row** — this is the exact same "supersede, then
+create" pattern IMP-002's `EmailChangeRequest`
 already uses and that this repository's governance has already reviewed and accepted (see
 `docs/audits/IMP-002-IMPLEMENTATION-REMEDIATION-1.md`/`-2.md`, m01). No ambiguity is left open:
 there is no "cleanup job" or implicit expiration-to-revocation conversion outside of this explicit,
@@ -1251,10 +1304,15 @@ purpose:      binds an Authority Type to a Principal, within a Scope, for a boun
 key fields:   authority_type_id FK->authority_types, principal_id FK->principals.id (real FK —
               see "IMP003-READY-M04"), scope_type (string, NEVER null — same matrix as
               principal_role_assignments), scope_id (nullable, same rule), starts_at, ends_at
-              (nullable), revoked_at (nullable), assigned_by_user_id FK->users NOT NULL (no
-              nullable exception remains — `IMP003-READY-B01` removed the one case that used to
-              require nullability), revoked_by_user_id FK->users nullable, timestamps
-FK:           principal_id -> principals.id; authority_type_id -> authority_types.id
+              (nullable), revoked_at (nullable), assigned_by_principal_id FK->principals.id NOT
+              NULL (no nullable exception exists here — `IMP003-READY-B01` already removed the one
+              case, the Q25 Bridge's self-grant, that used to require nullability; the Bridge never
+              creates an authority_assignments row at all, so this table's grantor is always a
+              genuine, distinct, already-authorized Principal), revoked_by_principal_id
+              FK->principals.id nullable, timestamps
+FK:           principal_id -> principals.id; authority_type_id -> authority_types.id;
+              assigned_by_principal_id/revoked_by_principal_id -> principals.id (`IMP003-REAUDIT2-M03`
+              — replaces the earlier direct `-> users.id` attribution)
 unique:       active_assignment_key (same generated-column technique as
               principal_role_assignments, keyed on principal_id/authority_type_id/scope_type/
               normalized_scope_id) — see "Scope Uniqueness Normalization + MySQL 8 Active-
@@ -1262,14 +1320,66 @@ unique:       active_assignment_key (same generated-column technique as
 indexes:      principal_id, authority_type_id, (scope_type, scope_id)
 deletion:     never hard-deleted
 audit:        authority assigned / authority revoked
-constraint:   `assigned_by_user_id` MUST always differ from the assignment's own principal's
-              underlying `human_user_id` (when principal_kind='human') — UNCONDITIONALLY, with NO
-              exception (the earlier draft's one documented exception, for the Q25 Bridge's
-              self-grant, is removed along with that self-grant — see "Super Admin Canonical
-              Authorization" and "Self-Escalation Protection"). This is enforced by a CHECK/
-              application validation that REJECTS the insert outright, not merely audited after
-              the fact.
+constraint:   `assigned_by_principal_id` MUST always differ from the assignment's own
+              `principal_id` — UNCONDITIONALLY, with NO exception (the Q25 Bridge grants only a
+              Role, never an Authority Type — see "Super Admin Canonical Authorization" and
+              "Self-Escalation Protection" — so no exception is needed or granted here). This is
+              enforced by a CHECK/application validation that REJECTS the insert outright, not
+              merely audited after the fact.
 ```
+
+### Attribution (`IMP003-REAUDIT2-M03` — canonical Principal-based actor attribution)
+
+Root cause of the finding: `role_permissions.granted_by_user_id`/`revoked_by_user_id`,
+`principal_role_assignments.assigned_by_user_id`/`revoked_by_user_id`, and
+`authority_assignments.assigned_by_user_id`/`revoked_by_user_id` all referenced `users.id`
+directly. Since a User can be deleted (via the Canonical User Deletion Transaction above), this
+would have orphaned the historical record of WHO granted/revoked an authorization the moment the
+acting administrator's own account was later deleted — directly conflicting with this
+specification's own durable-history requirement (`IMP003-READY-m01`).
+
+**Corrected rule, applied consistently across every IMP-003 authorization table (and ONLY these
+— this does not touch any unrelated business-domain table's own `created_by`/`approved_by`
+columns, which are out of scope for this specification): every actor-attribution column
+references `principals.id`, never `users.id` directly.**
+
+```
+role_permissions.granted_by_principal_id / revoked_by_principal_id       -> principals.id
+principal_role_assignments.assigned_by_principal_id / revoked_by_principal_id -> principals.id
+authority_assignments.assigned_by_principal_id / revoked_by_principal_id  -> principals.id
+```
+
+This works precisely because a canonical Principal is designed to OUTLIVE its underlying human
+User (it becomes TOMBSTONED, never hard-deleted) — so a grant/revocation performed by an
+administrator who is later deleted remains attributed to a real, permanent, resolvable row, not a
+dangling reference. This also uniformly supports Human, System, and Integration grantors without
+three separate nullable attribution-column sets — the grantor is always "a principal_id," and its
+`principal_kind` (plus, for a live human principal, its linked `users` row) is what
+audit/display logic resolves for human-readable presentation; the underlying authorization
+HISTORY itself never depends on that resolution succeeding.
+
+Where an assignment requires a grantor, the attribution column is `NOT NULL` (acceptable BECAUSE
+the Principal survives — see `principal_role_assignments`/`authority_assignments` above); it is
+nullable ONLY in the two specifically-documented, narrow cases where no acting Principal exists at
+all: the Permission Registry seeder's system-seeded `role_permissions` grants (a deployment-time
+action, not an RBAC action taken by any Principal), and the Q25 Bridge's `super_admin` Role
+assignment (a one-time, non-principal-initiated, deterministic bootstrap event — see "Super Admin
+Canonical Authorization" and "Q25 Bootstrap Attribution" immediately below). Neither nullable case
+exists "to make deletion easier" — both reflect a genuine absence of any acting Principal.
+
+#### Q25 Bootstrap Attribution (`§20`)
+
+The Bridge's resulting `principal_role_assignments` row (the bootstrapped identity's `super_admin`
+Role grant) has `assigned_by_principal_id = NULL` — attributed instead to the deterministic Q25
+bootstrap event itself (the audit event `super_admin_canonically_authorized`, which independently
+records that this specific, one-time, already-Human-authorized mechanism performed the grant, not
+an ordinary Principal). This is NOT a self-escalation exception: no Principal — including the
+bootstrapped identity itself — ever appears as the grantor of its own Role through the ordinary
+authorization service; the Bridge is not "the Super Admin granting itself a role through normal
+RBAC," it is a distinct, independently-guarded, non-principal-initiated provisioning mechanism
+whose own guards (see "Super Admin Canonical Authorization") are what make it safe, not an
+attribution value. Q25's own bootstrap-identification semantics (the `super_admin_bootstraps`
+table, IMP-002) are not reopened or altered by this rule.
 
 ### `system_principals` / `integration_principals`
 
@@ -1277,11 +1387,27 @@ constraint:   `assigned_by_user_id` MUST always differ from the assignment's own
 purpose:      fixed, seeded, non-authenticatable Principal catalogs (see "System Principal");
               each row here is what a `principals` row's system_principal_id/
               integration_principal_id links to
-key fields:   code (unique), description, timestamps
+key fields:   code (unique), description, deactivated_at (nullable — see "Delete Semantics" below),
+              timestamps
 unique:       code
-deletion:     never hard-deleted once ever assigned
-audit:        principal registered
+FK:           referenced BY `principals.system_principal_id`/`integration_principal_id` — a
+              catalog row must exist BEFORE any `principals` row can reference it (see "Migration
+              Order" below)
+deletion:     never hard-deleted once ever assigned — see "Delete Semantics for System/Integration
+              Principals"
+audit:        principal registered / principal deactivated
 ```
+
+#### Delete Semantics for System / Integration Principals (`§35`)
+
+A `system_principals`/`integration_principals` catalog row is never destructively deleted while a
+`principals` row (or any assignment referencing that `principals` row) still exists for it — the
+same "never hard-delete once referenced" rule already applied to every other table in this
+specification. Retiring a discontinued scheduled job or a decommissioned integration sets
+`deactivated_at` (a permanent, one-way marker — no automatic reactivation) and, per "Principal
+Lifecycle," the linked `principals` row's own `disabled_at` is set in the same transaction; neither
+row is ever deleted, so no orphan canonical Principal can result from retiring a system/integration
+identity. This is an engineering-integrity rule, not a new Human Decision.
 
 ### No changes to `users`
 
@@ -1309,8 +1435,9 @@ No numeric default duration, grace period, or renewal policy is invented — `en
 (open-ended by default) unless a later domain stage's own specification requires bounding it.
 
 Historical reproducibility: an assignment row is NEVER edited to change WHO it was for, WHAT
-Role/Authority it granted, or WHAT scope it covered — only `ends_at`/`revoked_at`/`revoked_by`
-may be set (once). A changed assignment is always a NEW row plus a revocation of the old one, never
+Role/Authority it granted, or WHAT scope it covered — only `ends_at`/`revoked_at`/
+`revoked_by_principal_id` may be set (once). A changed assignment is always a NEW row plus a
+revocation of the old one, never
 a mutation in place — this mirors IMP-002's own EmailChangeRequest immutable-except-terminal-
 columns pattern and satisfies `DATABASE-INVARIANTS.md` "Policy/version historical reproducibility."
 
@@ -1389,11 +1516,17 @@ First Super Admin canonical assignment (the Bridge):  locks the resolved bootstr
   "Super Admin Canonical Authorization"). The Bridge has no "grantor principal" in the ordinary
   sense (it is not a Principal acting through the authorization service), so it collapses steps
   1-2 into locking only the one target `principals` row.
-Human Principal tombstone transition (`IMP003-REAUDIT-M01`):  locks the `principals` row FIRST
-  (step 1-equivalent — there is no separate "grantor," this is an identity-lifecycle transition
-  triggered by IMP-002's own deletion path), revokes all active assignments referencing it (step
-  4-5-equivalent, applied to every assignment row for that principal rather than one), then sets
-  `tombstoned_at`/nulls `human_user_id` in one statement, then commits — see "Principal Lifecycle".
+Canonical User Deletion Transaction (`IMP003-REAUDIT2-M01`/`M02`):  this lifecycle path has no
+  separate "grantor" — it locks the `users` row FIRST, then the linked `principals` row (a
+  specialization of the general order above: there is only ONE principal involved here, not a
+  grantor/target pair, so there is nothing to order by ascending PK against), revokes every active
+  assignment referencing that principal (the same "existing assignment" step, applied in bulk
+  rather than to one tuple), nulls `human_user_id`/sets `tombstoned_at` in one statement, THEN
+  deletes the `users` row, all inside the SAME transaction, committing once at the end — see
+  "Principal Lifecycle > Canonical User Deletion Transaction" for the full 8-step sequence and its
+  rollback behavior. This does not conflict with the general Grantor/Target Principal ordering
+  above; it is simply the specialization of that order for a write path with exactly one principal
+  and no distinct grantor.
 ```
 
 ### Concurrency Test Contract (`§31`, conceptual — mirrors the Test Contract's posture)
@@ -1679,6 +1812,20 @@ an assignment write referencing a `principal_id` that does not resolve to an exi
   application-level check) — IMP003-READY-M04
 ```
 
+### Attribution (`IMP003-REAUDIT2-M03`, `§22`)
+
+```
+an authorization mutation's grantor `assigned_by_principal_id`/`granted_by_principal_id` resolves
+  to an existing `principals` row -> the write PASSES (assuming every other check also passes)
+an authorization mutation referencing a grantor `principal_id` that does not resolve to an
+  existing `principals` row -> REJECTED (real FK violation)
+a human grantor's OWN User is later deleted (Canonical User Deletion Transaction runs) -> the
+  grantor's `principals` row survives, TOMBSTONED — every `role_permissions`/
+  `principal_role_assignments`/`authority_assignments` row that grantor ever created or revoked
+  still resolves its `..._by_principal_id` to that (now-tombstoned) row; no attribution becomes
+  orphaned or unresolvable
+```
+
 ### Tombstoned Principal (`IMP003-REAUDIT-M01`, `§9`)
 
 ```
@@ -1694,6 +1841,26 @@ a TOMBSTONED principal attempting to act as GRANTOR of any Role/Authority assign
 tombstoning a principal that currently holds active Role/Authority assignments -> those
   assignments are revoked as PART OF the same tombstone transaction (never left dangling as
   "active" against a tombstoned target)
+```
+
+### Canonical User Deletion (`IMP003-REAUDIT2-M01`/`M02`, `§13`/`§14`)
+
+```
+a direct `DELETE FROM users` for a User whose linked `principals` row is still LIVE (non-
+  tombstoned) -> REJECTED by the FK (RESTRICT/NO ACTION) — the database itself blocks any
+  deletion path that bypasses the Canonical User Deletion Transaction
+the Canonical User Deletion Transaction, run against a User with active Role/Authority
+  assignments and a live linked principal -> SUCCEEDS: the User row is gone, the principals row
+  is TOMBSTONED (tombstoned_at set, human_user_id null), every previously-active assignment
+  referencing that principal is now revoked, and authorization evaluation against that principal
+  denies
+a forced failure injected AFTER the assignment-revocation and tombstone-mutation steps but BEFORE
+  the transaction commits (e.g. the `DELETE FROM users` step itself is made to fail) -> the ENTIRE
+  transaction rolls back: the User row still exists, the principals row is still LIVE (not
+  tombstoned, human_user_id still populated), and every assignment that would have been revoked is
+  still active exactly as it was before the attempt (mandatory test — mirrors the failure-
+  injection pattern IMP-002's own Remediation Pass 2 already established for its own security
+  transitions)
 ```
 
 ### Invalid Scope Reference (`§35`)
@@ -1806,6 +1973,22 @@ Principal attempting to assign themselves as the authorized actor for a privileg
 ## Database Test Contract
 
 ```
+fresh migration (`IMP003-REAUDIT2-M04`): running every IMP-003 migration, in the exact "Migration
+  Order" sequence specified above, against a clean/empty MySQL 8 database completes without error
+  — this is what catches a referenced-table-does-not-exist ordering mistake, an incorrect FK
+  direction, or a CHECK constraint referencing a not-yet-created column, before it becomes a real
+  deployment failure
+direct User deletion blocked (`IMP003-REAUDIT2-M02`): a raw `DELETE FROM users` for a User whose
+  linked `principals` row is still LIVE is rejected by the FK (RESTRICT/NO ACTION) — confirmed
+  directly, not merely assumed from the FK's declared action
+canonical deletion transaction (`IMP003-REAUDIT2-M01`): running the full Canonical User Deletion
+  Transaction against a User with active Role/Authority assignments succeeds atomically — User
+  removed, principal TOMBSTONED, human_user_id NULL, every previously-active assignment now
+  revoked, historical rows preserved, grantor attribution on those historical rows still resolves
+canonical deletion rollback (`IMP003-REAUDIT2-M01`): a forced failure late in the same transaction
+  (e.g. the final `DELETE FROM users` statement itself fails) rolls back EVERY step — the User
+  still exists, the principal is still live (not tombstoned), and every assignment that would
+  have been revoked is unchanged
 principals CHECK constraint (`IMP003-REAUDIT-M01`, corrected): a 'human' + non-tombstoned row
   REQUIRES human_user_id NOT NULL (rejected otherwise); a 'human' + tombstoned row REQUIRES
   human_user_id NULL (rejected if still populated); 'system'/'integration' rows REQUIRE
@@ -1821,10 +2004,6 @@ principals FK integrity: principal_role_assignments.principal_id and
   authority_assignments.principal_id both REJECT a reference to a nonexistent principals.id (real
   FK violation, tested directly — not merely "the application happened not to construct one") —
   IMP003-READY-M04
-tombstone transition: deleting a User whose principal holds active assignments is proven to, in
-  one transaction, revoke every one of those assignments AND set tombstoned_at/null human_user_id
-  together — never leaving an active assignment referencing a tombstoned principal, and never
-  leaving the principals row in a CHECK-violating intermediate state
 orphan/tombstoned principal denied: a `principals` row that is tombstoned (human_user_id null)
   still exists (not hard-deleted) but authorization evaluation against it is proven to DENY, never
   ALLOW; a write attempting to target it with a NEW assignment, or to use it as a grantor, is
@@ -1846,8 +2025,8 @@ active_assignment_key generated column: proven to be NULL for any revoked row (r
 no NOW()-dependent constraint: a direct test confirms the generated column's definition contains
   no reference to NOW()/CURRENT_TIMESTAMP (a static assertion against the migration/schema, since
   MySQL would reject such a column definition outright if attempted)
-revocation: revoking an assignment sets revoked_at/revoked_by without deleting the row; a
-  revoked row is excluded from "active assignment" queries used by the evaluator, and its
+revocation: revoking an assignment sets revoked_at/revoked_by_principal_id without deleting the
+  row; a revoked row is excluded from "active assignment" queries used by the evaluator, and its
   active_assignment_key is confirmed NULL
 temporal: an assignment with ends_at in the past is excluded from evaluation's "active" result
   even without an explicit revocation, AND is confirmed to still occupy its uniqueness slot (a
@@ -1858,8 +2037,8 @@ renewal transaction: creating a new assignment for a (principal, role-or-authori
   old row and insert the new one — never leaving two simultaneously non-revoked rows, never
   leaving a gap where neither is active
 role_permissions history: revoking a Role's Permission never hard-deletes the row (revoked_at/
-  revoked_by_user_id set instead); the SAME role/permission pair can be re-granted afterward as a
-  NEW row while the original revoked row remains queryable — IMP003-READY-m01
+  revoked_by_principal_id set instead); the SAME role/permission pair can be re-granted afterward
+  as a NEW row while the original revoked row remains queryable — IMP003-READY-m01
 Super Admin Bridge: running the bridge command TWICE is refused the second time (guard #2 in
   "Super Admin Canonical Authorization"); running it when NO bootstrap row exists is refused
   (nothing to bridge); running it when a `super_admin` Role assignment ALREADY exists is refused
@@ -1913,19 +2092,90 @@ capability exists and a locked requirement mandates it" condition applies to RBA
 
 ---
 
-## Implementation Order (for the future implementation-authorized pass)
+## Migration Order (`IMP003-REAUDIT2-M04` — FK-valid; distinct from Implementation Coding Order below)
+
+Root cause of the finding: the earlier draft's step 1 listed `principals` before
+`system_principals`/`integration_principals`, while `principals.system_principal_id`/
+`integration_principal_id` are FKs INTO those two catalogs — the referenced tables were ordered
+AFTER the table that references them, which a real migration run would reject outright
+(`referenced table does not exist`). **Corrected — the one rule this order follows throughout:
+a referenced table MUST exist before the referencing FK table is created.**
 
 ```
-1.  Database schema (principals, system_principals, integration_principals, roles, permissions,
-    role_permissions, principal_role_assignments, authority_types, authority_assignments) —
-    principals FIRST, since every assignment table's real FK depends on it
+0.  `users` (prerequisite — already exists from IMP-002; NOT created or altered by IMP-003 beyond
+    being the FK target for principals.human_user_id; no IMP-002 identity semantics are reopened)
+
+1.  roles                     (no FK dependency)
+2.  permissions                (no FK dependency)
+3.  authority_types             (no FK dependency)
+4.  system_principals           (no FK dependency)
+5.  integration_principals       (no FK dependency)
+
+6.  principals                 (FK -> users.id, system_principals.id, integration_principals.id —
+    ALL FOUR referenced tables (users, system_principals, integration_principals — plus its own
+    CHECK constraint referencing no other table) now exist)
+
+7.  role_permissions            (FK -> roles.id, permissions.id, principals.id x2 for
+    granted_by_principal_id/revoked_by_principal_id — requires roles, permissions, AND
+    principals to already exist, i.e. AFTER step 6, not merely after steps 1-2)
+8.  principal_role_assignments  (FK -> principals.id, roles.id, principals.id x2 for
+    assigned_by_principal_id/revoked_by_principal_id)
+9.  authority_assignments       (FK -> principals.id, authority_types.id, principals.id x2 for
+    assigned_by_principal_id/revoked_by_principal_id)
+```
+
+Dependency graph (arrows point FROM a referenced table TO the table whose FK depends on it):
+
+```
+users ────────────────────────────────┐
+                                       ▼
+system_principals ──────┐         principals
+integration_principals ─┤              │
+                         └─────────────┤
+                                       │
+roles ──────┐                         │
+permissions ┤                         │
+             ▼                        ▼
+        role_permissions      principal_role_assignments
+                                       │
+authority_types ───────────────────────┤
+                                       ▼
+                            authority_assignments
+```
+
+`principals` is the single common dependency every assignment table needs (both as the target
+of `principal_id` and, for `role_permissions`/`principal_role_assignments`/
+`authority_assignments`, as the target of their `..._by_principal_id` attribution columns per
+"Attribution") — it must be created immediately after its own three prerequisites
+(`users`, `system_principals`, `integration_principals`) and strictly before every table that
+attributes an action to a Principal.
+
+### Fresh-Database Migration Contract
+
+Running every migration above, in this exact order, against a clean/empty MySQL 8 database MUST
+complete without error — this is itself a mandatory test (see "Test Contract"/"Database Test
+Contract"): it is what actually catches a referenced-table-does-not-exist ordering mistake, an
+incorrect FK direction, or a CHECK constraint referencing a column that does not exist yet at
+that point in the migration sequence, before any of those become a runtime failure during a real
+deployment.
+
+## Implementation Order (for the future implementation-authorized pass)
+
+`§29`: this is the CODING order (services/tests/etc.) — it is NOT the same sequence as the
+Migration Order above, and does not need to be; schema creation (step 1 below) simply follows the
+Migration Order wholesale as one unit.
+
+```
+1.  Database schema — apply the Migration Order above in full (users is already present; steps
+    1-9 of that order create every IMP-003 table)
 2.  Models (with the immutable-except-terminal-columns pattern IMP-002 established; the
     active_assignment_key generated column defined per "Scope Uniqueness Normalization")
 3.  Permission Registry (code-defined) + idempotent seeder + Authority Type seeder (7 approved
     types) + System/Integration Principal seeders (empty catalog initially — later stages add
     their own rows)
 4.  Principal lifecycle service (idempotent `principals` row creation/lookup per User/System/
-    Integration source, per "Principal Lifecycle")
+    Integration source, per "Principal Lifecycle"; also implements the Canonical User Deletion
+    Transaction)
 5.  Principal Role/Authority assignment services (assign/revoke, with the stable lock order +
     active_assignment_key uniqueness + self-escalation rules specified above)
 6.  ScopeResolver contract + the ONE concrete resolver IMP-003 owns (`OWN` against `User` itself)
