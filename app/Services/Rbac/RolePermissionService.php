@@ -75,10 +75,17 @@ class RolePermissionService
                 ->isNotEmpty();
 
             if (! $actorAlreadyHasPermission) {
+                // `IMP003-REAUDIT1-M01`/`R3-M01`: "currently holds" means
+                // effective right now — the same canonical temporal
+                // predicate `PrincipalRoleAssignment::isActive()` already
+                // defines (not revoked, started, not yet ended). A merely
+                // historical/expired/revoked/future assignment must never
+                // trigger this branch.
                 $actorHoldsTargetRole = PrincipalRoleAssignment::where('principal_id', $lockedActor->id)
                     ->where('role_id', $lockedRole->id)
                     ->whereNull('revoked_at')
-                    ->exists();
+                    ->get()
+                    ->contains(fn (PrincipalRoleAssignment $assignment) => $assignment->isActive());
 
                 if ($actorHoldsTargetRole) {
                     throw new \RuntimeException(

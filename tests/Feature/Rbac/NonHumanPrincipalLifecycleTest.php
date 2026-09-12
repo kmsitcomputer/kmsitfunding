@@ -245,4 +245,83 @@ class NonHumanPrincipalLifecycleTest extends TestCase
         $this->assertNull($principal->disabled_at);
         $this->assertTrue($principal->canAuthorize());
     }
+
+    // --- R3-M02: stale caller-supplied catalog state must never override the authoritative DB row ---
+
+    public function test_for_system_with_stale_catalog_object_and_no_prior_principal_cannot_produce_enabled_principal(): void
+    {
+        $systemRow = SystemPrincipal::create(['code' => 'lifecycle_system_stale_1']);
+
+        // The caller holds an in-memory copy loaded BEFORE the row was
+        // deactivated (by some other request/process) — it still looks
+        // active locally.
+        $staleSystemRow = SystemPrincipal::find($systemRow->id);
+
+        $systemRow->forceFill(['deactivated_at' => now()])->save();
+
+        $this->assertNull($staleSystemRow->deactivated_at, 'Sanity: the stale in-memory copy must still look active.');
+        $this->assertNull(Principal::where('system_principal_id', $systemRow->id)->first());
+
+        $principal = app(PrincipalService::class)->forSystem($staleSystemRow);
+
+        $this->assertNotNull(
+            $principal->disabled_at,
+            'forSystem() must decide lifecycle from the authoritative DB row, not the stale caller-supplied model.'
+        );
+        $this->assertFalse($principal->canAuthorize());
+    }
+
+    public function test_for_integration_with_stale_catalog_object_and_no_prior_principal_cannot_produce_enabled_principal(): void
+    {
+        $integrationRow = IntegrationPrincipal::create(['code' => 'lifecycle_integration_stale_1']);
+
+        $staleIntegrationRow = IntegrationPrincipal::find($integrationRow->id);
+
+        $integrationRow->forceFill(['deactivated_at' => now()])->save();
+
+        $this->assertNull($staleIntegrationRow->deactivated_at);
+        $this->assertNull(Principal::where('integration_principal_id', $integrationRow->id)->first());
+
+        $principal = app(PrincipalService::class)->forIntegration($staleIntegrationRow);
+
+        $this->assertNotNull($principal->disabled_at);
+        $this->assertFalse($principal->canAuthorize());
+    }
+
+    public function test_for_system_with_existing_enabled_principal_and_stale_catalog_object_ends_disabled(): void
+    {
+        $systemRow = SystemPrincipal::create(['code' => 'lifecycle_system_stale_2']);
+        app(PrincipalService::class)->forSystem($systemRow);
+
+        $staleSystemRow = SystemPrincipal::find($systemRow->id);
+
+        $systemRow->forceFill(['deactivated_at' => now()])->save();
+
+        $this->assertNull($staleSystemRow->deactivated_at);
+
+        $resolved = app(PrincipalService::class)->forSystem($staleSystemRow);
+
+        $this->assertNotNull(
+            $resolved->disabled_at,
+            'An already-existing (previously enabled) Principal must end disabled once the authoritative catalog row is deactivated, even when resolved via a stale object.'
+        );
+        $this->assertFalse($resolved->canAuthorize());
+    }
+
+    public function test_for_integration_with_existing_enabled_principal_and_stale_catalog_object_ends_disabled(): void
+    {
+        $integrationRow = IntegrationPrincipal::create(['code' => 'lifecycle_integration_stale_2']);
+        app(PrincipalService::class)->forIntegration($integrationRow);
+
+        $staleIntegrationRow = IntegrationPrincipal::find($integrationRow->id);
+
+        $integrationRow->forceFill(['deactivated_at' => now()])->save();
+
+        $this->assertNull($staleIntegrationRow->deactivated_at);
+
+        $resolved = app(PrincipalService::class)->forIntegration($staleIntegrationRow);
+
+        $this->assertNotNull($resolved->disabled_at);
+        $this->assertFalse($resolved->canAuthorize());
+    }
 }

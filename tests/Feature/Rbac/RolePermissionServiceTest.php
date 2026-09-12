@@ -266,4 +266,96 @@ class RolePermissionServiceTest extends TestCase
             'assigned_by_principal_id' => null,
         ]);
     }
+
+    // --- R3-M01: "currently holds target Role" must respect temporal state ---
+
+    public function test_expired_target_role_membership_does_not_trigger_self_expansion_denial(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_expired', 'name' => 'RP Role Expired']);
+        $permission = Permission::create(['code' => 'rp.test.expired_role', 'description' => 'test']);
+
+        // The actor held this Role, but the assignment already ended — it is
+        // NOT currently effective and must not count as "currently holds".
+        PrincipalRoleAssignment::create([
+            'principal_id' => $actor->id,
+            'role_id' => $role->id,
+            'scope_type' => ScopeType::GlobalPlatform->value,
+            'scope_id' => null,
+            'starts_at' => now()->subDays(30),
+            'ends_at' => now()->subDay(),
+            'assigned_by_principal_id' => null,
+        ]);
+
+        app(RolePermissionService::class)->grant($actor, $role, $permission);
+
+        $this->assertTrue(
+            $role->permissions()->where('permissions.id', $permission->id)->exists(),
+            'An expired Role assignment must not trigger the self-expansion denial.'
+        );
+    }
+
+    public function test_revoked_target_role_membership_does_not_trigger_self_expansion_denial(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_revoked_membership', 'name' => 'RP Role Revoked Membership']);
+        $permission = Permission::create(['code' => 'rp.test.revoked_role_membership', 'description' => 'test']);
+
+        $assignment = PrincipalRoleAssignment::create([
+            'principal_id' => $actor->id,
+            'role_id' => $role->id,
+            'scope_type' => ScopeType::GlobalPlatform->value,
+            'scope_id' => null,
+            'starts_at' => now()->subDays(30),
+            'assigned_by_principal_id' => null,
+        ]);
+        // `revoked_at` is deliberately not mass-assignable — force it, as
+        // `RoleAssignmentService::revoke()` would.
+        $assignment->forceFill(['revoked_at' => now()->subDay()])->save();
+
+        app(RolePermissionService::class)->grant($actor, $role, $permission);
+
+        $this->assertTrue(
+            $role->permissions()->where('permissions.id', $permission->id)->exists(),
+            'A revoked Role assignment must not trigger the self-expansion denial.'
+        );
+    }
+
+    public function test_future_target_role_membership_does_not_trigger_self_expansion_denial(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_future', 'name' => 'RP Role Future']);
+        $permission = Permission::create(['code' => 'rp.test.future_role', 'description' => 'test']);
+
+        // Not yet active — starts_at is in the future.
+        PrincipalRoleAssignment::create([
+            'principal_id' => $actor->id,
+            'role_id' => $role->id,
+            'scope_type' => ScopeType::GlobalPlatform->value,
+            'scope_id' => null,
+            'starts_at' => now()->addDay(),
+            'assigned_by_principal_id' => null,
+        ]);
+
+        app(RolePermissionService::class)->grant($actor, $role, $permission);
+
+        $this->assertTrue(
+            $role->permissions()->where('permissions.id', $permission->id)->exists(),
+            'A not-yet-active (future) Role assignment must not trigger the self-expansion denial.'
+        );
+    }
+
+    public function test_currently_active_target_role_membership_without_existing_permission_is_denied(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $role = Role::create(['code' => 'rp_role_active_membership', 'name' => 'RP Role Active Membership']);
+        $permission = Permission::create(['code' => 'rp.test.active_role_membership', 'description' => 'test']);
+
+        $this->grantRoleToPrincipalDirectly($actor, $role);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Self-Escalation Protection');
+
+        app(RolePermissionService::class)->grant($actor, $role, $permission);
+    }
 }

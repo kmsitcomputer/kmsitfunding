@@ -38,22 +38,29 @@ class PrincipalService
     }
 
     /**
-     * `IMP003-REAUDIT1-M02`: if $systemPrincipal is ALREADY deactivated, the
-     * freshly-created Principal must never come back authorization-enabled
-     * — a deactivated catalog identity can never have a live-looking
-     * canonical Principal, regardless of which order creation and
-     * deactivation happen to occur in.
+     * `IMP003-REAUDIT1-M02` / `R3-M02`: if the catalog identity is ALREADY
+     * deactivated, the canonical Principal must never come back
+     * authorization-enabled — a deactivated catalog identity can never have
+     * a live-looking canonical Principal, regardless of which order
+     * creation and deactivation happen to occur in. Lifecycle state is
+     * decided from the AUTHORITATIVE row reloaded from the DB by this
+     * identifier, never from the caller-supplied `$systemPrincipal`
+     * instance — a stale in-memory copy (loaded before some other request
+     * deactivated the row) must not be able to resurrect an enabled
+     * Principal.
      */
     public function forSystem(SystemPrincipal $systemPrincipal): Principal
     {
         return DB::transaction(function () use ($systemPrincipal) {
+            $authoritativeCatalog = SystemPrincipal::whereKey($systemPrincipal->id)->firstOrFail();
+
             $principal = Principal::firstOrCreate(
-                ['system_principal_id' => $systemPrincipal->id],
+                ['system_principal_id' => $authoritativeCatalog->id],
                 ['principal_kind' => PrincipalKind::System],
             );
 
-            if ($principal->wasRecentlyCreated && $systemPrincipal->deactivated_at !== null) {
-                $principal->forceFill(['disabled_at' => $systemPrincipal->deactivated_at])->save();
+            if ($authoritativeCatalog->deactivated_at !== null && $principal->disabled_at === null) {
+                $principal->forceFill(['disabled_at' => $authoritativeCatalog->deactivated_at])->save();
             }
 
             return $principal;
@@ -66,13 +73,15 @@ class PrincipalService
     public function forIntegration(IntegrationPrincipal $integrationPrincipal): Principal
     {
         return DB::transaction(function () use ($integrationPrincipal) {
+            $authoritativeCatalog = IntegrationPrincipal::whereKey($integrationPrincipal->id)->firstOrFail();
+
             $principal = Principal::firstOrCreate(
-                ['integration_principal_id' => $integrationPrincipal->id],
+                ['integration_principal_id' => $authoritativeCatalog->id],
                 ['principal_kind' => PrincipalKind::Integration],
             );
 
-            if ($principal->wasRecentlyCreated && $integrationPrincipal->deactivated_at !== null) {
-                $principal->forceFill(['disabled_at' => $integrationPrincipal->deactivated_at])->save();
+            if ($authoritativeCatalog->deactivated_at !== null && $principal->disabled_at === null) {
+                $principal->forceFill(['disabled_at' => $authoritativeCatalog->deactivated_at])->save();
             }
 
             return $principal;
