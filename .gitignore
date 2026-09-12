@@ -4,16 +4,33 @@
 /vendor/
 /node_modules/
 /storage/*.key
+/storage/pail
 /public/hot
 /public/storage
 /public/build
+/public/fonts-manifest.dev.json
 .phpunit.result.cache
+/.phpunit.cache
 Homestead.json
 Homestead.yaml
 npm-debug.log
 yarn-error.log
+*.log
 .DS_Store
 Thumbs.db
+/database/database.sqlite
+_ide_helper.php
+/auth.json
+.phpactor.json
+
+# Editor/tool-local directories that may appear on a contributor's machine — not
+# project-authoritative
+/.codex
+/.cursor/
+/.idea
+/.nova
+/.vscode
+/.zed
 
 # Local tool cache/state (Command Code) — not project-authoritative
 /.commandcode/

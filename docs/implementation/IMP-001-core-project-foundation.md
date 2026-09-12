@@ -1416,27 +1416,28 @@ IMP-000:
 FINAL / LOCKED
 
 IMP-001 Specification:
-DRAFT / REMEDIATED (Readiness Remediation Pass 1 — see
-docs/audits/IMP-001-READINESS-REMEDIATION.md)
-
-IMP-001 Definition of Ready:
-READY FOR TARGETED INDEPENDENT RE-AUDIT
-
-Independent Readiness Review:
-PENDING (targeted re-audit against Readiness Remediation Pass 1)
+READY / LOCKED FOR IMPLEMENTATION (readiness gate passed; see
+docs/audits/IMP-001-READINESS-REMEDIATION.md and
+docs/audits/IMP-001-B01-MATERIALIZATION-PASS-2.md)
 
 IMP-001 Implementation:
-NOT AUTHORIZED
+COMPLETE — PENDING INDEPENDENT REVIEW (Implementation Pass 1 — see
+docs/audits/IMP-001-IMPLEMENTATION-PASS-1.md)
 
 Business Feature Coding:
+NOT AUTHORIZED (out of scope for IMP-001; unaffected by this pass)
+
+IMP-001 Final / Merge to master:
 NOT AUTHORIZED
 ```
 
-This status was reached through Readiness Remediation Pass 1 (materialization of the Level 1-3
-authoritative baseline referenced in §2, branch remediation, and environment verification). It is
-not a self-authorization — implementation remains NOT AUTHORIZED pending Codex's targeted
-readiness re-audit and, if that passes, explicit Human/stage authorization per
-[docs/00-governance/IMPLEMENTATION-GOVERNANCE.md](../00-governance/IMPLEMENTATION-GOVERNANCE.md).
+This status was reached through Implementation Pass 1 on `impl/001-core-foundation`: the
+Laravel/Vue/Inertia/TypeScript/Tailwind/Vite foundation described in this specification was
+implemented and locally verified (build, type-check, lint, tests — see
+docs/audits/IMP-001-IMPLEMENTATION-PASS-1.md for exact commands and results). It is not a
+self-authorization of the stage as FINAL — that still requires independent Codex review and, per
+[docs/00-governance/IMPLEMENTATION-GOVERNANCE.md](../00-governance/IMPLEMENTATION-GOVERNANCE.md),
+Human/stage authorization before any merge to `master`.
 
 STOP.
 
