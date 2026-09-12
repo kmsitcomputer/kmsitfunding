@@ -35,4 +35,21 @@ interface ScopeResolver
      * "Query-Level Enforcement" — never "fetch all, then filter").
      */
     public function applyToQuery(Builder $query, Principal $principal, ?int $scopeId): Builder;
+
+    /**
+     * WRITE-TIME target validation ("Polymorphic Scope Target Locking"):
+     * resolve the concrete scope target row for $scopeId and lock it
+     * (e.g. `->lockForUpdate()->first()`) WITHIN THE CALLER'S OPEN
+     * TRANSACTION, then return it only if it exists and is still
+     * active/assignable — null otherwise (target missing, or
+     * deleted/deactivated). The caller (RoleAssignmentService /
+     * AuthorityAssignmentService) treats a null return as REJECT.
+     *
+     * A future domain's own delete/deactivate path for this scope type's
+     * target table MUST lock the identical row before deleting/
+     * deactivating it, so the two paths serialize against each other and
+     * neither can produce an orphaned active assignment — this method is
+     * that shared lock point.
+     */
+    public function lockAndValidateTarget(int $scopeId): ?object;
 }

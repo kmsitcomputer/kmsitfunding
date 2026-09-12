@@ -13,9 +13,9 @@ use Illuminate\Support\Facades\DB;
  * the specification's stable lock order ("Concurrency"):
  *   1. Grantor Principal lock
  *   2. Target Principal lock (ascending principal_id if different row)
- *   3. Concrete Scope Target lock (skipped here — IMP-003 has no concrete
- *      scope target resolver of its own besides OWN, which requires no
- *      target row lock)
+ *   3. Concrete Scope Target lock — via the registered `ScopeResolver` for
+ *      $scopeType (`IMP003-IMPL-M02`); skipped only for scope types with no
+ *      concrete target row (`ScopeType::requiresNullScopeId()`)
  *   4. Existing Assignment / active-slot inspection
  *   5. Mutation
  *   6. Commit
@@ -24,12 +24,25 @@ use Illuminate\Support\Facades\DB;
  * grant itself a Role. There is NO exception here — the Q25 Bridge does not
  * call this service; it inserts its one bootstrap row directly with
  * assigned_by_principal_id = NULL, which this service never produces.
+ *
+ * `IMP003-IMPL-M01`: both assignment AND revocation require the acting
+ * Principal to be locked, re-validated, and to hold the operation's
+ * required `rbac.role.assign`/`rbac.role.revoke` permission under ELEVATED
+ * assurance — enforced here, at the authoritative service layer, never left
+ * to a caller/controller/route.
  */
 class RoleAssignmentService
 {
+    public function __construct(
+        private readonly RbacMutationGuard $guard,
+        private readonly ScopeResolverRegistry $scopeResolvers,
+        private readonly RbacAuditLogger $audit,
+    ) {}
+
     /**
-     * @throws \RuntimeException on self-escalation, invalid scope, or an
-     *                           inactive/tombstoned grantor or target Principal.
+     * @throws \RuntimeException on self-escalation, invalid/unresolvable
+     *                           scope, unauthorized actor, or an inactive/tombstoned grantor or
+     *                           target Principal.
      */
     public function assign(
         Principal $grantor,
@@ -55,12 +68,29 @@ class RoleAssignmentService
             $lockedGrantor = $lockedFirst->id === $grantor->id ? $lockedFirst : $lockedSecond;
             $lockedTarget = $lockedFirst->id === $target->id ? $lockedFirst : $lockedSecond;
 
-            if (! $lockedGrantor->canAuthorize()) {
-                throw new \RuntimeException('Grantor Principal cannot authorize (tombstoned, disabled, or unable to authenticate).');
-            }
+            $this->guard->ensureAuthorized($lockedGrantor, PermissionRegistry::RBAC_ROLE_ASSIGN);
 
             if (! $lockedTarget->canAuthorize()) {
                 throw new \RuntimeException('Target Principal cannot receive a Role assignment (tombstoned or disabled).');
+            }
+
+            // Step 3: Concrete Scope Target lock — fail-closed if no
+            // resolver is registered for a scope type that requires one.
+            if (! $scopeType->requiresNullScopeId()) {
+                $resolver = $this->scopeResolvers->get($scopeType);
+
+                if ($resolver === null) {
+                    throw new \RuntimeException(
+                        "No registered ScopeResolver for concrete scope type {$scopeType->value} — ".
+                        'assignment rejected (fail-closed; that domain does not exist yet).'
+                    );
+                }
+
+                if ($resolver->lockAndValidateTarget($scopeId) === null) {
+                    throw new \RuntimeException(
+                        "Scope target {$scopeId} for {$scopeType->value} does not exist or is not active/assignable."
+                    );
+                }
             }
 
             $now = now();
@@ -81,7 +111,7 @@ class RoleAssignmentService
                     'revoked_by_principal_id' => $lockedGrantor->id,
                 ]);
 
-            return PrincipalRoleAssignment::create([
+            $assignment = PrincipalRoleAssignment::create([
                 'principal_id' => $lockedTarget->id,
                 'role_id' => $role->id,
                 'scope_type' => $scopeType->value,
@@ -90,12 +120,26 @@ class RoleAssignmentService
                 'ends_at' => $endsAt,
                 'assigned_by_principal_id' => $lockedGrantor->id,
             ]);
+
+            $this->audit->record('role_assigned', [
+                'grantor_principal_id' => $lockedGrantor->id,
+                'target_principal_id' => $lockedTarget->id,
+                'role_id' => $role->id,
+                'scope_type' => $scopeType->value,
+                'scope_id' => $scopeId,
+            ]);
+
+            return $assignment;
         });
     }
 
     public function revoke(Principal $revoker, PrincipalRoleAssignment $assignment): void
     {
         DB::transaction(function () use ($revoker, $assignment) {
+            $lockedRevoker = Principal::whereKey($revoker->id)->lockForUpdate()->firstOrFail();
+
+            $this->guard->ensureAuthorized($lockedRevoker, PermissionRegistry::RBAC_ROLE_REVOKE);
+
             $locked = PrincipalRoleAssignment::whereKey($assignment->id)->lockForUpdate()->firstOrFail();
 
             if ($locked->revoked_at !== null) {
@@ -104,8 +148,15 @@ class RoleAssignmentService
 
             $locked->forceFill([
                 'revoked_at' => now(),
-                'revoked_by_principal_id' => $revoker->id,
+                'revoked_by_principal_id' => $lockedRevoker->id,
             ])->save();
+
+            $this->audit->record('role_revoked', [
+                'revoker_principal_id' => $lockedRevoker->id,
+                'assignment_id' => $locked->id,
+                'principal_id' => $locked->principal_id,
+                'role_id' => $locked->role_id,
+            ]);
         });
     }
 

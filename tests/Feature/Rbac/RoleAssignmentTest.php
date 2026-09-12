@@ -14,10 +14,12 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Tests\Support\Rbac\RbacTestActors;
 use Tests\TestCase;
 
 class RoleAssignmentTest extends TestCase
 {
+    use RbacTestActors;
     use RefreshDatabase;
 
     private int $userSequence = 0;
@@ -67,7 +69,7 @@ class RoleAssignmentTest extends TestCase
 
     public function test_renewal_revokes_the_prior_identical_assignment_before_inserting_the_new_one(): void
     {
-        $grantor = $this->makePrincipal();
+        $grantor = $this->makeAuthorizedActor();
         $target = $this->makePrincipal();
         $role = Role::create(['code' => 'r4', 'name' => 'R4']);
         $service = app(RoleAssignmentService::class);
@@ -157,7 +159,7 @@ class RoleAssignmentTest extends TestCase
 
     public function test_revoked_assignment_is_not_active(): void
     {
-        $grantor = $this->makePrincipal();
+        $grantor = $this->makeAuthorizedActor();
         $target = $this->makePrincipal();
         $role = Role::create(['code' => 'r8', 'name' => 'R8']);
         $service = app(RoleAssignmentService::class);
@@ -171,7 +173,7 @@ class RoleAssignmentTest extends TestCase
 
     public function test_tombstoned_principal_cannot_receive_a_role_assignment(): void
     {
-        $grantor = $this->makePrincipal();
+        $grantor = $this->makeAuthorizedActor();
         $targetUser = User::create(['email' => 'tombstone-target@example.com', 'password' => Hash::make('correct-horse-battery-staple')]);
         $target = app(PrincipalService::class)->forUser($targetUser);
         app(PrincipalService::class)->deleteUser($targetUser, $grantor);

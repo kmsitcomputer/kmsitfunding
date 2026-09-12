@@ -9,13 +9,16 @@ use Illuminate\Database\Eloquent\Model;
  * (SECURITY-ARCHITECTURE.md). Empty at this stage; later stages add rows for
  * their own external integrations. See "System Principal / Integration
  * Principal".
+ *
+ * `deactivated_at` is deliberately NOT mass-assignable (`IMP003-IMPL-M04`) —
+ * see `SystemPrincipal`'s equivalent note; the canonical path is
+ * `PrincipalService::deactivateIntegration()`.
  */
 class IntegrationPrincipal extends Model
 {
     protected $fillable = [
         'code',
         'description',
-        'deactivated_at',
     ];
 
     protected function casts(): array

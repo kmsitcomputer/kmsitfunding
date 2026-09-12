@@ -11,10 +11,12 @@ use App\Services\Rbac\AuthorityAssignmentService;
 use App\Services\Rbac\PrincipalService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Tests\Support\Rbac\RbacTestActors;
 use Tests\TestCase;
 
 class AuthorityAssignmentTest extends TestCase
 {
+    use RbacTestActors;
     use RefreshDatabase;
 
     private int $userSequence = 0;
@@ -55,7 +57,7 @@ class AuthorityAssignmentTest extends TestCase
 
     public function test_authority_assignment_by_a_distinct_grantor_succeeds(): void
     {
-        $grantor = $this->makePrincipal();
+        $grantor = $this->makeAuthorizedActor();
         $target = $this->makePrincipal();
 
         $assignment = app(AuthorityAssignmentService::class)->assign(
@@ -106,7 +108,7 @@ class AuthorityAssignmentTest extends TestCase
 
     public function test_tombstoned_principal_cannot_receive_authority(): void
     {
-        $grantor = $this->makePrincipal();
+        $grantor = $this->makeAuthorizedActor();
         $targetUser = User::create(['email' => 'authority-tombstone@example.com', 'password' => Hash::make('correct-horse-battery-staple')]);
         $target = app(PrincipalService::class)->forUser($targetUser);
         app(PrincipalService::class)->deleteUser($targetUser, $grantor);
@@ -118,7 +120,7 @@ class AuthorityAssignmentTest extends TestCase
 
     public function test_revoking_authority_deactivates_it(): void
     {
-        $grantor = $this->makePrincipal();
+        $grantor = $this->makeAuthorizedActor();
         $target = $this->makePrincipal();
         $service = app(AuthorityAssignmentService::class);
 

@@ -17,10 +17,12 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Tests\Support\Rbac\RbacTestActors;
 use Tests\TestCase;
 
 class PrincipalLifecycleTest extends TestCase
 {
+    use RbacTestActors;
     use RefreshDatabase;
 
     private int $userSequence = 0;
@@ -87,7 +89,7 @@ class PrincipalLifecycleTest extends TestCase
 
     public function test_canonical_user_deletion_transaction_is_atomic_on_success(): void
     {
-        $admin = app(PrincipalService::class)->forUser($this->makeUser());
+        $admin = $this->makeAuthorizedActor();
         $target = $this->makeUser();
         $service = app(PrincipalService::class);
         $principal = $service->forUser($target);
@@ -126,7 +128,7 @@ class PrincipalLifecycleTest extends TestCase
 
     public function test_canonical_user_deletion_rolls_back_entirely_on_forced_failure(): void
     {
-        $admin = app(PrincipalService::class)->forUser($this->makeUser());
+        $admin = $this->makeAuthorizedActor();
         $target = $this->makeUser();
         $principal = app(PrincipalService::class)->forUser($target);
 
@@ -161,8 +163,8 @@ class PrincipalLifecycleTest extends TestCase
 
     public function test_principal_attribution_survives_grantor_user_deletion(): void
     {
-        $grantorUser = $this->makeUser();
-        $grantor = app(PrincipalService::class)->forUser($grantorUser);
+        $grantor = $this->makeAuthorizedActor();
+        $grantorUser = $grantor->humanUser;
         $bystander = app(PrincipalService::class)->forUser($this->makeUser());
         $target = app(PrincipalService::class)->forUser($this->makeUser());
 

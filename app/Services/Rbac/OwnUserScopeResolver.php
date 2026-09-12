@@ -37,4 +37,15 @@ class OwnUserScopeResolver implements ScopeResolver
 
         return $query->where($query->getModel()->getQualifiedKeyName(), $principal->human_user_id);
     }
+
+    /**
+     * OWN never carries a concrete scope_id (ScopeType::requiresNullScopeId()
+     * is true for OWN) — there is no separate target row to lock, so this is
+     * never actually invoked by the concrete-scope enforcement path. Present
+     * only to satisfy the interface.
+     */
+    public function lockAndValidateTarget(int $scopeId): ?object
+    {
+        return null;
+    }
 }

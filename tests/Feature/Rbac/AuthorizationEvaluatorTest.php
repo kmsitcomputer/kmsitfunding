@@ -10,6 +10,7 @@ use App\Models\Rbac\AuthorityType;
 use App\Models\Rbac\IntegrationPrincipal;
 use App\Models\Rbac\Permission;
 use App\Models\Rbac\Principal;
+use App\Models\Rbac\PrincipalRoleAssignment;
 use App\Models\Rbac\Role;
 use App\Models\Rbac\SystemPrincipal;
 use App\Models\User;
@@ -18,7 +19,6 @@ use App\Services\Rbac\AuthorizationEvaluator;
 use App\Services\Rbac\AuthorizationRequest;
 use App\Services\Rbac\OwnUserScopeResolver;
 use App\Services\Rbac\PrincipalService;
-use App\Services\Rbac\RoleAssignmentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Tests\Support\Rbac\FakePartnerResource;
@@ -51,9 +51,24 @@ class AuthorizationEvaluatorTest extends TestCase
         return Permission::firstOrCreate(['code' => $code], ['description' => 'test']);
     }
 
+    /**
+     * Test fixture setup ONLY — this file exercises `AuthorizationEvaluator`
+     * directly, not `RoleAssignmentService`'s own mutation-authorization
+     * gate (`IMP003-IMPL-M01`, covered by `RoleAssignmentTest` instead), so
+     * this bypasses that service and inserts the assignment row directly —
+     * the same class of "internal setup, not an exposed runtime path"
+     * bypass the Q25 Bridge itself uses.
+     */
     private function grantRole(Principal $grantor, Principal $target, Role $role, ScopeType $scopeType = ScopeType::GlobalPlatform, ?int $scopeId = null): void
     {
-        app(RoleAssignmentService::class)->assign($grantor, $target, $role, $scopeType, $scopeId);
+        PrincipalRoleAssignment::create([
+            'principal_id' => $target->id,
+            'role_id' => $role->id,
+            'scope_type' => $scopeType->value,
+            'scope_id' => $scopeId,
+            'starts_at' => now(),
+            'assigned_by_principal_id' => $grantor->id,
+        ]);
     }
 
     public function test_missing_permission_is_denied(): void
@@ -354,7 +369,8 @@ class AuthorizationEvaluatorTest extends TestCase
 
     public function test_disabled_system_principal_cannot_authorize(): void
     {
-        $systemPrincipalRow = SystemPrincipal::create(['code' => 'disabled_system', 'deactivated_at' => now()]);
+        $systemPrincipalRow = SystemPrincipal::create(['code' => 'disabled_system']);
+        $systemPrincipalRow->forceFill(['deactivated_at' => now()])->save();
         $systemPrincipal = app(PrincipalService::class)->forSystem($systemPrincipalRow);
 
         $this->assertFalse($systemPrincipal->canAuthorize());

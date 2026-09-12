@@ -27,6 +27,8 @@ class PermissionRegistry
 
     public const IDENTITY_SECURITY_TRANSITION = 'identity.security.transition';
 
+    public const RBAC_PRINCIPAL_DEACTIVATE = 'rbac.principal.deactivate';
+
     /**
      * @return array<string, array{description: string, module: string}>
      */
@@ -61,6 +63,11 @@ class PermissionRegistry
                 'description' => 'Transition an identity Lifecycle (ACTIVE<->DISABLED) or Security '.
                     'Restriction (NONE<->SUSPENDED) — IMP-002 defers WHO may do this to IMP-003.',
                 'module' => 'identity',
+            ],
+            self::RBAC_PRINCIPAL_DEACTIVATE => [
+                'description' => 'Permanently deactivate a System or Integration Principal catalog '.
+                    'entry (and its linked canonical Principal) — a one-way transition.',
+                'module' => 'rbac',
             ],
         ];
     }
