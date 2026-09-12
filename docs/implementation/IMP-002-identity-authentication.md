@@ -317,15 +317,22 @@ expires_at               timestamp
 verified_at              nullable — set on successful promotion
 superseded_at            nullable — set when a later request replaces this one before it verifies
 cancelled_at             nullable — set on explicit cancellation
+conflicted_at            nullable — set when canonical promotion fails because another User
+                         acquired the target email first (see "Uniqueness Conflict — Durable
+                         Terminal State" below); a distinct terminal outcome from all of the above
+conflict_reason_code     nullable — a controlled, non-sensitive internal code explaining the
+                         conflict (baseline value: `TARGET_EMAIL_ALREADY_IN_USE`); never a raw
+                         database/exception message
 generation               a monotonically increasing per-user version/sequence number
                          (e.g. an integer that increments with every new request for that user) —
                          used so a verifier can trivially confirm "is this the request's own,
                          unambiguous identity," independent of timestamps
+created_at / updated_at  framework standard
 ```
 
-Every field above except `verified_at`/`superseded_at`/`cancelled_at` is immutable once the row is
-created — a request is never edited in place to point at a different email or a different token;
-a changed email means a NEW request row.
+Every field above except `verified_at`/`superseded_at`/`cancelled_at`/`conflicted_at`/
+`conflict_reason_code` is immutable once the row is created — a request is never edited in place
+to point at a different email or a different token; a changed email means a NEW request row.
 
 ### One Active Request Per User (baseline rule)
 
@@ -360,10 +367,11 @@ explicitly prohibited):
 the request belongs to the intended User (the token lookup resolves to a specific
   EmailChangeRequest row, and that row's user_id is used — never inferred separately)
 the request is the CURRENT active request for that User (compare against the latest
-  non-superseded, non-cancelled row, or equivalently check this request's own
-  superseded_at/cancelled_at are null)
+  non-superseded, non-cancelled, non-conflicted row, or equivalently check this request's own
+  superseded_at/cancelled_at/conflicted_at are all null)
 the request is not superseded
 the request is not cancelled
+the request is not conflicted (conflicted_at is null)
 the request is not expired (now < expires_at)
 the request is not already consumed (verified_at is null)
 the presented token matches THIS exact request's verification_token_hash
@@ -372,10 +380,10 @@ the email being promoted is THIS exact request's normalized_pending_email — ne
   request row IS the source of truth for which email a given token promotes)
 ```
 
-A token that matches a *superseded, cancelled, expired, or already-consumed* request fails all of
-the above and MUST be rejected with the generic error described in "Privacy" — it can never
-promote any email, including whatever the User's CURRENT active request (if any) is pending
-toward.
+A token that matches a *superseded, cancelled, conflicted, expired, or already-consumed* request
+fails all of the above and MUST be rejected with the generic error described in "Privacy" — it can
+never promote any email, including whatever the User's CURRENT active request (if any) is pending
+toward. See "Email Change Terminal States" for the complete, mutually exclusive set of outcomes.
 
 ### Success Semantics (atomic promotion)
 
@@ -404,26 +412,101 @@ BEGIN TRANSACTION
 COMMIT
 ```
 
-If the target email's uniqueness re-check fails (another identity acquired it since the request
-was created): the transaction fails, the User's canonical email is UNCHANGED, the request is
-marked in a failed/conflicted state (not `verified_at`, so it can never be retried — a fresh
-change request is required), and a generic safe error is returned (see "Privacy"). This is a
-concurrency outcome, not a new Human Decision.
+### Uniqueness Conflict — Durable Terminal State
 
-### Cancellation / Expiry / Supersession
+If the target email's uniqueness re-check (or the database's own unique constraint) fails during
+promotion — another identity acquired the target email since the request was created — the
+promotion transaction is ROLLED BACK in full:
 
 ```text
-A CANCELLED request cannot verify (cancelled_at is set).
-An EXPIRED request cannot verify (now >= expires_at).
-A SUPERSEDED request cannot verify (superseded_at is set) — this is what makes "starting a new
-  request immediately invalidates the previous challenge" true.
-A CONSUMED (verified_at set) request cannot verify again — replay of an already-used token is
-  rejected.
-None of the above ever mutates the User's canonical email. The existing canonical email remains
-  active and (already) verified until a new request successfully completes the "Success
-  Semantics" promotion above — there is no partial or provisional email state visible outside the
-  EmailChangeRequest row itself.
+BEGIN TRANSACTION (promotion attempt)
+  lock the EmailChangeRequest row; lock the User row
+  verify the request is active (per "Verification Token Binding")
+  verify the token/challenge
+  re-check target-email uniqueness
+  attempt canonical promotion
+  -> unique constraint / re-check indicates the target email is already owned by another User
+ROLLBACK
 ```
+
+`users.email` and `users.email_verified_at` are left completely untouched by the rolled-back
+transaction — a failed promotion transaction never persists its own conflict state; a rollback
+undoes everything, including any conflict marker that attempt might otherwise have tried to write
+inside the same transaction.
+
+Conflict finalization then happens as its own, separate, durable transaction:
+
+```text
+BEGIN TRANSACTION (conflict finalization)
+  lock the EmailChangeRequest row
+  IF the request is still eligible for conflict finalization (verified_at, superseded_at,
+     cancelled_at, and conflicted_at are all still null — i.e. no other action has already
+     resolved it to a different terminal state in the meantime):
+       set conflicted_at <- now
+       set conflict_reason_code <- 'TARGET_EMAIL_ALREADY_IN_USE'
+       (this makes the request permanently non-promotable and non-retryable — see "Email Change
+       Terminal States")
+       emit an audit event (conflict finalized)
+  ELSE:
+       do nothing — the request already reached a different terminal state (verified, superseded,
+       cancelled, or already conflicted) through some other concurrent action; that pre-existing
+       terminal state is authoritative and MUST NOT be overwritten
+COMMIT
+```
+
+An equivalent implementation (e.g. a single conditional/atomic update guarded by "all terminal
+columns are null") that provides the same durable, race-safe semantics is acceptable — the
+two-transaction description above is the conceptual model, not a mandated literal sequence of SQL
+statements.
+
+`conflict_reason_code` holds only a controlled, internal, non-sensitive value (baseline:
+`TARGET_EMAIL_ALREADY_IN_USE`) — never a raw database constraint name, exception message, or any
+detail that could reveal which other account owns the target email. The public-facing response to
+whatever action triggered verification remains the same generic safe error described in "Privacy,"
+regardless of whether the underlying cause was an invalid token, an expired request, or a
+uniqueness conflict.
+
+This is a concurrency/data-integrity outcome, not a new Human Decision.
+
+### Email Change Terminal States
+
+An `EmailChangeRequest` has exactly one of the following mutually exclusive effective outcomes at
+any point in time:
+
+```text
+ACTIVE       verified_at, superseded_at, cancelled_at, and conflicted_at are all null, and the
+             request has not expired — the only state in which the request is promotable
+VERIFIED     verified_at is set — promotion already succeeded; permanently terminal
+SUPERSEDED   superseded_at is set — a later request replaced this one before it verified;
+             permanently terminal
+CANCELLED    cancelled_at is set — explicitly cancelled before verifying; permanently terminal
+EXPIRED      now >= expires_at, and none of the above terminal fields is set — time-based,
+             effectively terminal (a fresh request is required; nothing further needs to be
+             written to "finalize" an expiry the way a conflict must be finalized, since expiry is
+             already fully determined by comparing `now` to the immutable `expires_at`)
+CONFLICTED   conflicted_at is set — promotion was attempted but the target email was already
+             taken by another User by the time of promotion; permanently terminal and NOT
+             retryable (a NEW request, targeting the same or a different email, is required)
+```
+
+A request is promotable ONLY when it is ACTIVE: not expired, not superseded, not cancelled, not
+conflicted, and not already verified/consumed. Once any terminal state is reached — VERIFIED,
+SUPERSEDED, CANCELLED, EXPIRED, or CONFLICTED — that request can never become promotable again,
+and a CONFLICTED request specifically does NOT count as "active," so the User may immediately
+initiate a brand-new email-change request (for the same or a different target email) once
+conflicted; the old, conflicted request remains untouched as immutable historical evidence and is
+never reused or retried.
+
+None of these terminal outcomes — including CONFLICTED — ever mutates the User's canonical email
+or `email_verified_at`. The existing canonical email remains active and (already) verified until
+a new request successfully completes the "Success Semantics" promotion above; there is no partial
+or provisional email state visible outside the `EmailChangeRequest` row itself, and no partial
+promotion can ever survive a rollback.
+
+Once `conflicted_at` is set, the verification token/challenge for that request becomes
+unconditionally unusable — any later attempt to present it returns the same generic safe failure
+described in "Privacy," without revealing which account holds the target email, any database
+constraint detail, or any other internal identity information.
 
 ### Concurrency
 
@@ -440,6 +523,11 @@ A token issued for request generation N can NEVER promote the email of request g
   vice versa — each token is permanently bound to the exact request it was issued for via the
   token-to-request lookup itself (the token hash is looked up against EmailChangeRequest rows, not
   against a mutable "current pending email" field).
+Conflict finalization (see "Uniqueness Conflict — Durable Terminal State") is itself race-safe: if
+  a request is concurrently cancelled, superseded, or has already been verified/conflicted by the
+  time the conflict-finalization step runs, that pre-existing terminal state is authoritative and
+  is never overwritten by a late-arriving conflict marker — the finalization step is a conditional
+  write ("only if still eligible"), not an unconditional one.
 ```
 
 No provider-specific email rewriting is introduced by this lifecycle (see "Email Normalization").
@@ -1232,6 +1320,10 @@ password reset requested
 password reset completed
 email change requested
 email change completed (promotion)
+email change conflicted (IDENTITY_EMAIL_CHANGE_CONFLICTED — target email already in use by
+  another User; records the request reference, User identity, conflict_reason_code, timestamp,
+  and security context; never the verification token, password, TOTP secret, recovery code, or
+  raw database/exception detail)
 email verified
 MFA enrolled
 MFA challenge succeeded
@@ -1306,15 +1398,21 @@ purpose:            immutable, per-request email-change challenge — see "Canon
 ownership:           Identity & Organization
 key fields:          id, user_id (FK to users.id), normalized_pending_email,
                      verification_token_hash, requested_at, expires_at, verified_at (nullable),
-                     superseded_at (nullable), cancelled_at (nullable), generation (per-user
-                     sequence)
-unique constraints:  at most one row per user_id with verified_at/superseded_at/cancelled_at all
-                     null (enforced at the application/transaction level — see "One Active
-                     Request Per User")
+                     superseded_at (nullable), cancelled_at (nullable), conflicted_at (nullable —
+                     durable terminal conflict marker; see "Uniqueness Conflict — Durable Terminal
+                     State"), conflict_reason_code (nullable — controlled internal value, e.g.
+                     TARGET_EMAIL_ALREADY_IN_USE; never a raw database/exception message),
+                     generation (per-user sequence), created_at, updated_at
+unique constraints:  at most one row per user_id with verified_at/superseded_at/cancelled_at/
+                     conflicted_at all null (enforced at the application/transaction level — see
+                     "One Active Request Per User"; CONFLICTED does not count as active)
 security-sensitive:  verification_token_hash (hashed, never plaintext)
 indexes:              user_id, expires_at
-retention concerns:   superseded/cancelled/expired/consumed rows may be pruned; no financial/
-                     audit-history implication
+retention concerns:   superseded/cancelled/expired/consumed/conflicted rows may be pruned per a
+                     retention policy, but a CONFLICTED row is otherwise kept as immutable
+                     historical evidence of the conflict, distinct from ordinary pruning
+                     candidates — exact retention timing is an implementation detail, not fixed
+                     here
 ```
 
 ### Password reset support
@@ -1505,13 +1603,21 @@ password reset: generic response regardless of existence; single-use; expiry; sa
   consequences as password change; old email stops being a valid reset target after email change
 canonical email change (request-versioned, M01): a new EmailChangeRequest immediately supersedes
   the prior active request, and the prior request's token can no longer verify anything (not even
-  the newer pending email); an expired/cancelled/superseded/already-consumed request's token is
-  always rejected; a token for one request can never promote a different request's email; two
-  rapid successive change requests (A then B) leave A's token non-functional while B's may
+  the newer pending email); an expired/cancelled/superseded/already-consumed/conflicted request's
+  token is always rejected; a token for one request can never promote a different request's email;
+  two rapid successive change requests (A then B) leave A's token non-functional while B's may
   succeed; concurrent verification attempts against the same request resolve to exactly one
-  success; a target-email uniqueness collision at promotion time leaves the current canonical
-  email unchanged and fails safely; successful promotion is atomic (session rotation, other-
-  session invalidation, ELEVATED invalidation, stale reset-token invalidation, audit)
+  success; successful promotion is atomic (session rotation, other-session invalidation, ELEVATED
+  invalidation, stale reset-token invalidation, audit)
+canonical email change — uniqueness conflict (P2-m01): a target email available at request
+  creation but acquired by another User before promotion causes the promotion transaction to roll
+  back completely, leaving `users.email`/`email_verified_at` unchanged; the request durably becomes
+  CONFLICTED (`conflicted_at` set, `conflict_reason_code` = `TARGET_EMAIL_ALREADY_IN_USE`) in a
+  separate transaction; the token can no longer be used afterward; the same conflicted request can
+  never be retried, but the User may immediately create a new, independent request; conflict
+  finalization is race-safe against a concurrent cancellation/supersession/verification of the
+  same request — an already-reached terminal state is never overwritten; the outward error
+  response reveals no database detail or which account owns the target email
 email verification: valid/expired/invalid/replay cases
 Authentication Assurance: STANDARD after login; ELEVATED only after fresh step-up; finite expiry
   with fallback to STANDARD; invalidated by every trigger listed in "Authentication Assurance";
@@ -1609,8 +1715,11 @@ referenced, not reopened. The Actor Catalog artifact gap remains a non-blocking 
 [x] Email-change lifecycle deterministic             -- PASS (request-versioned
                                                     EmailChangeRequest entity; exact
                                                     token-to-request binding; supersession is
-                                                    mandatory, not optional — see "Canonical
-                                                    Email Change Lifecycle")
+                                                    mandatory, not optional; a durable
+                                                    `conflicted_at`/`conflict_reason_code`
+                                                    terminal state covers the uniqueness-collision
+                                                    case with race-safe finalization — see
+                                                    "Canonical Email Change Lifecycle")
 [x] Invitation issuer/revocation model defined        -- PASS (see "Invitation Boundary")
 [x] Password/reset model unambiguous                 -- PASS
 [x] Password-change session consequences defined      -- PASS
@@ -1654,7 +1763,8 @@ secure email + password authentication implemented
 approved registration models implemented per actor
 canonical email-change lifecycle implemented via request-versioned EmailChangeRequest rows
   (supersession on new request, exact request/token binding, atomic promotion, session/reset-token
-  invalidation) — no `users.pending_email` column
+  invalidation, and a durable race-safe CONFLICTED terminal state for target-email uniqueness
+  collisions) — no `users.pending_email` column
 email verification implemented as specified
 password reset implemented securely, with full session/assurance invalidation
 TOTP MFA capability implemented via a maintained library (enrollment, verification, recovery,
