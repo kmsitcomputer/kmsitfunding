@@ -43,26 +43,19 @@ Object Access       != Full Field Disclosure
 Super Admin         != automatic Financial Authority
 ```
 
-## Explicit Non-Scope for This Materialization
+## Related Detailed Models
 
 This document materializes the authorization *evaluation model* (the AND-chain and the preserved
-distinctions above) as supplied. It does not materialize separate, detailed models for:
+distinctions above). The concrete detailed models referenced by three of its AND-terms were
+materialized separately during IMP-001 B01 Materialization Pass 2:
 
-- Data Scope (the concrete scope taxonomy referenced as "Applicable Data Scope" above);
-- Business Authority (the concrete authority catalog referenced as "Required Business Authority"
-  above);
-- Authentication Assurance (the concrete assurance-level model referenced as "Required
-  Authentication Assurance" above).
+- "Applicable Data Scope" — see [docs/05-rbac/DATA-SCOPE-MODEL.md](DATA-SCOPE-MODEL.md);
+- "Required Business Authority" — see
+  [docs/05-rbac/BUSINESS-AUTHORITY-MODEL.md](BUSINESS-AUTHORITY-MODEL.md);
+- "Required Authentication Assurance" — see
+  [docs/05-rbac/AUTHENTICATION-ASSURANCE.md](AUTHENTICATION-ASSURANCE.md).
 
-That detailed content was not supplied for materialization in this pass. Per the Human
-authorization's instruction to STOP FOR THAT ARTIFACT rather than reconstruct missing Level 1-3
-authority from guesses, no `DATA-SCOPE-MODEL.md`, `BUSINESS-AUTHORITY-MODEL.md`, or
-`AUTHENTICATION-ASSURANCE.md` file has been created. See
-[docs/audits/IMP-001-READINESS-REMEDIATION.md](../audits/IMP-001-READINESS-REMEDIATION.md) for the
-record of which artifacts were and were not materialized. A future stage (expected: IMP-003 —
-RBAC + Scope + Business Authority) must source that detail from the Human Authority or the
-external approved baseline before implementing scope/authority/assurance logic — it must not be
-invented at implementation time.
+This document does not duplicate their content — see those files directly.
 
 No RBAC implementation exists yet — see
 [docs/implementation/IMP-001-core-project-foundation.md](../implementation/IMP-001-core-project-foundation.md)

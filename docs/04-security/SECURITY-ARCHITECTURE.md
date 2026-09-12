@@ -30,14 +30,16 @@ API token authority intersection (a token's effective authority is the intersect
 Financial separation of duties
 ```
 
-## Explicit Non-Scope for This Materialization
+## Related Detailed Model
 
-The concepts "Privileged authentication assurance" and "API token authority intersection" above
-are principles, not fully specified models. A detailed Authentication Assurance model (assurance
-levels, step-up triggers, etc.) was not supplied for materialization in this pass — see
-[docs/audits/IMP-001-READINESS-REMEDIATION.md](../audits/IMP-001-READINESS-REMEDIATION.md) for
-the record of which artifacts were and were not materialized. Do not invent assurance levels or
-token-intersection mechanics beyond the principle stated here.
+The detailed Authentication Assurance model (assurance states and where elevated assurance is
+required) referenced by "Privileged authentication assurance" above was materialized separately
+during IMP-001 B01 Materialization Pass 2 — see
+[docs/05-rbac/AUTHENTICATION-ASSURANCE.md](../05-rbac/AUTHENTICATION-ASSURANCE.md).
+
+"API token authority intersection" above remains a principle-level statement only; no more
+detailed token-intersection mechanics beyond it have been supplied for materialization. Do not
+invent such mechanics beyond the principle stated here.
 
 No authentication implementation exists yet — see
 [docs/implementation/IMP-001-core-project-foundation.md](../implementation/IMP-001-core-project-foundation.md)

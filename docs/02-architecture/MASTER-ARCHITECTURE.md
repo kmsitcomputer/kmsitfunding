@@ -56,13 +56,9 @@ Single Root Domain
 
 ## Module Ownership
 
-A full Module Ownership document (detailed semantic ownership boundaries per module/domain) was
-not supplied for materialization in this pass. Per the Human authorization's instruction to STOP
-FOR THAT ARTIFACT rather than reconstruct missing Level 1-3 authority from guesses, no
-`MODULE-OWNERSHIP.md` file has been created — see
-[docs/audits/IMP-001-READINESS-REMEDIATION.md](../audits/IMP-001-READINESS-REMEDIATION.md) for the
-record of which artifacts were and were not materialized. Do not infer module ownership
-boundaries from this document beyond the shared Web/API logic principle stated above.
+The detailed Module Ownership document (semantic ownership boundaries per module/domain) was
+materialized separately during IMP-001 B01 Materialization Pass 2 — see
+[docs/02-architecture/MODULE-OWNERSHIP.md](MODULE-OWNERSHIP.md).
 
 ## Related Materialized Documents
 

@@ -91,7 +91,29 @@ Change Control
 Branching Policy
 ```
 
-Do not assume filenames if repository structure differs.
+These have been materialized (see
+[docs/audits/IMP-001-READINESS-REMEDIATION.md](../audits/IMP-001-READINESS-REMEDIATION.md) and
+[docs/audits/IMP-001-B01-MATERIALIZATION-PASS-2.md](../audits/IMP-001-B01-MATERIALIZATION-PASS-2.md)
+for the full record) at:
+
+```text
+docs/01-requirements/HUMAN-DECISION-REGISTER.md
+docs/01-requirements/MASTER-REQUIREMENTS.md
+docs/02-architecture/MASTER-ARCHITECTURE.md
+docs/02-architecture/MODULE-OWNERSHIP.md
+docs/02-architecture/FINANCIAL-POSTING-BOUNDARY.md
+docs/03-database/DATABASE-ARCHITECTURE.md
+docs/03-database/DATABASE-INVARIANTS.md
+docs/04-security/SECURITY-ARCHITECTURE.md
+docs/04-security/SECURITY-INVARIANTS.md
+docs/05-rbac/RBAC-ARCHITECTURE.md
+docs/05-rbac/DATA-SCOPE-MODEL.md
+docs/05-rbac/BUSINESS-AUTHORITY-MODEL.md
+docs/05-rbac/AUTHENTICATION-ASSURANCE.md
+```
+
+This specification references those documents rather than duplicating their content. Do not
+assume filenames if repository structure differs.
 
 Resolve them from the actual repository.
 
