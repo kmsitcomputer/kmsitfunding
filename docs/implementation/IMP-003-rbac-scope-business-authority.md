@@ -118,16 +118,24 @@ itself sourced from Q22 (actor list + registration model), Q7 (Beneficiary), and
 `docs/05-rbac/DATA-SCOPE-MODEL.md` "Ownership Examples". IMP-003 extends that same table with the
 authorization-specific columns this stage owns, inventing no new actor:
 
-| Actor | Identity Creation (IMP-002) | Portal | Default Role Model | Default Scope | Business Authority Boundary | Financial Authority Boundary | Assurance Notes |
-|---|---|---|---|---|---|---|---|
-| Donor | Self-registration (Q22) | `/donor/*` | **NO Role assigned at registration** (IMP003-READY-M05 — Identity Creation != Role Assignment; see "Role Model") — baseline self-service (view/update own identity) is authorized by Authenticated + Ownership alone, no Permission/Role gate | `OWN` | None by default | None | STANDARD for ordinary use; ELEVATED for account-security actions (IMP-002 owns those triggers) |
-| Fundraiser | Self-registration (Q22); no automatic business authority | `/fundraiser/*` | **NO Role assigned at registration** (same rule as Donor) | `OWN` until an Authority Assignment grants `FUNDRAISER`/`CAMPAIGN` scope by a later stage | **NOT granted by registration** — an approved-Fundraiser Authority Type (owned by the Fundraising & Attribution domain stage, registered into IMP-003's extensible Authority Type registry — see "Business Authority > Extensibility") is required before any fundraiser-operational capability | None by default | Same as Donor |
-| Partner Representative | Invitation only (Q22) | `/partner/*` | `partner_representative` role, assigned at invitation acceptance by the inviting workflow (never automatically by IMP-002) | `PARTNER` scope, bound to the specific Partner the invitation was issued for | **NOT implied by role alone** — requires an active `PARTNER` scope assignment; Partner Verification authority (`partner_verifier`) is separate and not implied | None by default | STANDARD baseline; ELEVATED for partner-configuration-sensitive actions per later Partner-domain policy |
-| Internal Administrative Identity | Invitation/provisioning only (Q22) | `/admin/*` | one or more internal operational roles (e.g. `finance_operator`, `beneficiary_operator`, `support_operator` — exact set is an later, domain-populated catalog, not invented here), assigned by an authorized Super Admin/authorized administrator, never self-assigned | `ORGANIZATION` or `ASSIGNED_WORK`, per assignment | None implied by the identity itself — each operational role's permissions are scoped narrowly per its own function | None implied — `financial_approver`/`refund_approver`/etc. are separate Authority Assignments | ELEVATED required for role/authority assignment actions (see "Self-Escalation Protection") |
-| Super Admin | Provisioning only; first identity via Q25 CLI bootstrap | `/admin/*` | `super_admin` role — see "Super Admin Canonical Authorization" | `GLOBAL_PLATFORM` | Broad platform administrative capability by role/permission — but see next column | **NEVER automatic** — `financial_approver` etc. remain separate Authority Assignments even for Super Admin (RBAC-ARCHITECTURE.md: "Super Admin != automatic Financial Authority") | ELEVATED required for canonical role/authority assignment and any security-sensitive configuration change |
-| Beneficiary | Governed by Q7 (mechanics deferred to Beneficiary & Distribution domain stage); IMP-002 does not create Beneficiary-specific identity mechanics beyond its general-purpose registration/invitation/provisioning primitives | Not yet routed | `beneficiary` role if/when a `User` is created for this actor (per Q7) | `OWN` / `BENEFICIARY_CASE` | Verification/eligibility authority (`beneficiary_verifier`) is separate, assigned only to authorized Operational Staff, never to the Beneficiary itself | None | Same general model as Donor; sensitive beneficiary data additionally requires explicit permission + scope + applicable business authority (MASTER-REQUIREMENTS.md §10) |
-| System Principal | Not a `User` — a fixed, seeded, non-authenticatable Principal (SECURITY-ARCHITECTURE.md) | N/A (no portal; invoked only by scheduled/queued jobs) | Fixed, narrowly-scoped system roles per job family — see "System Principal" | `GLOBAL_PLATFORM` scoped narrowly per capability, never unrestricted | None beyond what the specific job explicitly requires | None by default; any financial-consequence job must still go through the same Authorized Financial Consequence chain (`docs/02-architecture/FINANCIAL-POSTING-BOUNDARY.md`) with an explicit Authority Assignment for that job identity, not an implicit bypass | N/A — assurance is a human-session concept; System Principal actions are audited by principal identity instead |
-| Integration Principal | Not a `User` — a fixed, seeded, non-authenticatable Principal (SECURITY-ARCHITECTURE.md), one per external integration (e.g. a specific payment provider webhook identity) | N/A | Fixed, narrowly-scoped per integration | Narrow, per-integration scope only | None beyond the specific integration's declared capability | None — no Integration Principal may post directly to Ledger (`docs/02-architecture/FINANCIAL-POSTING-BOUNDARY.md` "Never... provider callback... write directly to Ledger") | N/A |
+`IMP003-REAUDIT-M03`: the table below now separates **Identity Creation** from **Authorization
+Transition** as two distinct columns for every invitation/provisioning-based actor — Identity
+Creation (IMP-002's `Invitation::accept()` or the Q25 bootstrap) NEVER itself performs the
+Authorization Transition; the transition is always a SEPARATE, later, independently-audited
+action performed by a principal who already holds the relevant `rbac.*` grant authority (see
+"Invitation Intent Bridge" for the full mechanism this column summarizes).
+
+| Actor | Identity Creation (IMP-002) | Authorization Transition | Portal | Role (post-transition) | Default Scope | Business Authority Boundary | Financial Authority Boundary | Assurance Notes |
+|---|---|---|---|---|---|---|---|---|
+| Donor | Self-registration (Q22) | None — no IMP-003-governed capability is granted by registration; see "No Automatic Role at Registration" | `/donor/*` | **NO Role** — baseline account-security operations (login, password, MFA, email verification/change) are entirely IMP-002-owned, never evaluated by IMP-003's AND-chain; any FUTURE IMP-003-governed Donor capability always requires an explicit Permission (never trivially satisfied) | `OWN` | None by default | None | STANDARD for ordinary use; ELEVATED for account-security actions (IMP-002 owns those triggers) |
+| Fundraiser | Self-registration (Q22); no automatic business authority | None at registration — a LATER, separate, explicitly-authorized transition (owned by the Fundraising & Attribution domain stage) is required before any fundraiser-operational Role/Permission/Authority exists | `/fundraiser/*` | **NO Role** at registration (same rule as Donor) | `OWN` until an Authority Assignment grants `FUNDRAISER`/`CAMPAIGN` scope by a later stage | **NOT granted by registration** — an approved-Fundraiser Authority Type (owned by the Fundraising & Attribution domain stage, registered into IMP-003's extensible Authority Type registry — see "Business Authority > Extensibility") is required before any fundraiser-operational capability | None by default | Same as Donor |
+| Partner Representative | Invitation acceptance creates the identity ONLY (Q22) — grants NO role, permission, scope, or business authority (see "Invitation Intent Bridge") | A SEPARATE, later, independently-audited Role assignment, performed by whoever already holds `rbac.role.assign` for `partner_representative` (e.g. an authorized Partner-module workflow) — never automatic upon acceptance | `/partner/*` | `partner_representative` Role, ONLY once the Authorization Transition above has actually run | `PARTNER` scope, bound to the specific Partner — established BY the same Authorization Transition, never inferred from invitation intent alone | **NOT implied by role alone** — requires an active `PARTNER` scope assignment; Partner Verification authority (`partner_verifier`) is separate and not implied | None by default | STANDARD baseline; ELEVATED for partner-configuration-sensitive actions per later Partner-domain policy |
+| Internal Administrative Identity | Invitation/provisioning creates the identity ONLY (Q22) — grants nothing | A SEPARATE, later, independently-audited Role assignment by an authorized Super Admin/authorized administrator — never self-assigned, never automatic upon acceptance | `/admin/*` | one or more internal operational roles (e.g. `finance_operator`, `beneficiary_operator`, `support_operator` — exact set is a later, domain-populated catalog, not invented here), ONLY once assigned | `ORGANIZATION` or `ASSIGNED_WORK`, per assignment | None implied by the identity itself — each operational role's permissions are scoped narrowly per its own function | None implied — `financial_approver`/`refund_approver`/etc. are separate Authority Assignments | ELEVATED required for role/authority assignment actions (see "Self-Escalation Protection") |
+| Super Admin (first) | Q25 CLI bootstrap creates the identity ONLY — grants nothing (see Q25 in IMP-002) | The Q25 Bridge — a distinct, one-time, non-principal-initiated mechanism (NOT an ordinary "Authorization Transition" performed by another principal; see "Super Admin Canonical Authorization") | `/admin/*` | `super_admin` Role, ONLY once the Bridge has run | `GLOBAL_PLATFORM` | Broad platform administrative capability by role/permission — but see next column | **NEVER automatic**, including via the Bridge — `financial_approver` etc. remain separate Authority Assignments granted by a DISTINCT Principal (RBAC-ARCHITECTURE.md: "Super Admin != automatic Financial Authority") | ELEVATED required for canonical role/authority assignment and any security-sensitive configuration change |
+| Super Admin (subsequent) | N/A — not a first bootstrap | An ORDINARY Role assignment by an EXISTING Super Admin (a distinct, already-authorized Principal) — never the Q25 Bridge, never self-assigned (§21 — Q25 first-bootstrap semantics are not reopened for this case) | `/admin/*` | `super_admin` Role, ONLY once assigned | `GLOBAL_PLATFORM` | Same as first Super Admin | Same as first Super Admin — never automatic | Same as first Super Admin |
+| Beneficiary | Governed by Q7 (mechanics deferred to Beneficiary & Distribution domain stage); IMP-002 does not create Beneficiary-specific identity mechanics beyond its general-purpose registration/invitation/provisioning primitives | Deferred to the Beneficiary & Distribution domain stage, following the same "identity creation never implies authorization" rule as every other actor | Not yet routed | `beneficiary` Role if/when a `User` is created for this actor (per Q7), ONLY once that stage's own transition assigns it | `OWN` / `BENEFICIARY_CASE` | Verification/eligibility authority (`beneficiary_verifier`) is separate, assigned only to authorized Operational Staff, never to the Beneficiary itself | None | Same general model as Donor; sensitive beneficiary data additionally requires explicit permission + scope + applicable business authority (MASTER-REQUIREMENTS.md §10) |
+| System Principal | Not a `User` — a fixed, seeded, non-authenticatable Principal (SECURITY-ARCHITECTURE.md) | Seeded directly (no "acceptance" step exists for a non-human Principal) | N/A (no portal; invoked only by scheduled/queued jobs) | Fixed, narrowly-scoped system roles per job family — see "System Principal" | `GLOBAL_PLATFORM` scoped narrowly per capability, never unrestricted | None beyond what the specific job explicitly requires | None by default; any financial-consequence job must still go through the same Authorized Financial Consequence chain (`docs/02-architecture/FINANCIAL-POSTING-BOUNDARY.md`) with an explicit Authority Assignment for that job identity, not an implicit bypass | N/A — assurance is a human-session concept; System Principal actions are audited by principal identity instead |
+| Integration Principal | Not a `User` — a fixed, seeded, non-authenticatable Principal (SECURITY-ARCHITECTURE.md), one per external integration (e.g. a specific payment provider webhook identity) | Seeded directly (same as System Principal) | N/A | Fixed, narrowly-scoped per integration | Narrow, per-integration scope only | None beyond the specific integration's declared capability | None — no Integration Principal may post directly to Ledger (`docs/02-architecture/FINANCIAL-POSTING-BOUNDARY.md` "Never... provider callback... write directly to Ledger") | N/A |
 
 **Materialized Without New Semantics: YES.** **New Actor Invented: NO.**
 
@@ -211,14 +219,28 @@ in "Invitation Intent Bridge" below) by making registration ITSELF an implicit a
 
 **Corrected rule: IMP-003 does not seed, and no workflow automatically assigns, a `donor` or
 `fundraiser` Role at registration, or ever, as a side effect of IMP-002 identity creation.**
-Donor/Fundraiser BASELINE self-service capability (viewing/updating one's own identity/profile,
-and any other action whose Policy declares no Permission requirement at all — i.e. an action
-gated ONLY by "Authenticated + No Security Restriction + Ownership," with the Permission,
-Business Authority, Resource State, and Approval State AND-terms trivially satisfied because the
-action does not require them) needs no Role at all. If/when a later domain stage introduces a
-Donor- or Fundraiser-facing capability that DOES require a Permission (e.g. `donation.create`
-once the Donation domain exists), that stage defines the Role/Permission and its OWN explicit
-assignment mechanism — never an automatic consequence of registration, and never invented here.
+
+`IMP003-REAUDIT-M02`: the earlier draft additionally implied that a Donor/Fundraiser's baseline
+capability was "an IMP-003 action with its Permission term trivially satisfied" — this is
+corrected. **Permission is NEVER optional or trivially satisfied for any capability that IMP-003's
+authorization evaluator actually governs — every such capability requires a resolvable Permission,
+full stop; there is no "Authenticated + Ownership is enough" pathway through the IMP-003
+AND-chain.** The baseline operations available to a freshly-registered Donor/Fundraiser
+(logging in and out, verifying email, changing/resetting password, enrolling in and challenging
+MFA, requesting/confirming an email change) are not "IMP-003 capabilities with no Permission
+requirement" at all — **they are entirely IMP-002-owned account-security operations**, already
+specified and implemented by `docs/implementation/IMP-002-identity-authentication.md`, governed
+by IMP-002's own rules (current-password confirmation, ELEVATED assurance, session ownership),
+and they never pass through IMP-003's Role/Permission/Scope/Authority evaluator at all — IMP-003
+simply has no jurisdiction over them (see "In Scope"/"Out of Scope": IMP-003 builds authorization
+ON TOP of IMP-002, it does not re-govern IMP-002's own account-security surface).
+
+If/when a later domain stage introduces a genuine Donor- or Fundraiser-facing capability that IS
+governed by IMP-003 (e.g. `donation.create` once the Donation domain exists), that capability
+ALWAYS requires a resolvable Permission — an unknown or missing Permission is DENY, exactly like
+every other IMP-003-protected action (see "Default Deny" and "Test Contract"). That stage defines
+the Role/Permission and its OWN explicit assignment mechanism; IMP-003 does not pre-grant it at
+registration, and does not describe any IMP-003-governed action as needing "no Permission."
 
 ---
 
@@ -421,26 +443,56 @@ nothing more" — the complete integrity contract is:
 Type whitelist:            scope_id is only ever interpreted against the scope_type recorded on
                             the SAME row (see "Scope Type / Scope Target Matrix") — a resolver is
                             never asked to interpret a scope_id under the wrong scope_type.
-Target existence validation: at ASSIGNMENT-CREATION time, the owning domain's resolver MUST
-                            confirm the target row exists and is in an assignable (active) state
-                            before the assignment is inserted — validated inside the SAME
-                            transaction as the insert (see "Concurrency"), not as a fire-and-forget
-                            pre-check.
-Transactional validation:   the existence check and the insert happen in one transaction — a
-                            target deleted/deactivated between the check and the insert is
-                            re-caught by the transaction's own FK/CHECK constraints where a native
-                            FK exists (a later domain WILL declare a native FK once its target
-                            table exists — this specification does not prohibit that; it only
-                            notes none exists TODAY because no target table exists today), or by
-                            the domain's own re-validation immediately before commit where a
-                            native FK is not yet possible.
-Deletion protection:        a domain's own target row (once a later stage's FK does exist) MUST
-                            NOT be hard-deleted while active scope assignments reference it — the
-                            owning domain enforces this the same way IMP-002 already enforces
-                            deletion protection for referenced identities (e.g. the Super Admin
-                            bootstrap guard's `nullOnDelete` pattern) — either restrict deletion or
-                            null/orphan the reference in a way that evaluation is proven to treat
-                            as DENY (never as "no restriction").
+Polymorphic Resolver Contract: each scope type that requires a concrete target (every one except
+                            GLOBAL_PLATFORM/ORGANIZATION/OWN) is backed by a per-domain resolver
+                            declaring: scope_type, concrete table/model, an existence check, a
+                            lifecycle (active/assignable) check, its lock strategy (below), its
+                            deletion-protection behavior, and its authorization resolver — a
+                            resolver missing any of these six is incomplete and must not be
+                            registered.
+```
+
+`IMP003-REAUDIT-M04`: the earlier draft allowed "the domain's own re-validation immediately before
+commit where a native FK is not yet possible" as a substitute for locking — this is exactly the
+"validate, then insert without a lock in between" race the reaudit correctly rejected (a
+concurrent deletion/deactivation could still commit in the gap between that revalidation and the
+assignment insert). **Corrected: target existence/lifecycle validation is never a lone read — it
+is always paired with locking the concrete target row, inside the SAME transaction, per the
+stable lock order below.**
+
+```
+Target existence + lock (assignment CREATION):    resolve scope_type -> resolve the concrete
+                            domain table/model -> SELECT ... FOR UPDATE the concrete target row
+                            (via the domain's OWN resolver, which knows its own table) -> verify
+                            it exists -> verify its lifecycle permits assignment (active, not
+                            deleted/deactivated) -> only THEN create/mutate the
+                            principal_role_assignment / authority_assignment row -> commit. This
+                            lock is acquired within the SAME transaction as steps 1-2 of the
+                            stable lock order in "Concurrency" (Grantor/Target Principal locks
+                            already held) — never a separate, earlier transaction whose lock is
+                            released before the assignment write.
+Target deletion/deactivation (participates in the SAME locking):    the owning domain's own
+                            delete/deactivate path for a scope target MUST ALSO lock that exact
+                            target row (SELECT ... FOR UPDATE) before proceeding, then inspect
+                            (and, per the domain's own policy, revoke or block) active
+                            authorization assignments referencing it, then commit. Because both
+                            paths (assignment creation, and target deletion/deactivation) lock the
+                            SAME concrete row before doing anything else, they SERIALIZE against
+                            each other — whichever transaction acquires the lock first completes
+                            fully (either creating a valid assignment against a target that is
+                            provably still active, or deleting/deactivating a target and handling
+                            its existing assignments per domain policy) before the other proceeds;
+                            neither can "sneak in" to observe a target as valid immediately before
+                            it stops being so.
+Deletion protection:        where a scope target has ACTIVE authorization assignments referencing
+                            it, the owning domain's chosen rule (RESTRICT destructive deletion
+                            until those references are revoked/closed, OR — where the domain uses
+                            soft-deactivation/status rather than hard delete — mark it inactive and
+                            rely on evaluation to DENY against it) is a domain-specific policy
+                            choice this specification does not pre-select (no target-table domain
+                            exists yet); either choice satisfies this contract as long as it is
+                            applied under the SAME lock described above, and as long as an
+                            inactive/deleted target is NEVER silently treated as "unrestricted."
 Inactive/deleted target
   behavior:                 an assignment whose target has become inactive/deleted is NEVER treated
                             as "no longer scoped, therefore unrestricted" — the resolver's
@@ -455,6 +507,11 @@ Orphan detection test:      see "Database Test Contract" — a scheduled or CI-t
                             a unit test proves the evaluator denies such a row rather than allowing
                             it.
 ```
+
+The reconciled, single stable lock order (Grantor Principal -> Target Principal -> Concrete Scope
+Target -> Existing Assignment/Active-Slot -> Mutation -> Commit) is specified ONCE, in
+"Concurrency" below, and applies identically here — this section does not define a second,
+competing lock order.
 
 ---
 
@@ -795,18 +852,70 @@ IMP-002's `Invitation.invited_actor` field (already implemented: `partner_repres
 `internal_administrative_identity` | `super_admin`) is ATTRIBUTION/INTENT ONLY — confirmed by
 reading `app/Services/Identity/InvitationService.php`: acceptance creates a `User` row and marks
 the invitation accepted; it assigns no Role, Permission, or Authority (verified — no such call
-exists in that service). IMP-003 defines the conversion step explicitly:
+exists in that service).
+
+`IMP003-REAUDIT-M03`: every section of this specification that touches invitation acceptance MUST
+state the same contract — the earlier draft's Actor Materialization table contradicted this
+section by describing Partner Representative's Role as "assigned at invitation acceptance." That
+table has been corrected (see "Actor Materialization" — now split into separate "Identity
+Creation"/"Authorization Transition" columns). The canonical contract, restated in full here:
 
 ```
-An authorized provisioning workflow (invoked by whoever holds `rbac.role.assign` for the relevant
-  target Role — e.g. a Super Admin, for `internal_administrative_identity` intent) — NOT
-  automatically upon Invitation::accept() — reads the accepted invitation's `invited_actor` value
-  as a HINT for which Role to offer/assign, and then performs an ORDINARY, independently-audited
-  Role assignment.
-This is a deliberate two-step design (accept identity, THEN separately authorize it) — merging
-  them would make `invited_actor` implicitly grant authority, which Q22/IMP-002 explicitly
-  prohibit.
+Invitation ACCEPTED
+  -> Human identity provisioned/activated exactly as IMP-002 already specifies (a `User` row
+     exists, the invitation is marked accepted)
+  -> the invitation's `invited_actor` value is RETAINED as context/evidence only (it is not
+     deleted or overwritten — it remains available as an INPUT to the later transition below)
+  -> NO Role
+  -> NO Permission
+  -> NO Scope
+  -> NO Business Authority
+  -> NO Financial Authority
+  -> NO Approval Authority
+  (all six are simultaneously and unconditionally absent the instant acceptance completes — there
+  is no partial or "identity-implied" grant of any of them)
 ```
+
+The actual grant of any Role/Scope/Authority happens ONLY through a SEPARATE, later, independently
+authorized, audited, transactional **IMP-003 Authorization Transition**:
+
+```
+performed by a Principal who ALREADY holds the required grant authority (e.g. `rbac.role.assign`
+  for the target Role) — never the newly-accepted identity itself, and never an automatic
+  consequence of Invitation::accept() completing
+may read the accepted invitation's `invited_actor` value as a HINT for which Role to offer — this
+  is the ONLY thing `invited_actor` is ever used for; it is input to a human/authorized decision,
+  never a self-executing grant
+is an ORDINARY Role/Scope/Authority assignment in every other respect — subject to the same
+  Self-Escalation Protection, stable lock order, and active-assignment-uniqueness rules as any
+  other assignment in this specification
+```
+
+### Partner Representative (`§19`)
+
+Invitation acceptance never implies Partner authorization. A later, explicit Authorization
+Transition may create the `partner_representative` Role, a `PARTNER` scope assignment bound to the
+specific Partner, and/or a `partner_verifier` Authority Assignment — but these are THREE
+INDEPENDENT grants, each requiring its own explicit action; accepting an invitation never
+auto-infers all three (or any of them) together. Which of them (if any) an authorized workflow
+grants, and when, is a decision made by that workflow at that later time — not decided or
+pre-ordained by this specification or by the invitation itself.
+
+### Internal Administrative Identity (`§20`)
+
+Identical rule: invitation/provisioning creates the identity ONLY. Every internal operational
+Role (`finance_operator`, `beneficiary_operator`, etc.) is granted exclusively through a separate,
+later Authorization Transition performed by an already-authorized administrator — never
+automatically, never self-assigned (this is also required by "Self-Escalation Protection").
+
+### Subsequent Super Admin (`§21`)
+
+Q25's first-bootstrap semantics are NOT reopened by this rule — the Bridge remains the sole,
+one-time mechanism for the FIRST Super Admin (see "Super Admin Canonical Authorization"). For
+every Super Admin identity AFTER the first: invitation/provisioning creates the identity only;
+canonical `super_admin` Role assignment is an ORDINARY Authorization Transition performed by an
+EXISTING Super Admin (a distinct, already-authorized Principal) — never the Bridge, never
+self-assigned, never automatic upon acceptance.
 
 ---
 
@@ -882,31 +991,51 @@ purpose:      canonical authorization-identity registry — every Role/Authority
 key fields:   principal_kind (string enum: 'human' | 'system' | 'integration'),
               human_user_id (BIGINT unsigned, nullable, UNIQUE, FK -> users.id, nullOnDelete —
                 same deletion pattern IMP-002 Remediation Pass 2 already established for
-                super_admin_bootstraps.user_id, so deleting a User never breaks this table),
+                super_admin_bootstraps.user_id),
               system_principal_id (BIGINT unsigned, nullable, UNIQUE, FK -> system_principals.id),
               integration_principal_id (BIGINT unsigned, nullable, UNIQUE,
                 FK -> integration_principals.id),
-              disabled_at (nullable timestamp — see "Principal Lifecycle" below; meaningful ONLY
-                for principal_kind IN ('system','integration') — see that section for why),
+              tombstoned_at (nullable timestamp — see "Principal Lifecycle"; meaningful ONLY for
+                principal_kind='human' — see that section for why),
+              disabled_at (nullable timestamp — see "Principal Lifecycle"; meaningful ONLY for
+                principal_kind IN ('system','integration')),
               timestamps
-CHECK:        exactly one of human_user_id / system_principal_id / integration_principal_id is
-              non-null, and it matches principal_kind (e.g. principal_kind='human' requires
-              human_user_id NOT NULL and the other two NULL) — a MySQL 8 CHECK constraint,
-              deterministic and row-local, plus application-level validation before insert
+CHECK (`IMP003-READY-M01` — corrected; the earlier draft's CHECK and its own "Deletion protection"
+  text directly contradicted each other, requiring human_user_id NOT NULL unconditionally for
+  principal_kind='human' while also describing it becoming null after User deletion):
+              principal_kind='human' AND tombstoned_at IS NULL
+                -> human_user_id NOT NULL AND system_principal_id NULL AND integration_principal_id NULL
+              principal_kind='human' AND tombstoned_at IS NOT NULL
+                -> human_user_id NULL AND system_principal_id NULL AND integration_principal_id NULL
+              principal_kind='system'
+                -> human_user_id NULL AND tombstoned_at NULL AND system_principal_id NOT NULL
+                   AND integration_principal_id NULL
+              principal_kind='integration'
+                -> human_user_id NULL AND tombstoned_at NULL AND system_principal_id NULL
+                   AND integration_principal_id NOT NULL
+              A MySQL 8 CHECK constraint (a row-local boolean expression over these five columns,
+              fully deterministic, no cross-row/NOW() dependency) plus application-level
+              validation before every insert/update.
 unique:       human_user_id, system_principal_id, integration_principal_id (each independently —
               at most one principals row per underlying identity; prevents a duplicate/competing
-              authorization identity for the same User/System/Integration source)
-indexes:      principal_kind, human_user_id, system_principal_id, integration_principal_id
+              authorization identity for the same User/System/Integration source; NULL values are
+              correctly excluded from uniqueness comparison by MySQL for these three columns,
+              which is the WANTED behavior here — a tombstoned human principal's null
+              human_user_id must not block a genuinely different, later User from getting its
+              own principals row)
+indexes:      principal_kind, human_user_id, system_principal_id, integration_principal_id,
+              tombstoned_at
 deletion:     never hard-deleted once ever referenced by an assignment (mirrors every other
               table's "never hard-delete once assigned" rule) — see "Principal Lifecycle"
-audit:        principal created / principal disabled (system/integration only)
+audit:        principal created / principal tombstoned (human) / principal disabled (system/
+              integration only)
 ```
 
 Never stored here: password, MFA secret, email, or any other IMP-002 credential/identity field —
 human authentication remains entirely owned by IMP-002's `users` table; `human_user_id` is the
 ONLY link, and it is a plain reference, never a duplicate of identity data.
 
-#### Principal Lifecycle (`§14`)
+#### Principal Lifecycle (`§14`, tombstone design per `IMP003-READY-M01`)
 
 ```
 Creation:     a `principals` row is created lazily but IDEMPOTENTLY (firstOrCreate keyed on
@@ -918,24 +1047,48 @@ Creation:     a `principals` row is created lazily but IDEMPOTENTLY (firstOrCrea
               assignment references it).
 Linkage:      exactly one principals row per human_user_id — enforced by the UNIQUE constraint
               above, so no duplicate/competing authorization identity can exist for one User.
-Human disable/deactivate: a 'human' principal has NO independent `disabled_at` of its own — its
-              live status is ALWAYS read from IMP-002's OWN `users.lifecycle_state`/
-              `security_restriction` at evaluation time (see "Security Restriction" — never a
-              second, competing source of truth for the same fact). `principals.disabled_at`
-              applies ONLY to 'system'/'integration' kinds, which have no IMP-002 lifecycle of
-              their own — an administrative action (e.g. retiring a discontinued scheduled job or
-              a decommissioned integration) sets it directly.
-Deletion protection: `human_user_id` uses `nullOnDelete()` — if the underlying User is ever
-              deleted, the principals row survives (orphaned: human_user_id becomes null) so
-              historical assignment rows referencing it remain valid FK targets and audit-
-              reconstructable; it is NEVER re-linked to a different User afterward.
-Orphan principal cannot authorize: a principal whose principal_kind='human' but whose
-              human_user_id is null (post-deletion) MUST fail Applicable Subject Context
-              Resolution (Step 0) deterministically — the evaluator requires resolving a LIVE,
-              existing User row through the principal; a null link is NOT treated as "no
-              restriction," it is DENY (§14: "must not leave an active orphan principal capable
-              of authorization" — satisfied by construction, not by a secondary check that could
-              be forgotten).
+Human disable/deactivate (while the User still exists): a 'human' principal (tombstoned_at IS
+              NULL) has NO independent status column of its own for this case — its live status
+              is ALWAYS read from IMP-002's OWN `users.lifecycle_state`/`security_restriction` at
+              evaluation time (see "Security Restriction" — never a second, competing source of
+              truth for the same fact). DISABLED/SUSPENDED is NOT the same thing as TOMBSTONED —
+              a DISABLED User's principal remains a live, non-tombstoned row (it simply fails
+              authorization via the existing Security Restriction check, and can become
+              authorizable again if the User is re-enabled); TOMBSTONED is permanent and only
+              follows actual User deletion (see below).
+Human tombstone transition (User deletion — `§7`): a SINGLE transaction, opened by whichever
+              IMP-002 workflow is about to delete the User row:
+                1. SELECT ... FOR UPDATE the `principals` row for this human_user_id (lock first).
+                2. Revoke every currently-active `principal_role_assignments`/
+                   `authority_assignments` row referencing this principal_id (set revoked_at =
+                   now(), revoked_by_user_id = the acting administrator, or a distinguished
+                   "identity-lifecycle" system actor reference where no human administrator
+                   directly triggered it — e.g. a self-service account-deletion flow) — this is
+                   the "revoke/disable all effective authorization" step.
+                3. In ONE UPDATE statement, set BOTH `tombstoned_at = now()` AND
+                   `human_user_id = NULL` on the `principals` row together — a single statement
+                   guarantees the row satisfies the CHECK constraint's "tombstoned" branch the
+                   instant it takes effect; there is no intermediate state where tombstoned_at is
+                   set but human_user_id is still populated (which the CHECK would reject).
+                4. Commit this transaction, THEN proceed with the actual `DELETE FROM users`
+                   (IMP-002's own deletion path). Because human_user_id was already nulled in step
+                   3, the FK's `nullOnDelete` action has nothing left to do when the User row is
+                   later deleted — no reliance on cascade-vs-application-code ordering.
+              This sequence is valid at every point under MySQL 8: no transaction ever leaves the
+              `principals` row in a state that violates its own CHECK constraint.
+Deletion protection: `human_user_id` uses `nullOnDelete()` as a BACKSTOP (in case some future
+              deletion path ever bypasses the tombstone transition above) — the row is NEVER
+              hard-deleted and NEVER re-linked to a different User afterward.
+Orphan / tombstoned principal cannot authorize: a principal with `tombstoned_at` set (equivalently,
+              principal_kind='human' with human_user_id null) MUST fail Applicable Subject
+              Context Resolution (Step 0) deterministically — DENY, never "no restriction". It
+              MUST NOT receive any NEW role or authority assignment (the assignment-creation path
+              rejects any attempt to reference a tombstoned principal as a TARGET), and it MUST
+              NOT act as a grantor (the same path rejects it as an ACTING principal). No automatic
+              restoration exists — if a tombstoned principal is ever legitimately restored (e.g. a
+              new User record is later associated with the same real-world identity), that requires
+              an explicitly authorized FUTURE workflow, not invented here (§8) — the tombstoned row
+              itself is never reactivated in place.
 Audit identity: every audited RBAC event records the acting principals.id (or, for a
               System/Integration action, that principal's own id) — never "the system" as an
               unstructured string.
@@ -1165,23 +1318,37 @@ columns pattern and satisfies `DATABASE-INVARIANTS.md` "Policy/version historica
 
 ## Concurrency
 
-**Stable lock order (`§11`/`§48`), used by EVERY RBAC write path without exception:**
+**Stable lock order (`IMP003-REAUDIT-M04`/`§24`-`§30`) — the ONE canonical sequence used by EVERY
+RBAC write path without exception; no other section defines a competing order:**
 
 ```
-1. Lock the canonical `principals` row for the target Principal (SELECT ... FOR UPDATE) — this
-   is now a REAL row (IMP003-READY-M04's `principals` table), not an ambiguous polymorphic pair.
-2. Validate the grantor's OWN authorization to perform the write (holds the required rbac.*
-   permission + ELEVATED assurance) and the Self-Escalation Protection invariants (grantor's
-   principal_id must differ from the target's, per "Self-Escalation Protection").
-3. Validate target references (role_id/authority_type_id exist; scope_id resolves to an active
-   target row per its scope_type, or is correctly NULL for GLOBAL_PLATFORM/ORGANIZATION/OWN).
-4. Inspect the current active assignment (via `active_assignment_key`, see "Scope Uniqueness
-   Normalization") for this exact (principal, role-or-authority-type, scope) tuple.
-5. Create the new assignment (or revoke the existing one, or both in the renewal/replacement
-   case — see below) — the database's own unique index on `active_assignment_key` is the final,
-   race-safe authority, not merely the step-4 read.
+1. Grantor Principal: lock the canonical `principals` row for the ACTING (granting/revoking)
+   Principal (SELECT ... FOR UPDATE).
+2. Target Principal: lock the canonical `principals` row for the Principal being granted to/
+   revoked from. If grantor and target are the SAME principal (relevant only for the narrow,
+   still-DENIED self-escalation attempt path, which is rejected before any mutation — see
+   "Self-Escalation Protection" — this lock step still runs so the rejection itself is evaluated
+   under a consistent lock), lock that ONE row once, not twice. If grantor and target are
+   DIFFERENT principals, lock their `principals` rows in stable ASCENDING principal_id (primary
+   key) order — never in "grantor first" or "target first" order based on role — so that two
+   concurrent transactions naming the same two principals in opposite grantor/target roles cannot
+   deadlock against each other.
+3. Concrete Scope Target (where the scope type requires one): resolve scope_type -> resolve the
+   owning domain's concrete table/model -> SELECT ... FOR UPDATE that concrete target row (per
+   "Scope Target Integrity"'s Polymorphic Resolver Contract) -> verify it exists and its lifecycle
+   permits assignment. Skipped entirely for GLOBAL_PLATFORM/ORGANIZATION/OWN (no concrete row).
+4. Existing Assignment / Active-Slot Parent: inspect the current active assignment (via
+   `active_assignment_key`, see "Scope Uniqueness Normalization") for this exact (principal,
+   role-or-authority-type, scope) tuple.
+5. Mutation: create the new assignment (or revoke the existing one, or both in the renewal/
+   replacement case — see below) — the database's own unique index on `active_assignment_key` is
+   the final, race-safe authority, not merely the step-4 read.
 6. Commit.
 ```
+
+Steps 1-2 additionally validate the grantor's OWN authorization to perform the write (holds the
+required `rbac.*` permission + ELEVATED assurance) and every Self-Escalation Protection invariant,
+under the same locks — a rejected self-escalation attempt never proceeds to step 3.
 
 Applied per write path:
 
@@ -1192,13 +1359,22 @@ Role assignment vs revocation (same principal+role+scope):  the stable lock orde
   fails atomically at the database, which the assignment service surfaces as an ordinary
   application-level conflict (never silently ignored, never converted into a duplicate grant).
 Scope assignment vs revocation:      same pattern (scope lives on the same assignment row, so
-  this is the same lock/uniqueness key, not a separate mechanism).
+  this is the same lock/uniqueness key, not a separate mechanism) — additionally serialized
+  against the concrete scope target's own delete/deactivate path via step 3's lock (see
+  "Scope Target Integrity").
 Business Authority assignment vs revocation:  identical pattern, against `authority_assignments`.
 Renewal/replacement of an expired-but-unrevoked assignment:  steps 4-5 become "revoke the existing
-  row, THEN insert the new row," both inside the SAME transaction opened after step 1's lock —
+  row, THEN insert the new row," both inside the SAME transaction opened after steps 1-3's locks —
   never two separate transactions, so no window exists where neither row is "active" nor where
   both could transiently coexist as active (see "Scope Uniqueness Normalization" for why this is
   necessary: expiration alone does not release the uniqueness slot).
+Scope target deletion/deactivation vs scope assignment: the owning domain's delete/deactivate path
+  locks the SAME concrete target row (step 3's lock) before proceeding — whichever transaction
+  (a new assignment being created, or the target being deleted/deactivated) acquires that lock
+  first completes fully before the other is allowed to proceed; the loser either sees the target
+  already gone (assignment creation is REJECTED) or sees an active assignment already referencing
+  it (deletion is RESTRICTED/blocked per the domain's own chosen deletion-protection rule) — never
+  an orphaned assignment referencing a target that vanished mid-transaction.
 Authorization evaluation vs revocation (a request is mid-evaluation when a revocation commits):
   the evaluator reads assignment rows FRESH per request (no long-lived cross-request cache is the
   default — see "Cache") — a revocation that commits before evaluation's read is honored
@@ -1210,7 +1386,30 @@ First Super Admin canonical assignment (the Bridge):  locks the resolved bootstr
   guard (1b) — "no existing `super_admin` Role assignment" — under that lock, exactly like Q25's
   own `super_admin_bootstraps` unique-constraint guard, for the same "concurrent double-invocation
   yields exactly one effective canonical Role assignment, never two, never broadened" reason (see
-  "Super Admin Canonical Authorization").
+  "Super Admin Canonical Authorization"). The Bridge has no "grantor principal" in the ordinary
+  sense (it is not a Principal acting through the authorization service), so it collapses steps
+  1-2 into locking only the one target `principals` row.
+Human Principal tombstone transition (`IMP003-REAUDIT-M01`):  locks the `principals` row FIRST
+  (step 1-equivalent — there is no separate "grantor," this is an identity-lifecycle transition
+  triggered by IMP-002's own deletion path), revokes all active assignments referencing it (step
+  4-5-equivalent, applied to every assignment row for that principal rather than one), then sets
+  `tombstoned_at`/nulls `human_user_id` in one statement, then commits — see "Principal Lifecycle".
+```
+
+### Concurrency Test Contract (`§31`, conceptual — mirrors the Test Contract's posture)
+
+```
+a scope-assignment transaction has locked the concrete target row, and a concurrent scope-target
+  deletion/deactivation attempt is made -> the deletion attempt SERIALIZES behind the assignment
+  transaction (blocks until it commits or rolls back), never proceeds concurrently against the
+  same row
+scope target deletion/deactivation commits FIRST -> a subsequent assignment-creation attempt
+  against that now-inactive/gone target is REJECTED (never silently creates an orphan reference)
+scope assignment creation commits FIRST -> a subsequent destructive deletion attempt against that
+  target is BLOCKED/RESTRICTED (or, for a soft-deactivation domain, the target becomes inactive
+  and evaluation against the still-existing assignment DENIES) per the owning domain's chosen
+  deletion-protection rule — never a scenario where both "the assignment is still active" and
+  "the target no longer exists/is inactive" are simultaneously true without evaluation denying
 ```
 
 Database deadlocks are never converted into a business state (`§30`/`§49`) — an unexpected
@@ -1363,12 +1562,20 @@ authenticated + Target Resource does not exist / cannot be resolved -> DENY
 (all three: DENY occurs at Step 0, before Permission/Scope/Ownership are ever evaluated)
 ```
 
-### Permission (`§24`)
+### Permission (`§24`, mandatory per `IMP003-REAUDIT-M02`)
 
 ```
 permission missing on every held Role                        -> DENY
 permission present via at least one held, active Role          -> evaluation continues
 permission present only via a REVOKED/expired Role assignment  -> DENY (not "present")
+an IMP-003-protected capability with an UNRESOLVABLE/unregistered required Permission code
+  -> DENY (Permission is never optional; there is no "no permission required" IMP-003 capability)
+a Donor/Fundraiser's baseline IMP-002 account-security operation (login, password change, MFA,
+  email verification/change) is NOT routed through the IMP-003 evaluator at all — asserted by a
+  boundary test confirming none of these IMP-002 controllers/routes invoke the IMP-003
+  authorization service, rather than asserting they pass with a trivially-satisfied Permission
+  (IMP003-REAUDIT-M02 regression check — the earlier "trivially satisfied" framing must not
+  return)
 ```
 
 ### Scope (`§25`)
@@ -1470,9 +1677,23 @@ Integration Principal attempting to post directly to Ledger (bypassing the Autho
 an assignment write referencing a `principal_id` that does not resolve to an existing
   `principals` row -> REJECTED at the database level (real FK violation, not merely an
   application-level check) — IMP003-READY-M04
-an assignment referencing a `principals` row whose underlying human_user_id has since become
-  null (orphaned after User deletion) -> evaluation DENIES deterministically (see "Principal
-  Lifecycle")
+```
+
+### Tombstoned Principal (`IMP003-REAUDIT-M01`, `§9`)
+
+```
+active Human Principal + valid, live User -> eligible for further authorization evaluation
+  (Step 0 resolves successfully; evaluation proceeds to Permission/Scope/etc.)
+Human Principal with human_user_id NULL + tombstoned_at set -> DENY (Step 0 fails deterministically
+  — never treated as "no restriction")
+attempting a NEW Role assignment targeting a TOMBSTONED principal -> REJECTED at the write path
+  (the assignment-creation service refuses a tombstoned target, not merely evaluation-time DENY)
+attempting a NEW Authority assignment targeting a TOMBSTONED principal -> REJECTED, same rule
+a TOMBSTONED principal attempting to act as GRANTOR of any Role/Authority assignment -> REJECTED
+  (a tombstoned principal can never authorize anything, including as the acting party)
+tombstoning a principal that currently holds active Role/Authority assignments -> those
+  assignments are revoked as PART OF the same tombstone transaction (never left dangling as
+  "active" against a tombstoned target)
 ```
 
 ### Invalid Scope Reference (`§35`)
@@ -1516,6 +1737,19 @@ Partner Representative A (PARTNER scope = Partner 1) -> Partner 2's protected re
 ```
 
 (Contract for the Partner-domain stage, same posture as Fundraiser above.)
+
+### Invitation Acceptance Authorization Boundary (`IMP003-REAUDIT-M03`, regression check)
+
+```
+Partner Representative / Internal Administrative Identity / Super Admin invitation accepted
+  -> the resulting identity has NO Role, NO Permission, NO Scope, NO Business Authority, and NO
+  Financial Authority immediately after acceptance (directly testable by IMP-003 itself, against
+  IMP-002's real `InvitationService::accept()` — asserts the earlier "role assigned at invitation
+  acceptance" framing does not return)
+the SAME accepted identity, after a SEPARATE, explicit Authorization Transition is performed by an
+  already-authorized Principal -> now holds exactly the Role/Scope/Authority that transition
+  granted, no more (proves the transition is additive/explicit, not implicit/automatic)
+```
 
 ### Donor
 
@@ -1572,17 +1806,36 @@ Principal attempting to assign themselves as the authorized actor for a privileg
 ## Database Test Contract
 
 ```
-principals: exactly-one-of-three CHECK constraint enforced (an insert with zero or more than one
-  of human_user_id/system_principal_id/integration_principal_id populated is rejected); each of
-  the three columns' individual UNIQUE constraint enforced (no duplicate authorization identity
-  for the same User/System/Integration source)
+principals CHECK constraint (`IMP003-REAUDIT-M01`, corrected): a 'human' + non-tombstoned row
+  REQUIRES human_user_id NOT NULL (rejected otherwise); a 'human' + tombstoned row REQUIRES
+  human_user_id NULL (rejected if still populated); 'system'/'integration' rows REQUIRE
+  human_user_id and tombstoned_at both NULL — all four branches tested directly, proving the
+  contradiction the reaudit found (NOT NULL required unconditionally vs. becoming null after
+  deletion) no longer exists
+principals unique constraints: each of human_user_id/system_principal_id/integration_principal_id
+  enforced independently (no duplicate authorization identity for the same User/System/Integration
+  source); a tombstoned row's NULL human_user_id does NOT block a genuinely different, later User
+  from obtaining its own principals row (MySQL's NULL-never-collides behavior confirmed to be the
+  WANTED behavior here, not an oversight)
 principals FK integrity: principal_role_assignments.principal_id and
   authority_assignments.principal_id both REJECT a reference to a nonexistent principals.id (real
   FK violation, tested directly — not merely "the application happened not to construct one") —
   IMP003-READY-M04
-orphan principal denied: a `principals` row whose human_user_id has been nulled (post User
-  deletion via nullOnDelete) still exists (not hard-deleted) but authorization evaluation against
-  it is proven to DENY, never ALLOW
+tombstone transition: deleting a User whose principal holds active assignments is proven to, in
+  one transaction, revoke every one of those assignments AND set tombstoned_at/null human_user_id
+  together — never leaving an active assignment referencing a tombstoned principal, and never
+  leaving the principals row in a CHECK-violating intermediate state
+orphan/tombstoned principal denied: a `principals` row that is tombstoned (human_user_id null)
+  still exists (not hard-deleted) but authorization evaluation against it is proven to DENY, never
+  ALLOW; a write attempting to target it with a NEW assignment, or to use it as a grantor, is
+  proven to be REJECTED
+scope target lock (`IMP003-REAUDIT-M04`): a scope-assignment-creation transaction that has locked
+  a concrete target row is proven to block a concurrent target deletion/deactivation attempt
+  against that same row until the first transaction commits or rolls back (tested via the
+  repository's standard technique for simulating lock contention — e.g. two connections/
+  transactions in a controlled test, or a documented static-review-plus-deterministic-logic-test
+  limitation consistent with IMP-002's own accepted MySQL-concurrency posture where genuine
+  multi-connection testing is not available)
 roles.code unique constraint enforced
 permissions.code unique constraint enforced
 active_assignment_key generated column: proven to be NULL for any revoked row (regardless of how
@@ -1719,17 +1972,22 @@ non-invented contract, which the sections above establish.
 ```
 Exact Artisan command name for the Super Admin Bridge (not locked by any document; §35's own
   instruction: "exact command name is an implementation detail").
-Exact mechanism for the MySQL 8-compatible "conditional unique active assignment" constraint
-  (generated column + unique index, vs. application-level transactional lock only) — both are
-  MySQL-8-compatible; the choice does not affect the locked model above.
-Whether `role_permissions` revocation should ALSO retain history (currently specified as hard-
-  delete-on-revoke, an engineering choice) — revisit only if a later domain's Definition of Ready
-  identifies an actual need to reconstruct "what a Role's permission set looked like at time T,"
-  which no current locked document requires.
 ```
 
-None of the above requires a Human Decision — each is a reversible, non-architecture-affecting
-implementation detail per AGENTS.md "Before Coding" step 7 ("make the smallest coherent change").
+`IMP003-REAUDIT-m01`: this section previously ALSO listed "generated column vs. application-level
+locking undecided" for the active-assignment uniqueness constraint, and "whether `role_permissions`
+revocation should retain history" as open — both are REMOVED. Neither is actually open: Remediation
+Pass 1 already selected and fully specified the normative design for both (the `active_assignment_key`
+generated-column technique in "Scope Uniqueness Normalization + MySQL 8 Active-Assignment
+Uniqueness," and durable `granted_at`/`revoked_at` history for `role_permissions`, respectively) —
+leaving them listed here as "undecided"/"may be used" was stale and actively contradicted the
+normative sections elsewhere in this same document, which is what this pass corrects. There is no
+alternative implementation path for either; both are the SOLE normative design, not one option
+among several.
+
+The one remaining item above requires no Human Decision — it is a reversible, non-architecture-
+affecting implementation detail per AGENTS.md "Before Coding" step 7 ("make the smallest coherent
+change").
 
 ## Human Decisions Required
 
