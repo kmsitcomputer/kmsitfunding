@@ -6,16 +6,23 @@ payments, ledger accounting, commission, fundraisers, partners, and beneficiary 
 ## Status
 
 ```
-Architecture Program:    COMPLETE / LOCKED
-Implementation Program:  STARTED
-Current Stage:           IMP-000 — Repository Bootstrap & Implementation Governance
+Architecture Baseline:    Externally established / treated as locked input to implementation.
+                          See AGENTS.md and authoritative architecture documents when present.
+Implementation Program:   IN PROGRESS
+Current Stage:            IMP-000 — remediation / governance gate pending
+IMP-001:                  NOT AUTHORIZED
 ```
 
-"Architecture Program: COMPLETE / LOCKED" means the architecture decisions listed in
-[AGENTS.md](AGENTS.md) under "Locked Decisions" are settled and require an approved ACR/ADR to
-change — it does not mean any application feature has been built. No business feature (donation,
-payment, ledger, commission, partner, beneficiary, CMS, theme, or API business logic) has been
-implemented. This stage (IMP-000) covers repository bootstrap and governance only.
+The architecture decisions listed in [AGENTS.md](AGENTS.md) under "Locked Decisions" are treated
+as locked input to implementation and require an approved ACR/ADR to change. This repository does
+not yet contain the authoritative architecture/requirements documents themselves (docs/02-
+architecture/, docs/03-database/, etc. are currently scaffolded but not authored), nor any
+accepted ADR or recorded Human approval — see
+[docs/audits/IMP-000-INDEPENDENT-AUDIT.md](docs/audits/IMP-000-INDEPENDENT-AUDIT.md). No business
+feature (donation, payment, ledger, commission, partner, beneficiary, CMS, theme, or API business
+logic) has been implemented. IMP-000 itself has not passed its final gate and IMP-001 is not
+authorized to begin — see
+[docs/implementation/IMP-000-repository-bootstrap.md](docs/implementation/IMP-000-repository-bootstrap.md).
 
 ## Where to Start
 

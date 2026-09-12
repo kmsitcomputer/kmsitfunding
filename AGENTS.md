@@ -8,17 +8,29 @@ Laravel modular monolith for a single primary organization.
 
 ## Authoritative Documents
 
-Before modifying code, read applicable documents under:
+Before modifying code or governance, read all applicable authoritative and governance documents
+relevant to the task, under:
 
+- docs/00-governance/
 - docs/01-requirements/
 - docs/02-architecture/
 - docs/03-database/
 - docs/04-security/
 - docs/05-rbac/
 - docs/06-domains/
+- docs/adr/
+- docs/decisions/
 - docs/implementation/
 
-Higher-level documents override lower-level assumptions.
+At minimum every implementation agent must consult: this file (AGENTS.md);
+`docs/00-governance/DOCUMENT-AUTHORITY.md`; `docs/00-governance/CHANGE-CONTROL.md`; the current
+IMP specification under `docs/implementation/`; relevant architecture/security/RBAC documents;
+and relevant accepted ADRs/decision records under `docs/adr/` and `docs/decisions/`. Reading
+every unrelated file is not required — read what is applicable to the task.
+
+Higher-level documents override lower-level assumptions — see
+[docs/00-governance/DOCUMENT-AUTHORITY.md](docs/00-governance/DOCUMENT-AUTHORITY.md) for the
+canonical hierarchy.
 
 ## Locked Decisions
 

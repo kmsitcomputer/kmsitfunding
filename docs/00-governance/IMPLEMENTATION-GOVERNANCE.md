@@ -44,8 +44,9 @@ explicitly transferred during remediation.
 
 ### Human
 
-Final approval and merge authority. Required for anything listed in
-[CHANGE-CONTROL.md](CHANGE-CONTROL.md) under "Human Approval Rule".
+Final approval and merge authority. Required for anything listed below under "Human Approval
+Rule" in this document. See also [CHANGE-CONTROL.md](CHANGE-CONTROL.md) for the ACR/ADR
+architecture-change workflow that Human approval feeds into.
 
 ## No Concurrent Ownership
 

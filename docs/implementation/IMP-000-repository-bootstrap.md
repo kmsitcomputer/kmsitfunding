@@ -2,7 +2,13 @@
 
 ## Status
 
-PASS
+REMEDIATION COMPLETE — PENDING TARGETED RE-AUDIT
+
+This status is NOT a final pass. It means: implementation/remediation work described below is
+complete from the implementing agent's perspective, but independent review and Human approval
+have not yet closed this task. See
+[docs/audits/IMP-000-INDEPENDENT-AUDIT.md](../audits/IMP-000-INDEPENDENT-AUDIT.md) for the audit
+history and current pending items.
 
 ## Objective
 
@@ -107,8 +113,25 @@ None (no code). Future stages introduce the testing gate defined in
 
 ## Forbidden Changes
 
-None — this task establishes the rules rather than operating under pre-existing locked
-architecture.
+IMP-000 is governance/bootstrap work, but all existing locked product, architecture, database,
+security, RBAC, and financial decisions remain binding throughout it. Forbidden changes include:
+
+- altering Q1-Q20 Human Decision Register entries;
+- changing Single Organization;
+- changing Centralized Settlement;
+- changing Modular Monolith;
+- weakening Ledger accounting invariants;
+- making Fund an authoritative mutable balance;
+- making Partner a tenant or settlement owner;
+- changing Commission semantics;
+- weakening security/RBAC boundaries;
+- changing same-origin API architecture;
+- making unsupported infrastructure mandatory;
+- weakening shared-hosting compatibility;
+- implementing business features outside IMP-000 scope.
+
+No forbidden change occurred during this task: no business feature, schema, or code was
+introduced, and the Locked Decisions list in [AGENTS.md](../../AGENTS.md) was not altered.
 
 ## External Verification
 
@@ -127,17 +150,40 @@ None.
 ## Gate
 
 ```
-BLOCKER            0
-MAJOR              0
-GATE MINOR         0
-HUMAN DECISION     0
+IMPLEMENTATION WORK:      COMPLETE
+INDEPENDENT AUDIT:        COMPLETED — FINDINGS ISSUED (see docs/audits/IMP-000-INDEPENDENT-AUDIT.md)
+REMEDIATION PASS 2:       COMPLETE
+TARGETED RE-AUDIT:        PENDING
+FINAL HUMAN APPROVAL:     PENDING
+IMP-000 FINAL GATE:       NOT YET PASSED
+IMP-001:                  NOT AUTHORIZED
 ```
 
-**IMPLEMENTATION 00 — PASS. REPOSITORY GOVERNANCE — LOCKED. IMPLEMENTATION PROGRAM — AUTHORIZED.**
+This document does not self-declare a final PASS, LOCKED, or AUTHORIZED status. The final gate
+requires a targeted independent re-audit finding zero unresolved BLOCKER/MAJOR items, followed by
+recorded Human approval — see
+[docs/audits/STAGE-GATE-APPROVAL-TEMPLATE.md](../audits/STAGE-GATE-APPROVAL-TEMPLATE.md).
 
-## Next Stage
+## IMP-000 Gate vs. IMP-001 Readiness
+
+IMP-000 reaching its final gate does NOT automatically authorize IMP-001. IMP-001 requires,
+independently:
+
+1. its own implementation specification;
+2. a Definition of Ready evaluation against
+   [docs/00-governance/DEFINITION-OF-DONE.md](../00-governance/DEFINITION-OF-DONE.md);
+3. identification of relevant authoritative references;
+4. no unresolved blocking Human Decision;
+5. required Human authorization according to
+   [docs/00-governance/IMPLEMENTATION-GOVERNANCE.md](../00-governance/IMPLEMENTATION-GOVERNANCE.md).
+
+No IMP-001 specification is implemented by this remediation task.
+
+## Next Stage (Not Yet Authorized)
 
 IMPLEMENTATION 01 — Core Project Foundation: Laravel project bootstrap, PHP/Laravel
 compatibility, Vue 3, Inertia 3, TypeScript, Tailwind 4, Vite, MySQL baseline, environment
 example, testing baseline, modular application folder convention, base CI/static-check
 conventions where practical, shared-hosting compatibility. No business feature implementation.
+This remains the anticipated next stage only — it is NOT authorized until IMP-000's final gate
+and its own Definition of Ready are satisfied.

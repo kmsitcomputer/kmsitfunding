@@ -2,7 +2,11 @@
 
 ## Status
 
-PROPOSED / ACCEPTED / SUPERSEDED / REJECTED
+PROPOSED / HUMAN-REVIEW / ACCEPTED / SUPERSEDED / REJECTED
+
+Rule: for any locked architecture/business/security/financial baseline change, status MUST NOT
+become ACCEPTED without recorded Human approval evidence in the "Approval" section below. An AI
+agent cannot set this status to ACCEPTED on its own.
 
 ## Context
 
@@ -28,6 +32,19 @@ What becomes easier or harder as a result of this decision.
 ## Financial Impact
 
 ## Migration Impact
+
+## Approval
+
+Do not fill these fields with invented approval data — leave them blank/PENDING until a real
+Human approval occurs.
+
+```
+Approval Authority:
+Human Approver:
+Approval Date:
+Approval Evidence:
+Approved Reference:
+```
 
 ## References
 

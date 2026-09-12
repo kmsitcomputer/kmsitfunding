@@ -11,11 +11,18 @@ before making any change.
    [docs/00-governance/IMPLEMENTATION-GOVERNANCE.md](docs/00-governance/IMPLEMENTATION-GOVERNANCE.md)
    for the template and the small-task exception).
 2. Work happens on a task branch: `impl/###-description`, `fix/IMP-XXX-description`, or
-   `docs/ADR-XXX-description`. Never commit experimental work directly to `main`.
+   `docs/ADR-XXX-description`. Never commit experimental work directly to the canonical stable
+   branch — currently `master`, targeting `main`; see
+   [docs/00-governance/BRANCHING-POLICY.md](docs/00-governance/BRANCHING-POLICY.md) for the
+   current bootstrap branch state and transition plan.
 3. A task is not done until it satisfies
    [docs/00-governance/DEFINITION-OF-DONE.md](docs/00-governance/DEFINITION-OF-DONE.md).
 4. Independent review happens before merge. Findings are classified BLOCKER / MAJOR / MINOR /
-   EDITORIAL. No merge with open BLOCKER or MAJOR findings.
+   EDITORIAL. A task, branch, or pull request MUST NOT merge while any unresolved BLOCKER or
+   MAJOR finding exists against the currently approved baseline — see the "Merge Gate" section of
+   [DEFINITION-OF-DONE.md](docs/00-governance/DEFINITION-OF-DONE.md). A Human Decision or ADR is
+   not a waiver for defective implementation; it changes the approved baseline, and the
+   implementation must then be patched to conform and re-reviewed before merge.
 5. If implementation reveals that a locked architecture decision must change, stop coding and
    raise an Architecture Change Request (ACR) — see
    [docs/00-governance/CHANGE-CONTROL.md](docs/00-governance/CHANGE-CONTROL.md).

@@ -96,8 +96,31 @@ EDITORIAL  Documentation/style only.
 
 ## Merge Gate
 
-Cannot merge with `BLOCKER > 0` or `MAJOR > 0` unless explicitly accepted through a Human
-Decision / ADR.
+Canonical rule:
+
+```
+A task, branch, or pull request MUST NOT merge while any unresolved BLOCKER or MAJOR finding
+exists against the currently approved baseline.
+```
+
+A Human Decision or ADR is not a waiver for defective implementation. A Human Decision/ADR
+changes the approved requirement or architecture baseline — it does not convert an unresolved
+defect into an acceptable defect measured against that baseline.
+
+If a finding reveals that the approved requirement or architecture itself should change:
+
+```
+1. stop implementation;
+2. process the requirement/architecture change (ACR);
+3. obtain required Human approval;
+4. update the authoritative baseline (ADR);
+5. patch implementation to conform to the new baseline;
+6. perform independent re-review;
+7. close the original finding against the approved baseline.
+```
+
+Only then may merge proceed. See
+[CHANGE-CONTROL.md](CHANGE-CONTROL.md) for the full ACR/ADR flow.
 
 ## Small Task Exception
 

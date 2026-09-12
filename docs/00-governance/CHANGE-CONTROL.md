@@ -13,14 +13,30 @@ Raise an **ACR — Architecture Change Request** instead, using
 ## ACR to ADR Flow
 
 ```
-ACR (docs/decisions/) -> Review -> Human / Architecture Approval
-   -> ADR (docs/adr/, using docs/adr/ADR-TEMPLATE.md)
-   -> Updated authoritative docs
-   -> Implementation resumes
+Conflict Detected
+  -> STOP IMPLEMENTATION
+  -> ACR Drafted (docs/decisions/)
+  -> AI / Technical Analysis (recommendation only, not approval)
+  -> HUMAN DECISION
+  -> if approved: ADR + authoritative baseline update (docs/adr/)
+  -> implementation resumes
+  -> independent re-review
 ```
 
-Draft ACRs live under `docs/decisions/`. Once approved, the decision is recorded as an ADR under
-`docs/adr/`.
+Draft ACRs live under `docs/decisions/`. Once approved by a Human, the decision is recorded as an
+ADR under `docs/adr/`.
+
+## AI Approval Boundary
+
+AI agents, including ChatGPT, Claude Code, Codex, Command Code, or any other automated system,
+MAY analyze, recommend, draft, or review a proposed change. AI agents MUST NOT approve a change
+to locked architecture, business rules, financial semantics, security boundaries, or Human
+Decision Register items. Approval of such a change requires a Human decision, recorded on the ACR
+and reflected in the resulting ADR's Approval section.
+
+For any ACR classified as LOCKED ARCHITECTURE, BUSINESS RULE, SECURITY, or FINANCIAL (see
+[docs/decisions/ARCHITECTURE-CHANGE-REQUEST-TEMPLATE.md](../decisions/ARCHITECTURE-CHANGE-REQUEST-TEMPLATE.md)
+"Change Classification"), **Human Decision Required = YES without exception.**
 
 ## Database Migration Policy
 
