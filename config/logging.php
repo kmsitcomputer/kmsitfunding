@@ -65,6 +65,18 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // Identity/Authentication audit emission points (IMP-002 "Audit Events").
+        // No canonical Audit domain sink exists yet (owned by Governance & Platform
+        // Services, MODULE-OWNERSHIP.md §16) — this channel is the approved,
+        // deferred-persistence emission abstraction until that domain is built.
+        // Never contains secrets; see App\Services\Identity\IdentityAuditLogger.
+        'identity_audit' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/identity-audit.log'),
+            'level' => 'info',
+            'replace_placeholders' => true,
+        ],
+
         'daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),
