@@ -32,10 +32,16 @@ class SchemaBoundaryTest extends TestCase
         }
     }
 
-    public function test_no_roles_or_permissions_tables_exist(): void
+    /**
+     * IMP-003 has since implemented `roles`/`permissions` — this test's
+     * enduring intent (never a `role_user`/`permission_user` pivot directly
+     * on `users`, which would encode authorization onto the Identity model
+     * itself) still applies: RBAC is Principal-scoped, never User-scoped.
+     */
+    public function test_no_direct_user_role_or_permission_pivot_tables_exist(): void
     {
-        foreach (['roles', 'permissions', 'role_user', 'permission_user'] as $table) {
-            $this->assertFalse(Schema::hasTable($table), "$table must not exist — RBAC is IMP-003+.");
+        foreach (['role_user', 'permission_user', 'user_roles', 'user_permissions'] as $table) {
+            $this->assertFalse(Schema::hasTable($table), "$table must not exist — Role/Permission assignment is Principal-scoped (IMP-003), never User-scoped.");
         }
     }
 

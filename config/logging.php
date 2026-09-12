@@ -77,6 +77,16 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // RBAC/Scope/Business-Authority audit emission points (IMP-003
+        // "Audit Contract"). Same deferred-persistence pattern as
+        // identity_audit above — see App\Services\Rbac\RbacAuditLogger.
+        'rbac_audit' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/rbac-audit.log'),
+            'level' => 'info',
+            'replace_placeholders' => true,
+        ],
+
         'daily' => [
             'driver' => 'daily',
             'path' => storage_path('logs/laravel.log'),

@@ -5,6 +5,7 @@ namespace Tests\Feature\Identity;
 use App\Models\SuperAdminBootstrap;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -54,10 +55,24 @@ class BootstrapSuperAdminTest extends TestCase
         $this->assertFalse(Route::has('super-admin.bootstrap'));
     }
 
-    public function test_bootstrap_introduces_no_role_or_permission_schema(): void
+    /**
+     * IMP-003 has since added `roles`/`permissions` (Principal-scoped, not
+     * User-scoped) — this test's enduring intent is that the BOOTSTRAP
+     * COMMAND ITSELF grants no role/permission as a side effect of identity
+     * creation, not that no RBAC schema exists anywhere in the codebase.
+     */
+    public function test_bootstrap_introduces_no_role_or_permission_grant(): void
     {
-        foreach (['roles', 'permissions', 'role_user'] as $table) {
-            $this->assertFalse(Schema::hasTable($table));
+        $this->assertFalse(Schema::hasTable('role_user'), 'Role assignment is Principal-scoped (IMP-003), never User-scoped.');
+
+        $this->artisan('identity:bootstrap-super-admin')
+            ->expectsQuestion('Super Admin email', 'root@example.com')
+            ->expectsQuestion('Super Admin password', 'a-very-strong-password-123')
+            ->expectsQuestion('Confirm password', 'a-very-strong-password-123')
+            ->assertExitCode(0);
+
+        if (Schema::hasTable('principal_role_assignments')) {
+            $this->assertSame(0, DB::table('principal_role_assignments')->count(), 'Bootstrap must grant no Role — that is IMP-003\'s separate Bridge mechanism.');
         }
     }
 
