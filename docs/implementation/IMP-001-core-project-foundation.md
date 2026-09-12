@@ -7,10 +7,11 @@ Task ID: IMP-001
 Stage: IMPLEMENTATION 01
 Title: Core Project Foundation
 Document Type: Implementation Specification
-Status: DRAFT — PENDING READINESS REVIEW
+Status: DRAFT — REMEDIATED (Pass 1) — PENDING TARGETED READINESS RE-AUDIT
 Implementation Authorization: NOT AUTHORIZED
 Coding Authorization: NO
 Predecessor: IMP-000 FINAL / LOCKED
+Working Branch: impl/001-core-foundation (not merged to master)
 ```
 
 This specification defines the technical foundation of the Modern Digital Philanthropy Platform.
@@ -198,13 +199,38 @@ Do NOT introduce a mandatory separate API server.
 
 # 6. VERSION VERIFICATION RULE
 
-Before installing or upgrading dependencies, implementation MUST inspect:
+Before installing or upgrading dependencies, implementation MUST verify that the PHP runtime and
+Composer are accessible and version-verifiable, and inspect Node/npm versions.
+
+Global PATH configuration is NOT mandatory. A verified invocation through an explicit full
+executable path is equivalent, for readiness purposes, to a bare-command invocation. For example,
+these are semantically equivalent:
 
 ```bash
 php -v
-composer --version
-node --version
-npm --version
+```
+
+and:
+
+```bash
+<verified-php-executable> -v
+```
+
+The same applies to Composer (which itself requires a working PHP invocation to run its
+`composer.phar`, whether that PHP is found via PATH or via an explicit path). Whichever mechanism
+is used, the actual executable path/invocation and the resulting version MUST be recorded — do
+not invent a version, and do not require a specific PATH arrangement as a precondition of
+readiness. See
+[docs/audits/IMP-001-READINESS-REMEDIATION.md](../audits/IMP-001-READINESS-REMEDIATION.md) for the
+verified executables and versions recorded for this environment.
+
+Required baseline checks:
+
+```bash
+<php>       -v
+<composer>  --version
+node        --version
+npm         --version
 ```
 
 and available project dependency state.
@@ -1368,13 +1394,14 @@ IMP-000:
 FINAL / LOCKED
 
 IMP-001 Specification:
-DRAFT
+DRAFT / REMEDIATED (Readiness Remediation Pass 1 — see
+docs/audits/IMP-001-READINESS-REMEDIATION.md)
 
 IMP-001 Definition of Ready:
-PROVISIONALLY SATISFIED
+READY FOR TARGETED INDEPENDENT RE-AUDIT
 
 Independent Readiness Review:
-PENDING
+PENDING (targeted re-audit against Readiness Remediation Pass 1)
 
 IMP-001 Implementation:
 NOT AUTHORIZED
@@ -1382,6 +1409,12 @@ NOT AUTHORIZED
 Business Feature Coding:
 NOT AUTHORIZED
 ```
+
+This status was reached through Readiness Remediation Pass 1 (materialization of the Level 1-3
+authoritative baseline referenced in §2, branch remediation, and environment verification). It is
+not a self-authorization — implementation remains NOT AUTHORIZED pending Codex's targeted
+readiness re-audit and, if that passes, explicit Human/stage authorization per
+[docs/00-governance/IMPLEMENTATION-GOVERNANCE.md](../00-governance/IMPLEMENTATION-GOVERNANCE.md).
 
 STOP.
 
