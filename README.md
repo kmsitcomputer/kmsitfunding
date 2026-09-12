@@ -36,18 +36,42 @@ authorized to begin — see
 
 ## Source of Truth Hierarchy
 
+The canonical authority hierarchy is defined by
+[docs/00-governance/DOCUMENT-AUTHORITY.md](docs/00-governance/DOCUMENT-AUTHORITY.md). This
+section is a summary only — if it and DOCUMENT-AUTHORITY.md ever appear to disagree,
+DOCUMENT-AUTHORITY.md governs the implementation process, subject to the higher-level Human
+Decision, Requirement, and Locked Architecture authorities defined within it.
+
 ```
-Human Decision Register
-  -> Master Requirements
-    -> Locked Architecture Documents
-      -> ADR / Approved Implementation Decisions
-        -> Implementation Specification
-          -> Code
-            -> Tests / Generated Documentation
+LEVEL 1 — Human Decisions
+
+LEVEL 2 — Master Requirements
+
+LEVEL 3 — Locked Architecture Baseline
+           ├─ Master Architecture
+           ├─ Database Architecture
+           ├─ Security Architecture
+           └─ Authentication / RBAC Architecture
+
+LEVEL 4 — Approved Decisions / Amendments
+           └─ Accepted ADR
+
+LEVEL 5 — Implementation Specifications
+           └─ IMP-XXX
+
+LEVEL 6 — Governance / Operating Instructions
+           ├─ AGENTS.md
+           ├─ Governance documents (docs/00-governance/)
+           └─ CONTRIBUTING.md
+
+LEVEL 7 — Implementation Artifacts
+           ├─ Code
+           ├─ Tests
+           └─ Generated operational artifacts
 ```
 
-Higher authority always wins over lower authority. See
-[docs/00-governance/DOCUMENT-AUTHORITY.md](docs/00-governance/DOCUMENT-AUTHORITY.md).
+Higher authority always wins over lower authority (lower level number wins). Code and Tests are
+both Level 7 Implementation Artifacts — neither has authority over the other.
 
 ## Implementation Sequence
 
