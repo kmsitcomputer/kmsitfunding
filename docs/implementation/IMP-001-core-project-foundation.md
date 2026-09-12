@@ -1416,29 +1416,37 @@ IMP-000:
 FINAL / LOCKED
 
 IMP-001 Specification:
-READY / LOCKED FOR IMPLEMENTATION (readiness gate passed; see
-docs/audits/IMP-001-READINESS-REMEDIATION.md and
-docs/audits/IMP-001-B01-MATERIALIZATION-PASS-2.md)
+FINAL / LOCKED
 
 IMP-001 Implementation:
-COMPLETE — PENDING INDEPENDENT REVIEW (Implementation Pass 1 — see
-docs/audits/IMP-001-IMPLEMENTATION-PASS-1.md)
+FINAL / LOCKED
 
 Business Feature Coding:
-NOT AUTHORIZED (out of scope for IMP-001; unaffected by this pass)
+NOT AUTHORIZED (remains out of scope for IMP-001)
 
 IMP-001 Final / Merge to master:
+COMPLETE (merge commit 81ca3a0 on master)
+
+IMP-002:
 NOT AUTHORIZED
 ```
 
-This status was reached through Implementation Pass 1 on `impl/001-core-foundation`: the
-Laravel/Vue/Inertia/TypeScript/Tailwind/Vite foundation described in this specification was
-implemented and locally verified (build, type-check, lint, tests — see
-docs/audits/IMP-001-IMPLEMENTATION-PASS-1.md for exact commands and results). It is not a
-self-authorization of the stage as FINAL — that still requires independent Codex review and, per
-[docs/00-governance/IMPLEMENTATION-GOVERNANCE.md](../00-governance/IMPLEMENTATION-GOVERNANCE.md),
-Human/stage authorization before any merge to `master`.
+This status was reached through the full chain recorded in
+[docs/audits/IMP-001-READINESS-REMEDIATION.md](../audits/IMP-001-READINESS-REMEDIATION.md),
+[docs/audits/IMP-001-B01-MATERIALIZATION-PASS-2.md](../audits/IMP-001-B01-MATERIALIZATION-PASS-2.md),
+[docs/audits/IMP-001-IMPLEMENTATION-PASS-1.md](../audits/IMP-001-IMPLEMENTATION-PASS-1.md),
+[docs/audits/IMP-001-TARGETED-REMEDIATION-PASS-1.md](../audits/IMP-001-TARGETED-REMEDIATION-PASS-1.md),
+and [docs/audits/IMP-001-FINALIZATION.md](../audits/IMP-001-FINALIZATION.md): implementation,
+independent review, targeted remediation, targeted re-audit PASS, explicit Human Stage Gate
+approval, and controlled non-destructive integration into `master`. It is not a self-declared
+FINAL — the Human Stage Gate approval and independent review are what closed this stage; this
+document only records that outcome.
+
+IMP-001 reaching FINAL/LOCKED does NOT, by itself, authorize IMP-002 (Identity + Authentication).
+IMP-002 requires its own implementation specification, Definition of Ready evaluation, and
+explicit Human/stage authorization, per
+[docs/00-governance/IMPLEMENTATION-GOVERNANCE.md](../00-governance/IMPLEMENTATION-GOVERNANCE.md).
 
 STOP.
 
-Do not implement IMP-001 yet.
+Do not begin IMP-002.
