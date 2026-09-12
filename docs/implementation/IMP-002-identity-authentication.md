@@ -7,7 +7,7 @@ Task ID: IMP-002
 Stage: IMPLEMENTATION 02
 Title: Identity + Authentication
 Document Type: Implementation Specification
-Status: DRAFT — READY FOR READINESS REVIEW
+Status: DRAFT — READY FOR TARGETED READINESS RE-AUDIT
 Implementation Authorization: NOT AUTHORIZED
 Coding Authorization: NO
 Predecessor: IMP-001 FINAL / LOCKED
@@ -24,22 +24,20 @@ authority) assigned to IMP-003, and it does NOT implement any business/financial
 
 ```text
 Q7  — Beneficiary Registration Model  = HYBRID BENEFICIARY REGISTRATION — FINAL / LOCKED
-                                         (pre-existing Level 1 entry — see
-                                         docs/01-requirements/HUMAN-DECISION-REGISTER.md; not a
-                                         new decision made by this specification, referenced only)
+                                         (pre-existing Level 1 entry; referenced only)
 Q21 — Login Identifier                = EMAIL AS CANONICAL LOGIN IDENTIFIER — FINAL / LOCKED
 Q22 — Registration Model              = HYBRID REGISTRATION BY ACTOR — FINAL / LOCKED
 Q23 — MFA Policy                      = CONFIGURABLE MFA, TOTP BASELINE — FINAL / LOCKED
+Q24 — Account / Security Status Model = SEPARATED IDENTITY LIFECYCLE + VERIFICATION + SECURITY
+                                         RESTRICTION MODEL — FINAL / LOCKED
+Q25 — First Super Admin Bootstrap     = CONTROLLED ONE-TIME CLI BOOTSTRAP — FINAL / LOCKED
 ```
 
-Q21-Q23, together with the pre-existing Q1-Q20 register in
+Q21-Q25 are now materialized in the canonical Level 1
 [docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md)
-(which already includes Q7), are now authoritative Level 1 input to this specification. Q21-Q23
-are recorded here because they were supplied directly to this specification task; the canonical
-register file itself was not edited by that task (see "Evidence" in the accompanying remediation
-audit record for where they were communicated). Q7 is listed above only as a reference to an
-already-locked decision this specification must not contradict — it is not renumbered, redefined,
-or reopened here.
+("Register" and "Extended Decisions — Detailed Rules (Q21-Q25)"), alongside the pre-existing
+Q1-Q20 (which already include Q7). This specification references, rather than duplicates, their
+detailed rules — see the register for the authoritative wording; this document applies it.
 
 ---
 
@@ -69,34 +67,19 @@ docs/implementation/IMP-001-core-project-foundation.md
 docs/audits/IMP-001-IMPLEMENTATION-PASS-1.md
 docs/audits/IMP-001-TARGETED-REMEDIATION-PASS-1.md
 docs/audits/IMP-001-FINALIZATION.md
+docs/audits/IMP-002-SPECIFICATION-REMEDIATION-1.md
+docs/audits/IMP-002-AUTHORITY-CONSISTENCY-PATCH-1.md
 ```
 
-**Actor Catalog reconciliation (corrects the prior draft):** the prior draft of this
-specification treated the absence of a dedicated `docs/06-domains/identity/` Actor Catalog file as
-a blocking Human Decision. On reconciliation, this was the wrong classification. No repository
-document is titled "Actor Catalog," but
-[docs/01-requirements/MASTER-REQUIREMENTS.md](../01-requirements/MASTER-REQUIREMENTS.md) §3 (route
-prefixes `/donor/*`, `/fundraiser/*`, `/partner/*`, `/admin/*`) and §6 (domain names "Donor
-Portal," "Fundraiser Portal," "Partner Portal") already named the actor set relevant to
-authentication, and Q22 (this task) explicitly locks the registration model for exactly that
-actor set (Donor, Fundraiser, Partner Representative, Internal Administrative Identity, Super
-Admin). Combined, these are now sufficient authoritative identification of the actors IMP-002 must
-support — see "Actors" below. This is reconciliation from existing authority, not invention of a
-new actor, removal of one, or renaming one semantically.
-
-**Correction:** an earlier revision of this specification described Beneficiary registration as an
-open/undecided item. That was incorrect and has been corrected. Beneficiary registration is
-already governed by
-[docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md)
-"Q7 — D Hybrid Beneficiary Registration" — a Level 1, FINAL/LOCKED Human Decision. There is no
-open Human Decision regarding Beneficiary registration. What remains open is only *which stage
-implements* the Beneficiary domain's hybrid registration mechanics and whether/how a Beneficiary
-holds a `User` identity — an implementation-ownership question, not a business decision — see
-"Actors" and "Deferred Items."
-
-The absence of a dedicated domain-level Actor Catalog *artifact* under `docs/06-domains/identity/`
-is still true and is still worth closing, but it is correctly classified as a **documentation /
-materialization gap**, not a Human Decision — see "Actor Catalog Artifact Gap" below.
+**Actor Catalog reconciliation:** no repository document is titled "Actor Catalog," but
+[docs/01-requirements/MASTER-REQUIREMENTS.md](../01-requirements/MASTER-REQUIREMENTS.md) §3/§6,
+[docs/05-rbac/DATA-SCOPE-MODEL.md](../05-rbac/DATA-SCOPE-MODEL.md), and Q22 together already
+identify the actor set relevant to authentication (Donor, Fundraiser, Partner Representative,
+Internal Administrative Identity, Super Admin) — see "Actors" below. Beneficiary registration
+policy is separately governed by Q7 (not Q22); only Q7's implementation ownership is deferred, not
+its policy — see "Actors" and "Deferred Items." The absence of a dedicated
+`docs/06-domains/identity/` Actor Catalog artifact is a documentation/materialization gap, not a
+Human Decision.
 
 ---
 
@@ -110,10 +93,11 @@ Establish:
 3. How authenticated state is maintained (Session).
 4. How credentials are securely managed.
 5. How authentication-sensitive lifecycle events are handled (registration, invitation,
-   verification, password reset, MFA, account security state).
+   verification, email change, password reset, MFA, account/security state, first Super Admin
+   bootstrap).
 6. How authentication assurance (STANDARD / ELEVATED, per
-   docs/05-rbac/AUTHENTICATION-ASSURANCE.md) is represented for later authorization stages to
-   consume.
+   docs/05-rbac/AUTHENTICATION-ASSURANCE.md) is represented, with an executable lifecycle, for
+   later authorization stages to consume.
 ```
 
 IMP-002 does NOT answer what business data/action a principal may access — that is IMP-003
@@ -129,21 +113,30 @@ IMP-002 does NOT answer what business data/action a principal may access — tha
 Identity data model (credential-bearing entity only)
 Authentication (email + password login, logout)
 Session use of IMP-001's existing sessions table
-Password credential handling (hash, update, reset)
+Password credential handling (hash, update, reset) and its session/assurance consequences
+Canonical email change lifecycle (pending email, re-verification, atomic promotion)
 Email verification lifecycle (canonical, per Q21)
 Optional phone as contact data only (never a login identifier)
-Configurable TOTP-baseline MFA (enrollment, verification, recovery)
-Authentication Assurance state exposure (STANDARD / ELEVATED) for IMP-003 to consume
-Account/security lifecycle states needed for authentication (active/suspended/disabled/locked)
+Configurable TOTP-baseline MFA (enrollment, verification, recovery, reset) using a maintained
+  library — see "MFA"
+Executable Authentication Assurance lifecycle (STANDARD / ELEVATED) with finite lifetime and
+  explicit invalidation triggers, for IMP-003 to consume
+Identity Lifecycle (ACTIVE/DISABLED) + Verification (email_verified_at) + persistent Security
+  Restriction (NONE/SUSPENDED) per Q24 — transient brute-force lockout handled via rate limiting,
+  never as persistent lifecycle state
 Invitation lifecycle for non-self-registering actors (Partner Representative, Internal
-  Administrative Identity, Super Admin)
+  Administrative Identity, Super Admin), including issuer/revocation state
+Controlled one-time CLI bootstrap of the first Super Admin identity per Q25
 Principal exposure to web requests, API requests, audit
 Rate limiting / abuse control on authentication endpoints
 Authentication-relevant audit events
 Privacy-safe error responses (no account enumeration)
 Minimal authentication UI (login, registration where decided, invitation acceptance, forgot/reset
-  password, verification, account security, MFA enrollment/verification)
+  password, email verification, email change, account security, MFA enrollment/verification)
 ```
+
+Remember-me is explicitly DEFERRED/DISABLED for the IMP-002 baseline — see "Remember-Me
+(Deferred)."
 
 ### Out of Scope
 
@@ -162,6 +155,9 @@ Partner scope authorization / actual Partner relationship record (Partner module
 Fundraiser business rules / Fundraiser Profile (owned by Fundraising & Attribution, see
   docs/02-architecture/MODULE-OWNERSHIP.md §5)
 Fundraiser approval / verification decision (a Business Authority concept, not Identity)
+Beneficiary domain implementation (application, document, eligibility, verification workflow,
+  distribution eligibility, business status, approval) — Q7's registration *policy* is locked;
+  its mechanics belong to the Beneficiary & Distribution domain stage
 Donation logic
 Payment logic
 Ledger
@@ -173,6 +169,8 @@ CMS
 Theme Engine
 Full REST API (only a boundary/direction is discussed in "API Authentication Boundary" below)
 Business notifications
+Canonical RBAC Super Admin role/permission/scope/authority (Q25 — owned by IMP-003; IMP-002 only
+  bootstraps the first identity)
 ```
 
 Rationale for the Fundraiser/Partner/Beneficiary profile exclusion: per
@@ -183,44 +181,35 @@ which owns only "User identity, Organization membership, Principal organizationa
 therefore implements only the shared credential-bearing identity; each business module's own
 profile record (created in that module's later stage) references this identity by foreign key.
 
-**Identity creation is never authorization.** Account creation (self-registered, invited, or
-provisioned) is explicitly NOT equivalent to: role assignment, permission assignment, data scope,
-business authority, financial authority, Partner authority, or Fundraiser approval. A Fundraiser
-who self-registers (see "Registration Flows") receives only an authenticated Identity/Auth
-subject — no Fundraiser business authority, no attribution eligibility, no Commission
-entitlement. Those remain entirely IMP-003+/domain-stage concerns.
+**Identity creation is never authorization.** Account creation (self-registered, invited,
+provisioned, or bootstrapped per Q25) is explicitly NOT equivalent to: role assignment, permission
+assignment, data scope, business authority, financial authority, Partner authority, or Fundraiser
+approval. A Fundraiser who self-registers receives only an authenticated Identity/Auth subject —
+no Fundraiser business authority, no attribution eligibility, no Commission entitlement. The first
+bootstrapped Super Admin identity (Q25) likewise receives no RBAC authority from IMP-002 itself —
+see "First Super Admin Bootstrap." All authority remains entirely IMP-003+/domain-stage concerns.
 
 ---
 
 ## Actors
 
-Reconciled from [docs/01-requirements/MASTER-REQUIREMENTS.md](../01-requirements/MASTER-REQUIREMENTS.md)
-§3/§6 and Q22, plus [docs/05-rbac/DATA-SCOPE-MODEL.md](../05-rbac/DATA-SCOPE-MODEL.md) "Ownership
-Examples" and [docs/05-rbac/RBAC-ARCHITECTURE.md](../05-rbac/RBAC-ARCHITECTURE.md) (Super Admin
-mention). No actor is added, removed, or renamed beyond aligning terminology with Q22's own
-wording (e.g. Q22's "Partner Representative" corresponds to DATA-SCOPE-MODEL.md's "Partner User";
-Q22's "Internal Administrative Identity" corresponds to DATA-SCOPE-MODEL.md's "Operational
-Staff"/MASTER-REQUIREMENTS.md's `/admin/*`).
-
 | Actor | Can Hold Human Identity? | Authentication Expected? | Registration / Provisioning Model | Public Representation Separate? | Authorization Owner | Notes |
 |---|---|---|---|---|---|---|
-| Donor | YES | YES | **Self-registration** (Q22) | YES — public donor representation is separate per Q6 (Human Decision Register: "Public Anonymity Only") and AGENTS.md ("Public donor representation != internal identity") | IMP-003+ (no authority granted at registration) | Baseline actor; `/donor/*` (MASTER-REQUIREMENTS.md §3) |
-| Fundraiser | YES | YES | **Self-registration** (Q22); creates Identity/Auth subject only — no automatic Fundraiser business authority | YES — Fundraiser Profile is a separate record owned by Fundraising & Attribution (MODULE-OWNERSHIP.md §5) | IMP-003+ / Fundraising & Attribution module (attribution eligibility, Commission entitlement, etc. are never granted by registration) | `/fundraiser/*` |
-| Partner Representative | YES | YES | **Invitation or domain-driven provisioning only** — no public self-registration baseline (Q22) | YES — Partner Profile owned by Partner module (MODULE-OWNERSHIP.md §7) | IMP-003+ / Partner module (Partner Verification, relationship ownership) | `/partner/*` |
-| Internal Administrative Identity | YES | YES | **Invitation/provisioning only** — no public self-registration (Q22) | Not applicable in the same sense (internal identity; no public-facing representation is implied by this stage) | IMP-003+ (roles/permissions) | `/admin/*` |
-| Super Admin | YES | YES | **Provisioning only** — no public self-registration (Q22) | Not applicable | IMP-003+ | `/admin/*`; RBAC-ARCHITECTURE.md explicitly notes "Super Admin != automatic Financial Authority" — reaffirmed: Super Admin identity provisioning grants no financial or business authority in IMP-002 or later without an explicit Authority Assignment |
-| Beneficiary | Likely YES where the hybrid model requires it (DATA-SCOPE-MODEL.md: "Beneficiary -> own application/profile where permitted") | Governed by Q7 (Hybrid Beneficiary Registration — FINAL/LOCKED); whether that entails a `User` identity is an implementation-ownership question for the Beneficiary domain stage, not open at the business-decision level | **LOCKED by Q7** ("Hybrid Beneficiary Registration" — HUMAN-DECISION-REGISTER.md); exact mechanics deferred to the Beneficiary domain stage's own implementation specification | YES — Beneficiary data is HIGHLY_SENSITIVE per MASTER-REQUIREMENTS.md §10; Profile owned by Beneficiary & Distribution (MODULE-OWNERSHIP.md §14) | IMP-003+ / Beneficiary & Distribution module (business status, eligibility, verification); Identity boundary only, if any, is IMP-002's concern | Not routed yet (`/beneficiary/*` does not appear in MASTER-REQUIREMENTS.md §3). Registration *policy* is not open (Q7); only *which stage implements it* and *whether it needs a `User`* are deferred — see "Deferred Items." IMP-002 does not implement any Beneficiary domain behavior. |
+| Donor | YES | YES | **Self-registration** (Q22) | YES — separate per Q6 and AGENTS.md | IMP-003+ | `/donor/*` |
+| Fundraiser | YES | YES | **Self-registration** (Q22); no automatic business authority | YES — Fundraiser Profile owned by Fundraising & Attribution (MODULE-OWNERSHIP.md §5) | IMP-003+ / Fundraising & Attribution | `/fundraiser/*` |
+| Partner Representative | YES | YES | **Invitation or domain-driven provisioning only** (Q22) | YES — Partner Profile owned by Partner module (§7) | IMP-003+ / Partner module | `/partner/*` |
+| Internal Administrative Identity | YES | YES | **Invitation/provisioning only** (Q22) | N/A | IMP-003+ | `/admin/*` |
+| Super Admin | YES | YES | **Provisioning only** (Q22); the *first* Super Admin uses the controlled CLI bootstrap (Q25) | N/A | IMP-003+ (canonical role/permission/scope/authority) | `/admin/*`; RBAC-ARCHITECTURE.md: "Super Admin != automatic Financial Authority" |
+| Beneficiary | Likely YES where Q7's hybrid model requires it | Governed by Q7 (FINAL/LOCKED); whether it entails a `User` is an implementation-ownership question | **LOCKED by Q7**; mechanics deferred to the Beneficiary & Distribution domain stage | YES — Beneficiary data is HIGHLY_SENSITIVE (MASTER-REQUIREMENTS.md §10) | IMP-003+ / Beneficiary & Distribution | Not routed yet; policy is not open, only implementation ownership is deferred |
 
 Do NOT create role authorization rules, business authority, or per-actor permission logic from
 this table — it governs authentication/registration eligibility only.
 
 ### Actor Catalog Artifact Gap
 
-`docs/06-domains/identity/` remains an empty placeholder (`.gitkeep` only). Materializing a formal
-Actor Catalog document there (consolidating the table above plus any future actor) would be
-useful and is recommended, but its absence is a **documentation/materialization gap**, not a
-blocking Human Decision — reconciliation above already supplies everything IMP-002 needs from
-existing authority.
+`docs/06-domains/identity/` remains an empty placeholder. This is a documentation/materialization
+gap, not a blocking Human Decision — reconciliation above already supplies everything IMP-002
+needs from existing authority.
 
 ---
 
@@ -228,62 +217,53 @@ existing authority.
 
 ### Canonical Identity Entity
 
-Per [docs/02-architecture/MODULE-OWNERSHIP.md](../02-architecture/MODULE-OWNERSHIP.md) §1
-("Identity & Organization" owns "User identity"), the canonical credential-bearing entity remains
-named **User** in this specification — unchanged by Q21-Q23, since no authoritative higher-level
-source contradicts it. This is a naming choice, not an architecture decision.
+Per [docs/02-architecture/MODULE-OWNERSHIP.md](../02-architecture/MODULE-OWNERSHIP.md) §1, the
+canonical credential-bearing entity remains named **User** — a naming choice, not an architecture
+decision.
 
 `User` owns exactly:
 
 ```text
-entity purpose:       authentication + shared identity, nothing business-domain-specific
-primary identifier:   BIGINT unsigned internal key (docs/03-database/DATABASE-ARCHITECTURE.md
-                       "Identity Conventions")
-public identifier:    ULID (same source). NOT exposed in every authentication response by
-                       default — see "Public ID" below.
-login identifier:     email (Q21 — canonical, exclusive baseline; see "Email as Canonical Login
-                       Identifier")
-password credential:  hashed only (see "Credential Model")
-contact (optional):   phone — contact data only, never a login identifier (see "Contact Phone")
-status/lifecycle:     neutral identity/security states only — see "Security Restrictions"
-verification state:   email_verified_at (baseline); phone_verified_at (only if phone is
-                       collected, and only for contact purposes, not as a login gate)
-MFA state:            mfa_enabled flag + reference to MFA secret storage (see "MFA")
-security metadata:    failed-login counters, lock timestamps, last-login metadata (standard
-                       Laravel-compatible fields; no invented mechanism)
+entity purpose:        authentication + shared identity, nothing business-domain-specific
+primary identifier:    BIGINT unsigned internal key (DATABASE-ARCHITECTURE.md "Identity
+                        Conventions")
+public identifier:     ULID — see "Public ID"
+login identifier:      email (Q21 — canonical, exclusive baseline)
+pending email:         nullable — see "Canonical Email Change Lifecycle" (not the login
+                        identifier until promoted)
+password credential:   hashed only (see "Credential Model")
+contact (optional):    phone — contact data only, never a login identifier
+Identity Lifecycle:    ACTIVE | DISABLED (Q24 — persistent; see "Account / Security Model")
+Security Restriction:  NONE | SUSPENDED (Q24 — persistent, separate from Identity Lifecycle)
+verification state:    email_verified_at (Q24 — a timestamp, not a lifecycle enum value);
+                        phone_verified_at (only if phone is collected)
+MFA state:             mfa_enabled flag; TOTP secret and recovery codes live in separate storage
+                        (see "MFA Secret Storage" / "Database Design Requirements")
+security metadata:     failed-login counters and transient-lockout timestamp (brute-force
+                        protection — see "Account / Security Model"; NOT a persistent lifecycle
+                        state), last-login metadata
 timestamps:            created_at / updated_at (framework standard)
 soft-delete/retention: NOT soft-deleted by default — see "Retention Boundary"
 ```
 
+No `remember_token` field is part of the IMP-002 baseline — see "Remember-Me (Deferred)."
+
 `User` does NOT own: Donor-specific fields, Fundraiser Profile, Partner Profile, Beneficiary
 Profile/Application, Admin business preferences, roles, permissions, scopes, or business
-authority. Each owning module (per MODULE-OWNERSHIP.md) references `User` by its internal ID when
-that module is implemented in its own stage.
+authority.
 
 ### Organization Membership
 
-Unchanged from the prior draft: per
-[docs/02-architecture/MASTER-ARCHITECTURE.md](../02-architecture/MASTER-ARCHITECTURE.md)'s locked
-"Single Organization" principle, "Organization membership" (MODULE-OWNERSHIP.md §1) is interpreted
-minimally as implicit single-organization membership for every `User`; no separate membership
-table is required by this stage.
+Unchanged: per [docs/02-architecture/MASTER-ARCHITECTURE.md](../02-architecture/MASTER-ARCHITECTURE.md)'s
+locked "Single Organization" principle, every `User` is implicitly a member of the single platform
+organization; no separate membership table is required by this stage.
 
 ### Internal Identity vs. Public Representation
 
-Unchanged principle, reaffirmed against Q21-Q23: `User` (internal identity, keyed by email) MUST
-NOT be conflated with any public-facing representation:
-
-```text
-public fundraiser display name    -> owned by Fundraiser Profile (Fundraising & Attribution)
-partner public profile            -> owned by Partner Profile (Partner)
-donor display name / anonymity    -> owned by the future Donation/Donor-facing module, governed
-                                      by Q6 (Human Decision Register: "Public Anonymity Only")
-beneficiary public identity       -> owned by Beneficiary & Distribution; beneficiary data is
-                                      HIGHLY_SENSITIVE per MASTER-REQUIREMENTS.md §10
-campaign public author            -> owned by Campaign & Program / Content Experience
-```
-
-An email address in particular MUST NOT be exposed as any actor's public identity/handle.
+Unchanged principle: `User` (internal identity, keyed by email) MUST NOT be conflated with any
+public-facing representation (fundraiser display name, partner public profile, donor
+display/anonymity per Q6, beneficiary public identity, campaign public author). An email address
+in particular MUST NOT be exposed as any actor's public identity/handle.
 
 ---
 
@@ -291,111 +271,169 @@ An email address in particular MUST NOT be exposed as any actor's public identit
 
 ```text
 Email is the canonical login identifier for all actors in "Actors" above.
-Authentication baseline is email + password (see "Credential Model").
-Phone MAY exist as contact and/or verification data but is NOT a baseline login identifier.
+Authentication baseline is email + password.
+Phone MAY exist as contact/verification data but is NOT a baseline login identifier.
 Username is NOT a baseline login identifier.
-Multi-identifier login (choosing email OR phone OR username at login time) is NOT part of the
-  IMP-002 baseline.
-Adding a second login identifier in the future requires change control (an ACR/ADR) where it
-  would alter this locked identity contract — it is not an IMP-002 implementation detail.
+Multi-identifier login is NOT part of the IMP-002 baseline.
+Adding a second login identifier later requires change control (an ACR/ADR).
 ```
 
 ### Email Normalization
 
 ```text
-Leading/trailing whitespace is removed before storage and comparison.
-The local part and domain are compared using a single, consistent canonical representation
-  (e.g. lowercase) for uniqueness — the exact case-folding rule is an implementation detail as
-  long as it is applied consistently at both write and comparison time.
-The unique constraint is enforced on the canonical stored representation, at the database level
-  (see "Database Design Requirements"), not only in application validation.
+Leading/trailing whitespace removed before storage and comparison.
+Compared using a single, consistent canonical representation (e.g. lowercase) for uniqueness,
+  applied consistently at both write and comparison time.
+The unique constraint is enforced on the canonical stored representation at the database level.
 ```
 
-Explicitly NOT specified or authorized: Gmail-style dot-removal, plus-alias stripping, or any
-other provider-specific mailbox rewriting. Email identity semantics remain provider-neutral —
-two addresses that differ only by such provider-specific conventions are treated as distinct
-identifiers unless a future Human Decision says otherwise.
+Explicitly NOT authorized: Gmail-style dot-removal, plus-alias stripping, or other
+provider-specific mailbox rewriting. Email identity semantics remain provider-neutral.
+
+---
+
+## Canonical Email Change Lifecycle (M01)
+
+Email is the login identifier (Q21), so changing it is a sensitive operation with its own
+deterministic lifecycle — not merely "update a column."
+
+```text
+1. Principal is authenticated (STANDARD assurance at minimum to initiate the request).
+2. A sensitive email change requires fresh credential confirmation; if the approved security
+   policy requires ELEVATED assurance for this class of change (see "Authentication Assurance"),
+   ELEVATED must be satisfied before the request proceeds.
+3. The requested new email is normalized (see "Email Normalization").
+4. The normalized new email is checked for uniqueness against all existing canonical emails
+   (application-level check first; see step 6 for the final authority).
+5. The new email is stored as `pending_email` — it does NOT become the canonical login email yet.
+6. The database unique constraint on the canonical email column remains the final race-safe
+   authority: promotion (step 8) is rejected at the database level if a collision has since
+   arisen, even if the application-level check in step 4 passed.
+7. A verification message is sent to the new (pending) email — reusing the same verification
+   mechanism as initial registration.
+8. The canonical login email is NOT considered changed, and the old email remains fully valid for
+   login and password reset, until verification of the new email succeeds.
+9. On successful verification, promotion is atomic (see "Transaction Boundaries"):
+   - the old canonical email is replaced by the (now-verified) `pending_email`;
+   - `pending_email` is cleared;
+   - `email_verified_at` is updated to reflect the new email's verification time;
+   - the current session's ID is rotated;
+   - all other active sessions for the identity are invalidated;
+   - any persistent/remember-me credential is invalidated (moot under the IMP-002 baseline, since
+     remember-me is deferred — see "Remember-Me (Deferred)" — but specified now so a future
+     enablement does not need to revisit this lifecycle);
+   - any password-reset token outstanding against the OLD email is invalidated — after promotion,
+     the old email is no longer a valid password-reset lookup target for this identity;
+   - the change is audited (see "Audit Events").
+10. Rollback/cancellation: an expired or cancelled pending-email verification leaves the existing
+    canonical email unchanged and valid; a failed uniqueness or verification check must not
+    corrupt the current identity's canonical email in any way.
+```
+
+No provider-specific email rewriting is introduced by this lifecycle (see "Email Normalization").
+
+### Concurrency
+
+```text
+Two identities can never hold the same normalized canonical email — enforced by the database
+  unique constraint (step 6 above), which is authoritative regardless of what any
+  application-level pre-check found.
+Two concurrent pending-email requests for the same identity: the most recently confirmed
+  verification wins; an application MAY choose to invalidate a prior unconfirmed pending-email
+  token when a new change request is made (reasonable default, not mandated).
+A pending email that collides with another identity's canonical (or another pending) email at
+  promotion time fails safely — the requesting identity's canonical email is unchanged, and a
+  generic error is shown (see "Privacy" — this is not an enumeration risk, since the requester is
+  already authenticated and initiated the request themselves, but the response still should not
+  gratuitously confirm which existing account holds the colliding email).
+```
 
 ---
 
 ## Credential Model
 
 Password hashing MUST use Laravel's framework-standard hashing (bcrypt/argon2 via the `Hash`
-facade) — per [CHANGE-CONTROL.md](../00-governance/CHANGE-CONTROL.md) "Dependency Governance": "Use
-framework capabilities before building custom equivalents for ... hashing." No custom
-cryptography (AGENTS.md "Never").
+facade) — per [CHANGE-CONTROL.md](../00-governance/CHANGE-CONTROL.md) "Dependency Governance." No
+custom cryptography (AGENTS.md "Never").
 
 ```text
 baseline:                 email + password (Q21)
-password hashing:        framework Hash facade only; never plaintext, never reversible
-password verification:    via the framework hasher (`Hash::check()` equivalent); the framework
-                          hasher rehashes automatically when its configured algorithm/cost policy
-                          changes (Laravel's "needs rehash" capability) — use this framework
-                          behavior rather than a custom rehash mechanism
-password update:         requires current-password confirmation OR an authenticated reset flow;
-                          invalidates other active sessions where "Session Model" requires it
-password reset:           see "Password Reset" below — token-based, single-use, expiring
+password hashing:         framework Hash facade only; never plaintext, never reversible
+password verification:    via the framework hasher; the framework hasher rehashes automatically
+                           when its configured algorithm/cost policy changes (Laravel's "needs
+                           rehash" capability) — no custom rehash mechanism
+password update:          requires current-password confirmation OR an authenticated reset flow
+password reset:           see "Password Reset" — token-based, single-use, expiring
 password confirmation:    supported as one mechanism to step up from STANDARD to ELEVATED
-                          assurance for a bounded window (see "Authentication Assurance")
-credential invalidation:  changing a password invalidates existing password-reset tokens for that
-                          identity
-password history:         NOT required — no materialized document specifies password-history
-                          reuse prevention; do not invent it
+                           assurance for a bounded window (see "Authentication Assurance")
+password history:         NOT required — not invented
 ```
 
 Never store: plaintext password, reversibly-encrypted password, or a plaintext password-reset
-token (the reset token is stored hashed — see "Password Reset").
+token.
+
+### Password Change — Session Consequences (m02)
+
+On any successful *ordinary* password change (the identity supplies its current password to set a
+new one), ALL of the following are required, atomically (see "Transaction Boundaries"):
+
+```text
+password is rehashed per the credential model above
+the current session's ID is regenerated (rotation)
+all of the identity's OTHER active sessions are invalidated
+all ELEVATED Authentication Assurance is invalidated (both the current session's and any other
+  session's, since those sessions are themselves being invalidated) — a new STANDARD-only state
+  applies until re-earned
+all outstanding password-reset tokens for the identity are invalidated
+any persistent/remember-me credential is invalidated (moot under the current baseline — see
+  "Remember-Me (Deferred)" — specified for forward compatibility)
+an audit event is emitted
+```
+
+The current request's session may continue only after the rotation and assurance reset above have
+been applied — it does not "keep" its pre-change ELEVATED state.
+
+A password reset completed via the recovery flow (see "Password Reset") applies the *same or
+stronger* invalidation semantics — every other session is invalidated there too, not just "some."
 
 ---
 
 ## Registration Flows (Q22 — Hybrid Registration by Actor)
 
-Per-actor eligibility is now locked (see "Actors"). Every registration/provisioning/invitation
-path, regardless of actor, MUST:
+Per-actor eligibility is locked (see "Actors"). Every registration/provisioning/invitation path,
+regardless of actor, MUST:
 
 ```text
-validate the email format and uniqueness
-hash the password immediately (never hold plaintext beyond the request lifecycle)
-create the User record inside a single transaction (see "Transaction Boundaries")
-NOT seed a default/known password (IMP-001's targeted remediation already established this
-  as a hard requirement — see docs/audits/IMP-001-TARGETED-REMEDIATION-PASS-1.md)
-NOT grant any role, permission, scope, or business authority (IMP-003 concern)
-emit an audit event (see "Audit Events")
+validate the email format and uniqueness (application check + final database unique constraint)
+hash the password immediately
+create the User record inside a single transaction
+NOT seed a default/known password (see docs/audits/IMP-001-TARGETED-REMEDIATION-PASS-1.md)
+NOT grant any role, permission, scope, or business authority
+emit an audit event
 ```
 
 ### Donor Self-Registration
 
 ```text
-submit email + set password
-create Identity (User) record
-begin email verification lifecycle (see "Verification")
-establish an authenticated session per "Session Model" / "Login"
+submit email + set password -> create Identity -> begin email verification -> authenticated
+  session per "Session Model"/"Login"
 ```
-
-Does NOT create any donor-domain record beyond the Identity itself — donor-specific business data
-belongs to the future Donation-facing module.
 
 ### Fundraiser Self-Registration
 
 ```text
-create Identity (User) record (same mechanism as Donor)
-authenticate the identity
-grant NO automatic Fundraiser business authority, attribution eligibility, or Commission
-  entitlement
+create Identity (same mechanism as Donor) -> authenticate -> grant NO automatic Fundraiser
+  business authority, attribution eligibility, or Commission entitlement
 ```
 
-Whether a neutral, non-authoritative "pending Fundraiser application" record is created alongside
-the Identity is a Fundraising & Attribution (MODULE-OWNERSHIP.md §5) concern for that module's own
-stage — IMP-002 does not implement Fundraiser domain logic, and does not decide whether such a
-record exists.
+Whether a neutral "pending Fundraiser application" record accompanies the Identity is a
+Fundraising & Attribution (MODULE-OWNERSHIP.md §5) concern for that module's own stage.
 
 ### Partner Representative
 
 ```text
-NO public self-registration baseline (Q22)
-identity is created via invitation (see "Invitation Boundary") or as a side effect of a
-  domain-driven Partner-module workflow (e.g. Partner Verification) — the domain workflow itself
-  is out of scope; only the resulting Identity creation touches IMP-002
+NO public self-registration baseline (Q22) — invitation (see "Invitation Boundary") or
+  domain-driven Partner-module provisioning only
 ```
 
 ### Internal Administrative Identity
@@ -408,57 +446,84 @@ invited or provisioned only — no public self-registration (Q22)
 
 ```text
 provisioned only — no public self-registration (Q22)
-provisioning is itself a privileged administrative action; IMP-002 does not define who is
-  authorized to provision a Super Admin identity (an Authority/Approval concern — IMP-003+), only
-  that the resulting Identity follows the same credential/security rules as any other User
+the FIRST Super Admin identity uses the Q25 controlled CLI bootstrap — see "First Super Admin
+  Bootstrap"
+any subsequent Super Admin identity does NOT use the first-bootstrap mechanism; it uses whatever
+  ordinary provisioning path IMP-003+ establishes for granting Super Admin authority to an
+  already-existing or newly invited identity
 ```
 
 ### Beneficiary
 
-The Beneficiary registration *policy* is not open — it is locked by
-[docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md)
-"Q7 — Hybrid Beneficiary Registration" (FINAL/LOCKED). What IMP-002 defers is only the
-*implementation* of that flow: Q7's register entry names the model but not its detailed mechanics
-(which parts are self-service vs. verified/provisioned, and how they interact with an Identity).
-That detail belongs to the Beneficiary & Distribution domain's own implementation specification
-(MODULE-OWNERSHIP.md §14), which must design it consistently with Q7 — not invent a new policy.
-
-IMP-002 itself implements NO Beneficiary domain behavior: no Beneficiary profile, application,
-document, eligibility review, verification workflow, distribution eligibility, business status,
-or approval. If and when the Beneficiary domain stage determines that a Beneficiary must hold an
-authenticated `User` identity, that stage reuses IMP-002's existing Identity/Auth foundation (the
-same way Donor and Fundraiser do) — it does not require a different identity mechanism. Whether
-that is in fact required, and via which of the mechanisms already specified (self-registration,
-invitation, or provisioning), is Q7's hybrid model applied by that later stage, not decided here.
+Registration *policy* is locked by Q7 (Hybrid Beneficiary Registration). IMP-002 implements no
+Beneficiary domain behavior. If/when the Beneficiary domain stage determines a Beneficiary needs a
+`User`, it reuses IMP-002's existing mechanisms (self-registration, invitation, or provisioning) —
+it does not require a different identity mechanism.
 
 ---
 
-## Invitation Boundary
+## Invitation Boundary (M02)
 
-Required for Partner Representative and Internal Administrative Identity (and usable, if needed,
-for Super Admin provisioning). Neutral Identity/Auth-level requirements only:
+Required for Partner Representative and Internal Administrative Identity (and usable for Super
+Admin provisioning beyond the first bootstrap).
 
 ```text
-invitation token:          opaque, cryptographically random
-intended-identity binding: the invitation is bound to a specific target email — acceptance MUST
-                           use that same (or an explicitly re-confirmed) email, not an arbitrary
-                           one, to prevent an invitation being redeemed by an unintended recipient
-expiration:                 configurable, framework-standard token-expiry mechanics (no fixed
-                           numeric value mandated by any materialized document)
-single use:                 an invitation is consumed on successful acceptance; reuse fails safely
-generic safe errors:        an invalid/expired/already-used invitation returns a generic error
-                           that does not confirm whether a different, valid invitation exists for
-                           that email
-credential establishment:   acceptance requires the invitee to set a password, hashed per
-                           "Credential Model," at which point a normal User record is created
-audit event:                invitation issued, invitation accepted, invitation rejected/expired
-                           (see "Audit Events")
+id                    internal identifier
+public_id             ULID, if a consuming context needs an external-safe reference
+intended_email         the email this invitation is bound to
+token_hash             the invitation token, stored hashed — never plaintext
+issued_at              timestamp
+expires_at             timestamp — configurable, framework-standard expiry mechanics
+accepted_at            nullable timestamp — set on successful acceptance
+revoked_at             nullable timestamp — set on explicit revocation before expiry
+issuer reference       records WHO/WHAT issued the invitation (attribution/context only)
+revoker reference       records who revoked it, where available
+created_at / updated_at
 ```
 
-An accepted invitation establishes an Identity/Auth subject ONLY. It must NOT silently establish
-any future business authority, Partner relationship ownership, or administrative role — those are
-granted, if at all, by an explicit later IMP-003+/domain workflow, not as a side effect of
-invitation acceptance.
+**Boundary:** the issuer/revoker reference records attribution only — it does NOT itself
+implement or imply role authority. *Actual* authorization to issue or revoke an invitation (e.g.
+"only a Partner Verifier may invite a Partner Representative") is a future RBAC/Business Authority
+concern (IMP-003+); IMP-002 only records who did it, for audit and revocation purposes.
+
+### Lifecycle Rules
+
+```text
+Explicit revocation is supported before expiry — a revoked invitation cannot later be accepted,
+  even if not yet expired.
+Acceptance requires ALL of: not expired, not already accepted, not revoked, token valid (matches
+  the stored hash), and the presented email matches the invitation's intended_email (after
+  normalization).
+Acceptance is transaction-safe: exactly one acceptance may succeed for a given invitation, even
+  under concurrent attempts (enforced via the single-consumption transaction, e.g. an atomic
+  "accept once" update guarded by accepted_at IS NULL).
+An invalid/expired/already-used/revoked invitation returns a generic error (see "Privacy") that
+  does not confirm whether a different, valid invitation exists for that email.
+Acceptance establishes an Identity/Auth subject (a `User`) ONLY. It must NOT automatically grant
+  Partner authority, Admin role, Super Admin role, permission, data scope, business authority, or
+  financial authority — those remain IMP-003+/domain-stage grants, performed (if at all) by the
+  owning authorized workflow, never as a side effect of invitation acceptance.
+```
+
+### Invitation / Registration Email-Uniqueness Race (task item 20)
+
+If an invitation exists for `X@example.com` and a User self-registers that same (normalized)
+email before the invitation is accepted:
+
+```text
+The invitation MUST NEVER cause a duplicate identity to be created — the database's unique
+  constraint on canonical email is the final authority (see "Canonical Email Change Lifecycle"
+  for the same principle applied to changes; the same constraint also governs registration and
+  invitation acceptance).
+Acceptance in this situation either (a) fails safely with a generic error and requires an
+  authorized reconciliation step (an IMP-003+/administrative concern for deciding what happens
+  next), or (b) — only if the owning workflow explicitly permits it — binds the invitation to the
+  already-existing identity that self-registered that email, WITHOUT automatically granting any
+  business authority that acceptance would otherwise have implied. IMP-002 does not decide between
+  (a) and (b) beyond requiring that neither option ever produces two `User` rows for the same
+  canonical email; that choice belongs to the owning domain workflow (e.g. Partner module) that
+  issued the invitation in the first place.
+```
 
 ---
 
@@ -468,60 +533,69 @@ invitation acceptance.
 
 ```text
 credential submission:    email + password
-credential validation:    constant-time-safe password verification via the framework hasher;
-                          generic failure message regardless of whether the email existed (see
-                          "Privacy")
-session regeneration:     session ID MUST be regenerated on successful authentication (session
-                          fixation protection)
-rate limiting/throttling: required on the login endpoint (see "Rate Limiting / Abuse Control")
-suspended/disabled/locked account: authentication MUST fail with a neutral security-restriction
-                          response — see "Security Restrictions" and "Privacy"
-MFA challenge:             if the identity has MFA enabled (see "MFA"), a successful password
-                          check is followed by a TOTP challenge before the session is considered
-                          fully authenticated; failing the TOTP challenge does not reveal whether
-                          the password step succeeded beyond what the flow already implies
-security audit event:     both success and failure are audited (see "Audit Events")
+credential validation:    via the framework hasher; generic failure message regardless of
+                           whether the email existed (see "Privacy")
+session regeneration:      session ID MUST be regenerated on successful authentication
+rate limiting/throttling: required on the login endpoint
+account state check:      DISABLED or SUSPENDED (Q24) -> authentication denied, generic message;
+                           a transient brute-force lockout (see "Account / Security Model") also
+                           denies authentication for its duration, without being a persistent
+                           lifecycle state
+MFA challenge:             if the identity has MFA enabled, a successful password check is
+                           followed by a TOTP challenge before the session is considered fully
+                           authenticated
+security audit event:     both success and failure are audited
 ```
 
-No business-role redirect logic belongs here. Post-login routing may go to a single neutral
-authenticated landing route; portal-specific routing (donor/fundraiser/partner/admin dashboards)
-is a later-stage concern once IMP-003 can express "what dashboard may this principal see."
+No business-role redirect logic belongs here.
 
 ### Logout
 
 ```text
-invalidates the current session (session data is destroyed, not merely marked)
-session ID is regenerated/rotated after logout (prevents reuse of the old session identifier)
-"logout other sessions" is a reasonable feature given IMP-001's database-backed sessions table
-  already supports per-user session lookup, but is NOT required by any materialized document —
-  implementation-time discretion, not a Human Decision
+invalidates the current session (destroyed, not merely marked)
+session ID is regenerated/rotated after logout
+ELEVATED Authentication Assurance, if any, is invalidated as part of session invalidation
+"logout other sessions" is optional, implementation-time discretion
 ```
 
 ---
 
 ## Session Model
 
-IMP-001 already provides a database-backed `sessions` table (see
-[docs/implementation/IMP-001-core-project-foundation.md](IMP-001-core-project-foundation.md) and
-[docs/audits/IMP-001-IMPLEMENTATION-PASS-1.md](../audits/IMP-001-IMPLEMENTATION-PASS-1.md)). IMP-002
-MUST reuse it, not replace it. Its `user_id` column is nullable and carries no foreign-key
-constraint (verified against the migration itself), so it can reference the future internal
-`User.id` once `User` exists without requiring any change to the existing IMP-001 migration — no
-schema change is anticipated for `sessions`.
+IMP-001 already provides a database-backed `sessions` table. IMP-002 MUST reuse it, not replace
+it. Its `user_id` column is nullable and carries no foreign-key constraint, so it can reference
+the future internal `User.id` without any change to the existing IMP-001 migration.
 
 ```text
-session fixation protection:  regenerate session ID on login and on privilege-relevant transitions
-                               (e.g. password change, successful MFA challenge)
-session rotation:              periodic ID rotation is a Laravel framework capability
-                               (`session.php` config); use framework defaults
-logout:                        see "Authentication Flows > Logout" above
-expiration:                    framework-standard SESSION_LIFETIME (already configured in
-                               .env.example per IMP-001)
-CSRF protection:                see "CSRF / Cookie Security"
-cookie expectations:            see "CSRF / Cookie Security"
-remember-me:                   Laravel's framework "remember token" capability is available;
-                               whether to enable it is an implementation-time UX decision — if
-                               enabled, the remember token MUST be hashed at rest
+session fixation protection:  regenerate session ID on login and on privilege-relevant
+                               transitions (password change, email-change promotion, successful
+                               MFA challenge, ELEVATED step-up)
+session rotation:              framework `session.php` config defaults
+logout:                        see "Authentication Flows > Logout"
+expiration:                    framework-standard SESSION_LIFETIME (IMP-001 .env.example)
+CSRF / cookie expectations:    see "CSRF / Cookie Security"
+```
+
+### Remember-Me (Deferred) (m01)
+
+```text
+REMEMBER-ME = DEFERRED / DISABLED for the IMP-002 baseline.
+```
+
+Persistent (long-lived) authentication introduces additional revocation and security semantics
+(a persistent credential that must be tracked, rotated, and invalidated consistently with every
+session-invalidation trigger in this specification) that are not needed for the initial
+authentication foundation. Therefore:
+
+```text
+`remember_token` is NOT a required IMP-002 `User` field (see "Identity Model" and "Database
+  Design Requirements").
+No "remember me" checkbox/flow is implemented by IMP-002.
+Future enablement requires a specification update, not a silent implementation addition — every
+  session-invalidation trigger elsewhere in this document (password change, email change, MFA
+  reset, suspension, disablement, etc.) would then need to explicitly invalidate the persistent
+  credential too, which this specification calls out at each relevant point precisely so that
+  future enablement does not miss one.
 ```
 
 ---
@@ -531,22 +605,31 @@ remember-me:                   Laravel's framework "remember token" capability i
 Bound to the canonical email identity (Q21):
 
 ```text
-request:                       accepts an email address; ALWAYS returns a generic "if an account
-                               exists, instructions were sent" response — never confirms/denies
-                               account existence (see "Privacy")
-token generation:               cryptographically random token
-token storage:                   stored HASHED, not plaintext — Laravel's framework
-                                 `PasswordBroker` hashes reset tokens by default; use that
-                                 framework capability rather than a custom table/mechanism, and
-                                 verify (at implementation time) that the hashing behavior is
-                                 actually in effect rather than assuming it
-expiration:                      framework-standard broker expiry (config value, not invented here)
-single use:                      token is invalidated immediately upon successful use
-password replacement:            new password is hashed per "Credential Model"; the identity's
-                                  other active sessions ARE invalidated (a password reset is a
-                                  strong signal the prior session state may be compromised)
-audit:                           reset requested, reset completed, and reset-token-invalid/expired
-                                  attempts are all audited
+request:                accepts an email address; ALWAYS returns a generic "if an account
+                         exists, instructions were sent" response
+token generation:        cryptographically random
+token storage:           stored HASHED — Laravel's framework `PasswordBroker` hashes reset
+                         tokens by default; verify this at implementation time rather than
+                         assuming it
+expiration:              framework-standard broker expiry
+single use:              invalidated immediately upon successful use
+password replacement:     new password hashed per "Credential Model"; the SAME session/assurance
+                         invalidation consequences as "Password Change — Session Consequences"
+                         apply (all other sessions invalidated, ELEVATED reset, remember-me
+                         credential invalidated if ever enabled)
+audit:                    reset requested, reset completed, and invalid/expired attempts are all
+                         audited
+```
+
+### Interaction with Email Change (task item 19)
+
+```text
+Password reset always targets the CURRENT canonical login email — never a `pending_email` that
+  has not yet been promoted (see "Canonical Email Change Lifecycle").
+Once a canonical email change completes (promotion), the OLD email immediately stops being a
+  valid password-reset lookup target for that identity, and any reset token that was outstanding
+  against the old email is invalidated as part of the promotion transaction (already specified in
+  "Canonical Email Change Lifecycle," step 9).
 ```
 
 ---
@@ -556,28 +639,23 @@ audit:                           reset requested, reset completed, and reset-tok
 Distinguish states that MUST NOT be conflated:
 
 ```text
-identity exists:          a User record was created (registration/invitation/provisioning)
-email verified:            the canonical login email has been confirmed reachable/owned by the
-                          principal (verification link/code lifecycle)
-authenticated:             a login (email + password, plus TOTP if MFA-enabled) succeeded for
-                          this request/session
-business authorized:       an Authority Assignment exists (docs/05-rbac/BUSINESS-AUTHORITY-MODEL.md)
-                          — entirely an IMP-003+ concern, never established by IMP-002
+identity exists:      a User record was created (registration/invitation/provisioning/bootstrap)
+email verified:        email_verified_at is set for the current canonical email (Q24 — a
+                       timestamp field, not a lifecycle status value)
+authenticated:         a login succeeded for this request/session
+business authorized:   an Authority Assignment exists — entirely an IMP-003+ concern
 ```
 
-Since email is the canonical login identifier (Q21), email verification is part of the IMP-002
-baseline for every actor. No materialized document states whether login itself is blocked until
-email is verified, or only certain elevated/sensitive actions are; in the absence of an explicit
-rule, this specification takes the more conservative, security-architecture-consistent default:
-**login succeeds on valid credentials regardless of email-verification state, but
-`pending_verification` is tracked as a distinct, visible security-restriction-adjacent status**
-(see "Security Restrictions"), and any future ELEVATED-assurance-gated action may additionally
-require a verified email — that mapping belongs to whichever later stage defines such an action,
-not to IMP-002. This is a specification-time default, not a Human Decision, since it introduces no
-business-authorization consequence.
+Per Q24, `email_verified_at` is a separate field from the Identity Lifecycle
+(ACTIVE/DISABLED) and the persistent Security Restriction (NONE/SUSPENDED) — there is no
+`pending_verification` *lifecycle* value. Login succeeds on valid credentials regardless of
+email-verification state (an unverified email is not itself a Q24 Identity Lifecycle or Security
+Restriction value); a future ELEVATED-assurance-gated action MAY additionally require a verified
+email, but that mapping belongs to whichever later stage defines such an action.
 
-Verification lifecycle: send verification (email, on registration/invitation acceptance/email
-change), confirm via a signed/token link or code, re-send with rate limiting, mark verified, audit.
+Verification lifecycle: send verification (on registration/invitation acceptance/email-change
+request), confirm via a signed/token link or code, re-send with rate limiting, mark verified
+(update `email_verified_at`), audit.
 
 ---
 
@@ -587,240 +665,402 @@ If collected at all, phone is contact data only:
 
 ```text
 phone != login identifier (Q21)
-phone verification, if implemented, exists only for contact/notification purposes, not as a
-  prerequisite for baseline login
-SMS OTP is explicitly NOT the MFA baseline (Q23) and is not introduced here for any purpose
+phone verification, if implemented, exists only for contact/notification purposes
+SMS OTP is explicitly NOT the MFA baseline (Q23)
 ```
-
-Whether phone is collected at all, and whether phone verification is required for any purpose, is
-not decided by any materialized document; IMP-002 does not require it, and implementation may omit
-the phone column entirely if no consuming requirement exists yet.
 
 ---
 
-## Authentication Assurance
+## Authentication Assurance (M03 — Executable Lifecycle)
 
 Per [docs/05-rbac/AUTHENTICATION-ASSURANCE.md](../05-rbac/AUTHENTICATION-ASSURANCE.md), IMP-002
-establishes the neutral STANDARD/ELEVATED state that IMP-003+ later consumes as the "Required
-Authentication Assurance" AND-term of the canonical authorization formula
-([docs/05-rbac/RBAC-ARCHITECTURE.md](../05-rbac/RBAC-ARCHITECTURE.md)). IMP-002 does NOT decide
-which specific business operations require ELEVATED.
+establishes STANDARD/ELEVATED as session-scoped security metadata — NOT a permanent `User`
+property.
 
 ```text
-STANDARD:   the ordinary state after a normal email+password login (with a successful TOTP
-            challenge already folded in in general request, if MFA is enabled for that identity —
-            see "MFA").
-ELEVATED:   achieved via a fresh/recent re-authentication (password confirmation within a short
-            window) OR a fresh, successful TOTP challenge performed specifically to step up
-            assurance (not merely the one performed at login time, if a stronger, more recent
-            proof is required by a later stage's policy).
+Conceptual representation (session-scoped, not a User column):
+  assurance_level    STANDARD | ELEVATED
+  elevated_at        timestamp the ELEVATED state was most recently earned
+  elevated_until      timestamp ELEVATED expires and falls back to STANDARD
 ```
 
-Explicitly reaffirmed: a valid password/session makes a principal *authenticated*. A completed
-MFA/recent-auth mechanism may additionally satisfy *ELEVATED assurance*. Neither authentication
-nor ELEVATED assurance itself grants any permission — the authorization layer (IMP-003+) consumes
-these states; IMP-002 does not attach financial or business rights to either state.
+### STANDARD
+
+Created after successful baseline authentication (email + password, plus TOTP if MFA is enabled
+for that identity).
+
+### ELEVATED
+
+Created ONLY after a fresh, successful step-up action performed specifically for that purpose:
+
+```text
+a fresh password confirmation, or
+a fresh TOTP challenge performed specifically to step up assurance (not merely reused from the
+  login-time challenge, if a later policy requires a more recent proof)
+```
+
+### Lifetime
+
+```text
+ELEVATED has a finite, configurable lifetime (`elevated_until`) — no hard-coded duration is fixed
+  by this specification, since no materialized document fixes one; implementation sets a secure
+  configurable default.
+When `elevated_until` passes, the session's assurance falls back to STANDARD automatically —
+  ELEVATED is never permanent.
+```
+
+### Immediate Invalidation Triggers
+
+ELEVATED MUST be invalidated immediately (not merely left to expire) on any of:
+
+```text
+logout
+password change (ordinary or reset)
+canonical email change completion
+MFA reset / disable / re-enrollment
+account entering SUSPENDED or DISABLED (Q24)
+any session invalidation (e.g. "logout other sessions," or the session-invalidation consequences
+  of the triggers above)
+```
+
+A NEW session never automatically inherits a prior session's ELEVATED assurance — each session
+starts at STANDARD and must independently earn ELEVATED, unless a future, explicitly authorized
+authentication architecture decision says otherwise (none does today).
+
+### Authorization Boundary
+
+```text
+Authenticated  != role
+ELEVATED        != permission, financial authority, or approval authority
+```
+
+IMP-003+ consumes both states; IMP-002 attaches no business/financial right to either.
 
 ---
 
 ## MFA (Q23 — Configurable, TOTP Baseline)
 
 ```text
-MFA capability belongs to IMP-002's authentication foundation (not deferred to a later stage).
-MFA is NOT universally mandatory for every identity — enablement is per-identity/configurable.
-TOTP (RFC 6238) is the baseline supported mechanism.
-A successful TOTP challenge may satisfy ELEVATED Authentication Assurance (see above).
-MFA success/enrollment grants NO role, permission, data scope, business authority, financial
-  authority, or approval authority — identical boundary to registration/invitation.
-SMS OTP is explicitly NOT the baseline mechanism (Q23).
+MFA capability belongs to IMP-002's authentication foundation.
+MFA is NOT universally mandatory — enablement is per-identity/configurable.
+TOTP (RFC 6238) is the baseline mechanism.
+A successful TOTP challenge may satisfy ELEVATED Authentication Assurance.
+MFA success/enrollment grants NO role, permission, data scope, business, or financial authority.
+SMS OTP is explicitly NOT the baseline mechanism.
+```
+
+### Implementation Contract (M04)
+
+**TOTP implementation MUST use a maintained, security-reviewed, Laravel/PHP-compatible
+third-party library implementing RFC 6238.** A hand-rolled/"minimal direct" TOTP implementation is
+explicitly **PROHIBITED** for this specification, superseding any earlier suggestion that a direct
+`hash_hmac`-based implementation was an acceptable alternative — TOTP's HMAC construction and
+timing/window handling are exactly the kind of security-sensitive, easy-to-get-subtly-wrong logic
+that AGENTS.md's "No custom cryptography" rule exists to keep out of bespoke code, and a
+maintained library is the safer, ecosystem-standard choice.
+
+Selection criteria for the library (applied at implementation time, per Dependency Governance —
+[CHANGE-CONTROL.md](../00-governance/CHANGE-CONTROL.md)):
+
+```text
+actively maintained
+compatible with the approved PHP/Laravel versions
+RFC 6238 compliant
+no mandatory external service (must run locally, stateless)
+no mandatory daemon
+supports secure secret generation
+supports a configurable verification window (clock-drift tolerance)
+acceptable security history (no known unpatched, unaddressed vulnerabilities)
+license compatible with this project
+pinned and reviewed during implementation authorization, not installed by this specification
 ```
 
 ### Enrollment
 
 ```text
-principal must already be authenticated (STANDARD assurance at minimum) to begin enrollment
-a TOTP secret is generated and presented (e.g. via QR code) for the principal to add to an
-  authenticator app
-enrollment completes only after the principal proves possession by submitting one valid TOTP code
-  generated from the new secret
-completion is transactional (see "Transaction Boundaries") and audited
+1. Principal is already authenticated (STANDARD at minimum).
+2. A cryptographically secure TOTP secret is generated.
+3. The secret is stored as a PENDING, encrypted enrollment secret — mfa_enabled remains false
+   throughout this stage.
+4. The secret (e.g. via QR code) is shown to the principal to add to an authenticator app.
+5. The principal submits one valid TOTP code generated from the new secret, proving possession.
+6. Only on that proof does enrollment atomically complete: mfa_enabled becomes true, the pending
+   secret becomes the active secret, a set of recovery codes is generated, and the event is
+   audited (see "Transaction Boundaries").
 ```
+
+Abandoned enrollment: a pending secret that is never confirmed does not enable MFA; it expires or
+is replaced if the principal restarts enrollment. Starting a new enrollment attempt invalidates
+any previous unconfirmed pending secret — there is never a window with two pending secrets.
 
 ### Verification (Challenge)
 
 ```text
 required as a second factor after a successful password check, for any identity with MFA enabled
-a narrow, rate-limited time window is allowed per RFC 6238 clock-drift tolerance — exact tolerance
-  is an implementation-time configuration value
-repeated failed challenges are rate-limited/lockable the same way login failures are (see "Rate
-  Limiting / Abuse Control")
+a narrow, rate-limited verification window is allowed per the selected library's RFC 6238
+  clock-drift tolerance
+repeated failed challenges are rate-limited/throttled the same way login failures are
 ```
+
+### TOTP Replay Protection (task item 12)
+
+For each of the following sensitive TOTP uses, the specification requires tracking sufficient
+challenge/session state (e.g. recording the most recently accepted code/step per identity per
+challenge context) to prevent the SAME code from being immediately reusable within the same
+accepted time window, where the selected library/application design supports it deterministically:
+
+```text
+MFA enrollment confirmation
+ELEVATED assurance step-up via TOTP
+MFA disable/reset confirmation
+```
+
+This is scoped narrowly to these sensitive challenge contexts — it is NOT a global, permanent,
+cross-context OTP ledger, and the design must remain compatible with shared hosting (no
+additional daemon or external state store beyond the database/cache already in use).
 
 ### Recovery
 
 ```text
-a set of single-use recovery codes is generated at enrollment time (secure regeneration
-  available on demand, which invalidates all prior recovery codes)
-using a recovery code completes authentication in place of a TOTP challenge, exactly once per code
-recovery-code regeneration and MFA reset/disable are both audited events
+a set of cryptographically secure, sufficiently high-entropy recovery codes is generated at
+  enrollment time
+codes are displayed to the principal exactly once, at generation/regeneration time — never
+  re-displayed afterward
+codes are stored ONLY as hashes (via the framework hasher, like a password) — never plaintext,
+  never reversibly encrypted
+using a recovery code completes authentication in place of a TOTP challenge, EXACTLY once per
+  code — consumption is transaction-safe: under concurrent replay attempts, only one succeeds,
+  and the consumed code's hash record is atomically marked used (or removed)
+regeneration invalidates ALL previous recovery codes, generates a new set, displays it once, and
+  is audited
 ```
 
 ### Reset / Disable
 
 ```text
-disabling MFA, or resetting it (e.g. after device loss), is a sensitive operation — it SHOULD
-  itself require ELEVATED assurance (e.g. a fresh password confirmation) to perform
-whether an administrative party (rather than the identity itself) may force-reset another
-  identity's MFA is an authority/approval question — if such an administrative reset capability
-  is needed, the authority to invoke it is an IMP-003+ (Business Authority) concern; IMP-002 only
-  defines the identity-initiated self-service path plus the boundary that any administrative path
-  requires an Authority Assignment it does not itself grant
-every reset/disable is audited
+disabling or resetting MFA (e.g. after device loss) requires BOTH fresh credential confirmation
+  AND ELEVATED assurance (or the equivalent strongest mechanism the approved assurance
+  architecture supports) — this is stricter than a single-factor check, consistent with MFA
+  reset being one of the most sensitive operations in this specification
+administrative (non-self-service) MFA reset authority belongs to a future IMP-003+ Authority
+  Assignment; IMP-002 defines only the identity-initiated self-service path plus this boundary
+on reset/disable: the TOTP secret is invalidated, recovery codes are invalidated, ELEVATED
+  assurance is invalidated, other sessions are invalidated where security policy requires it, and
+  the event is audited
 ```
 
 ### MFA Secret Storage
 
 ```text
-TOTP secrets are never stored in plaintext logs and never exposed through any public API/response
-  (including to the identity's own authenticated session, after initial enrollment display)
-secrets are encrypted/protected at rest using Laravel's framework encryption capability (the
-  `Crypt` facade / encrypted Eloquent cast) — no custom cryptographic scheme (AGENTS.md "Never":
-  "No custom cryptography")
-access to the secret (for verification) is limited to the authentication domain's own
-  verification logic — no other module reads it
-recovery-code material is stored hashed (each code, like a password, is checked via the framework
-  hasher), not stored in plaintext or reversibly
+TOTP secrets are RECOVERABLE secrets (the verification algorithm needs the plaintext value to
+  compute a comparison code) — they are therefore ENCRYPTED at rest using Laravel's framework
+  encryption capability (the `Crypt` facade / an encrypted Eloquent cast), never hashed (hashing
+  a TOTP secret would make verification impossible) and never stored plaintext.
+Secrets are never logged, never included in any audit payload, never returned by any endpoint
+  other than the enrollment flow itself, and never re-displayed after initial enrollment
+  confirmation.
+Access to the secret for verification purposes is limited to the authentication domain's own
+  verification logic.
+Recovery codes, unlike the TOTP secret, are one-way HASHED (like a password) — verification only
+  ever needs to check "does this code match a stored hash," never recover the original value.
+Encryption-key rotation compatibility follows whatever Laravel's framework encryption/key-rotation
+  facilities already provide — no custom key-rotation mechanism is invented here; consult
+  docs/04-security/SECURITY-ARCHITECTURE.md at implementation time for any additional constraint.
 ```
-
-### Dependency Note
-
-Laravel's framework core does not ship a built-in RFC 6238 TOTP implementation. Implementing TOTP
-therefore requires either (a) a well-maintained, narrowly-scoped third-party package implementing
-RFC 6238 exactly, or (b) a minimal direct implementation using PHP's built-in `hash_hmac` (already
-available via the `ext-hash` extension Laravel already requires) that implements the published
-RFC 6238 algorithm precisely, not an invented variant — hand-rolling a *novel* one-time-password
-scheme would violate AGENTS.md's "No custom cryptography," but implementing a published, standard
-algorithm via a well-reviewed library or a faithful direct implementation is the accepted pattern
-for TOTP in the Laravel ecosystem. Which of (a)/(b) is used, and if (a), which specific package, is
-an implementation-time Dependency Governance decision (per
-[CHANGE-CONTROL.md](../00-governance/CHANGE-CONTROL.md)) — not decided by this specification.
 
 ---
 
-## Security Restrictions (Account Status)
+## Account / Security Model (Q24)
 
-Neutral, authentication/security-relevant states only — explicitly NOT business-approval states:
+Q24 separates what an earlier draft of this specification incorrectly combined into a single
+`User.status` enum into three independent concerns:
+
+### 1. Identity Lifecycle (persistent)
 
 ```text
-active                normal authenticatable state
-pending_verification  email not yet verified (see "Verification")
-suspended              temporarily blocked from authenticating (e.g. abuse/fraud signal); reason
-                       not exposed in the public error response
-disabled               permanently deactivated by an administrative action (out-of-scope trigger
-                       for IMP-002; only the effect on authentication is defined here)
-locked                 temporary lockout from repeated failed login/MFA attempts (see "Rate
-                       Limiting")
+ACTIVE      normal state
+DISABLED    permanently deactivated by an administrative action; authentication denied
 ```
 
-This state set remains a specification-time proposal built from generic, universally-applicable
-authentication concepts (not repository-invented business states); the readiness reviewer may
-confirm or adjust it. It is explicitly kept separate from business-approval states: **"Fundraiser
-approval" and "Partner approval" (or verification decisions) are Business Authority concepts
-(docs/05-rbac/BUSINESS-AUTHORITY-MODEL.md) and MUST NOT become a `User.status` value.** A
-Fundraiser or Partner Representative whose business approval is pending is still, from IMP-002's
-perspective, simply `active` (or `pending_verification`) — their lack of business authority is
-enforced entirely by IMP-003+, not by an identity-level status.
+### 2. Verification (a field, not a lifecycle value)
+
+```text
+email_verified_at   nullable timestamp — see "Verification." "pending_verification" is NOT a
+                     persistent Identity Lifecycle value.
+```
+
+### 3. Persistent Security Restriction
+
+```text
+NONE        no restriction
+SUSPENDED    temporarily blocked from authenticating (e.g. abuse/fraud signal); reason not
+             exposed in the public error response
+```
+
+### 4. Transient Brute-Force Lockout (NOT persistent lifecycle state)
+
+Repeated failed login/MFA attempts trigger rate limiting/throttling (see "Rate Limiting / Abuse
+Control") — this is time-bounded, tracked via counters/timestamps, and is explicitly NOT a
+persistent `LOCKED` lifecycle value. It denies authentication only for its own duration.
+
+### Authentication Effect
+
+```text
+ACTIVE + Security Restriction = NONE  -> authentication potentially allowed (subject to
+                                          transient lockout state and credential correctness)
+DISABLED                               -> authentication denied
+Security Restriction = SUSPENDED       -> authentication denied
+transient brute-force lockout active    -> authentication denied for its duration
+email unverified                       -> does not by itself deny authentication — see
+                                          "Verification"
+```
+
+### Transition Rules
+
+```text
+ACTIVE -> DISABLED, DISABLED -> ACTIVE
+NONE -> SUSPENDED, SUSPENDED -> NONE
+```
+
+Every persistent transition requires: an authorized future security authority (IMP-003+) or an
+explicitly authorized deterministic security mechanism (not invented by IMP-002); an audit event;
+a reason/context where required; a timestamp. IMP-002 does not define WHO (which role/authority)
+may perform these transitions — only their effect and their audit/transaction requirements.
+
+Entering DISABLED or SUSPENDED must, atomically:
+
+```text
+deny new authentication attempts
+invalidate all active authenticated sessions for that identity
+invalidate ELEVATED assurance
+prevent any persistent/remember-me authentication (moot under the current deferred baseline)
+apply appropriate protection to reset/recovery flows per "Password Reset"/"MFA" (e.g. a
+  password-reset or MFA-recovery request for a SUSPENDED/DISABLED identity still returns the
+  same generic response as any other request — it does not itself need to succeed in restoring
+  access, since that requires the security-authority-gated transition back to ACTIVE/NONE first)
+```
+
+### Business Boundary (unchanged, reaffirmed)
+
+The following are never stored as `User` identity status — they are Business Authority concepts
+(docs/05-rbac/BUSINESS-AUTHORITY-MODEL.md), not Identity concepts:
+
+```text
+Fundraiser approval
+Partner approval
+Beneficiary approval
+Financial approval
+Campaign authority
+```
+
+A Fundraiser or Partner Representative whose business approval is pending is, from IMP-002's
+perspective, simply ACTIVE with Security Restriction NONE — their lack of business authority is
+enforced entirely by IMP-003+, never by an identity-level status.
+
+---
+
+## First Super Admin Bootstrap (Q25)
+
+```text
+No public bootstrap web endpoint exists — there is no HTTP route that can create a Super Admin
+  identity.
+No public Super Admin self-registration.
+Provisioning is via a controlled, one-time Artisan/CLI command (e.g. conceptually
+  `platform:bootstrap-super-admin` — the exact command name is an implementation detail, not
+  locked by this specification).
+The command is operator-initiated and interactive: the operator supplies the identity's email
+  and a password via secure interactive input (e.g. a masked prompt) — there is no default
+  email and no default password.
+No plaintext credential is ever persisted in code, configuration, a seeder, a log, or an audit
+  payload — the password is hashed through the same framework hasher as any other `User`
+  password before storage.
+An auditable bootstrap event/evidence record is created (e.g. an audit entry noting that a
+  bootstrap occurred, by which operator context, and when — without recording the credential
+  itself).
+A durable one-time guard prevents the command from creating a second bootstrap identity once the
+  initial bootstrap has completed — repeating the command is refused, not silently re-run.
+The mechanism is shared-hosting-compatible: it is a one-shot Artisan command runnable during
+  deployment/maintenance (e.g. via SSH or a hosting control panel's command runner), not a
+  permanently running service or a required daemon.
+```
+
+### Scope Boundary
+
+```text
+IMP-002 -> creates/bootstraps the initial human Identity (a `User` record) and records the
+           bootstrap's security evidence. It does NOT create any role, permission, scope, or
+           business-authority record for that identity.
+IMP-003 -> owns the canonical Super Admin role/permission/scope/business-authority model. If the
+           architecture requires the first Super Admin's authority to exist immediately upon
+           bootstrap, IMP-003 (or a coordinated cross-stage step at that time) is responsible for
+           consuming/authorizing the already-bootstrapped Identity — IMP-002 does not invent a
+           parallel or provisional role system to bridge that gap itself.
+```
+
+The bootstrapped identity is, from IMP-002's own perspective, an ordinary `User` — ACTIVE, no
+Security Restriction, `email_verified_at` set at bootstrap time (the operator is presumed to have
+verified it out-of-band by directly entering it), MFA not enabled by default (may be enrolled
+afterward through the normal MFA lifecycle above). No IMP-002 schema or logic distinguishes a
+"bootstrap" `User` row from any other `User` row after creation — the distinction lives entirely
+in the one-time bootstrap-guard mechanism and its audit trail, not in the `User` table itself.
 
 ---
 
 ## Principal Exposure
 
 ```text
-web requests:  the framework's authenticated-user resolution (`Auth::user()` / request-bound
-               principal) exposes the `User` plus its Authentication Assurance state.
-API requests:  same principal concept; exact API authentication mechanism is undecided (see "API
-               Authentication Boundary") but whatever mechanism is chosen must resolve to the same
-               `User` + assurance state shape, not a parallel identity concept.
-jobs:          IMP-002 does not implement System Principal job plumbing — assigning "System
-               Principal"/"Integration Principal" (docs/04-security/SECURITY-ARCHITECTURE.md) to a
-               specific implementation stage is not decided by any materialized document. Flagged
-               as a deferred item, not implemented here.
-audit:         every audited authentication event (see "Audit Events") records the acting
-               `User` (or "system"/"anonymous" where applicable) as its principal.
-future policies: IMP-003's canonical authorization formula consumes "Authenticated" (a boolean
-               derived from principal presence) and "Required Authentication Assurance" (the
-               STANDARD/ELEVATED state) directly from what IMP-002 exposes here.
+web requests:     the framework's authenticated-user resolution exposes the `User` plus its
+                  Authentication Assurance state (see "Authentication Assurance").
+API requests:     same principal concept; API authentication mechanism is undecided (see "API
+                  Authentication Boundary") but must resolve to the same `User` + assurance shape.
+jobs:              IMP-002 does not implement System Principal job plumbing (deferred item).
+audit:             every audited event records the acting `User` (or "system"/"anonymous").
+future policies:   IMP-003's canonical authorization formula consumes "Authenticated" and
+                  "Required Authentication Assurance" directly from what IMP-002 exposes here.
 ```
 
-Distinguish, only where the architecture already names them (no invention): Human Principal (a
-`User` acting directly), System Principal, and Anonymous Principal (an unauthenticated request/
-guest). Integration Principal is not addressed by IMP-002.
+Distinguish, only where the architecture already names them: Human Principal, System Principal,
+Anonymous Principal. Integration Principal is not addressed by IMP-002.
 
 ---
 
 ## API Authentication Boundary
 
-Unchanged conclusion from the prior draft: no `/api/v1` business routes exist yet (IMP-001 §9), and
-no materialized document decides whether future API authentication will use session/cookie auth,
-personal access tokens, OAuth, or another mechanism. This remains a **deferred, non-blocking
-item** for IMP-002, whose own scope is web (session-based) authentication; the underlying `User` +
-credential + assurance model is transport-agnostic and does not need to be redesigned once an API
-authentication mechanism is chosen.
-
-The locked rule applies unchanged whenever that later decision is made: "API token authority
-intersection (a token's effective authority is the intersection of the token's own grant and its
-principal's authority, never a union)" (SECURITY-ARCHITECTURE.md). No token scope or OAuth grant
-flow is invented or decided here.
+Unchanged: no `/api/v1` business routes exist yet, and no materialized document decides the
+future API authentication mechanism. Deferred, non-blocking. The locked "API token authority
+intersection... never a union" rule (SECURITY-ARCHITECTURE.md) applies unchanged whenever that
+decision is made.
 
 ---
 
 ## CSRF / Cookie Security
 
-Standard Laravel web-guard defaults, not weakened:
-
-```text
-CSRF protection:    Laravel's VerifyCsrfToken middleware on all state-changing web routes
-Secure cookie:       session cookie `secure` flag enabled in production (HTTPS-only)
-HttpOnly:            session cookie HttpOnly (framework default)
-SameSite:            framework default (`lax`) unless a specific flow requires otherwise
-session regeneration: on login/logout/password change/MFA enrollment completion, per "Session
-                     Model"
-HTTPS production:    expected in production; shared-hosting deployment terminates TLS per normal
-                     hosting practice
-```
+Standard Laravel web-guard defaults, not weakened: CSRF protection on all state-changing web
+routes; secure/HttpOnly session cookie; framework-default SameSite; session regeneration on
+login/logout/password change/email-change promotion/MFA enrollment completion; HTTPS expected in
+production.
 
 ---
 
 ## Rate Limiting / Abuse Control
 
-Required on each of the following flows, using Laravel's framework rate limiter (`RateLimiter`
-facade / `throttle` middleware against the database/cache store IMP-001 already configured) — no
-custom implementation, no mandatory Redis:
-
-```text
-login
-donor self-registration
-fundraiser self-registration
-password reset request
-verification resend
-TOTP verification (challenge attempts)
-invitation acceptance
-```
-
-Exact numeric limits are NOT fixed by any materialized document; configurable, secure defaults are
-required at implementation time — configurable never means unrestricted.
+Required on: login, donor self-registration, fundraiser self-registration, password reset
+request, verification resend, TOTP verification (challenge attempts), invitation acceptance. Use
+Laravel's framework rate limiter — no custom implementation, no mandatory Redis. Exact numeric
+limits are not fixed by any materialized document; configurable, secure defaults are required.
 
 ---
 
 ## Audit Events
 
-Emission points only; the audit *sink* (storage/query mechanism, owned by Governance & Platform
-Services per MODULE-OWNERSHIP.md §16) is a later stage's responsibility — none currently exists.
+Emission points only; the sink (owned by Governance & Platform Services per MODULE-OWNERSHIP.md
+§16) is a later stage's responsibility.
 
 ```text
 identity created
 self-registration completed
 invitation issued
+invitation revoked
 invitation accepted
 login succeeded
 login failed
@@ -828,75 +1068,45 @@ logout
 password changed
 password reset requested
 password reset completed
+email change requested
+email change completed (promotion)
 email verified
 MFA enrolled
 MFA challenge succeeded
 MFA challenge failed
 MFA recovery code used
+MFA recovery codes regenerated
 MFA reset / disabled
-account locked / unlocked
-account suspended / disabled / reactivated
-security-sensitive profile change (e.g. login-email change, if supported)
+account/security transition: ACTIVE <-> DISABLED
+account/security transition: NONE <-> SUSPENDED
+first Super Admin bootstrap completed
 ```
 
 ---
 
 ## Privacy
 
-Authentication responses must not allow account enumeration:
-
-```text
-login failure:            identical generic message whether the email does not exist or the
-                           password (or MFA code) is wrong
-password-reset request:    identical generic "if an account exists..." response regardless of
-                           existence
-registration (self-service, email must be unique): a "this email is already in use" message
-                           during registration is an accepted, common trade-off, but is not paired
-                           with further account detail
-verification resend:        generic response regardless of current verification state, where
-                           practical
-invitation edge cases:      an invalid/expired/already-used invitation returns a generic error
-                           that does not confirm whether a different valid invitation exists for
-                           that email
-```
-
-Do not expose: email/phone existence beyond the unavoidable registration-uniqueness trade-off
-above, internal identifiers (expose ULID publicly, never the internal BIGINT, and not automatically
-even then — see "Public ID"), or security-state detail.
+Authentication responses must not allow account enumeration: login failure, password-reset
+request, registration-uniqueness message (unavoidable trade-off, not paired with further detail),
+verification resend, and invitation edge cases (invalid/expired/revoked/already-used) all use
+generic responses that do not confirm account existence beyond what is unavoidable. Never expose
+the internal BIGINT id; expose ULID only where a consuming context needs it (see "Public ID").
 
 ---
 
 ## Retention Boundary
 
-Unchanged from the prior draft. Per
-[docs/01-requirements/MASTER-REQUIREMENTS.md](../01-requirements/MASTER-REQUIREMENTS.md) §10 and
-[docs/02-architecture/MODULE-OWNERSHIP.md](../02-architecture/MODULE-OWNERSHIP.md) §16:
-
-```text
-Deleting/closing a User account MUST NOT cascade-delete or orphan any immutable financial/Ledger/
-  audit record that references that identity.
-Anonymization/pseudonymization of a closed identity (rather than hard deletion) is the likely
-  mechanism, but the exact mechanism, retention period, and legal-hold interaction are NOT decided
-  by any materialized document.
-IMP-002 does not implement retention/anonymization logic — it documents this boundary only.
-```
+Unchanged: closing/deleting a `User` MUST NOT cascade-delete or orphan immutable financial/
+Ledger/audit records. Anonymization/pseudonymization is the likely mechanism; exact design is
+deferred.
 
 ---
 
 ## Public ID
 
-Following the locked database convention (BIGINT internal / ULID public,
-DATABASE-ARCHITECTURE.md "Identity Conventions"):
-
-```text
-the internal BIGINT id is never exposed as a stable public identifier
-public_id (ULID) is used for any external-safe reference (e.g. a future /api/v1 resource
-  identifier)
-public_id is NOT automatically included in every authentication response by default — it is
-  exposed only where a consuming context (e.g. a future API resource) actually needs a stable
-  external reference; the authenticated web session itself has no need to expose it beyond what
-  Inertia/Vue already receives as the authenticated user's minimal profile
-```
+The internal BIGINT id is never exposed as a stable public identifier. `public_id` (ULID) is used
+for any external-safe reference, but is not automatically included in every authentication
+response by default.
 
 ---
 
@@ -907,87 +1117,80 @@ Specification only — no migration is created by this document.
 ### `users` (or the eventual entity name)
 
 ```text
-purpose:            canonical Identity + Authentication record (see "Identity Model")
-ownership:           Identity & Organization (MODULE-OWNERSHIP.md §1)
-key fields:          id (BIGINT unsigned PK), public_id (ULID), email, email_verified_at
-                     (nullable timestamp), password (hashed), status (string/enum),
-                     mfa_enabled (boolean), failed_login_attempts (int), locked_until (nullable
-                     timestamp), last_login_at (nullable timestamp), remember_token (nullable,
-                     hashed, only if "remember me" is enabled), phone (nullable, optional),
-                     phone_verified_at (nullable, optional), created_at, updated_at
-unique constraints:  email (on its canonical normalized representation), public_id
-security-sensitive:  password, remember_token (both hashed at rest; never logged)
-indexes:              email (unique), public_id (unique), status (for administrative queries)
-retention concerns:   no default soft-delete; closure/anonymization mechanism deferred (see
-                     "Retention Boundary")
+purpose:            canonical Identity + Authentication record
+ownership:           Identity & Organization
+key fields:          id (BIGINT unsigned PK), public_id (ULID),
+                     email (canonical, normalized, unique), pending_email (nullable, normalized,
+                     see "Canonical Email Change Lifecycle"), email_verified_at (nullable
+                     timestamp), password (hashed),
+                     identity_status (ACTIVE | DISABLED), security_restriction (NONE |
+                     SUSPENDED), failed_login_attempts (int), locked_until (nullable timestamp —
+                     transient brute-force lockout only, not a lifecycle value),
+                     last_login_at (nullable timestamp), mfa_enabled (boolean), phone (nullable,
+                     optional), phone_verified_at (nullable, optional), created_at, updated_at
+unique constraints:  email (canonical normalized representation), public_id
+security-sensitive:  password (hashed; never logged)
+indexes:              email (unique), public_id (unique), identity_status, security_restriction
+retention concerns:   no default soft-delete; closure/anonymization mechanism deferred
+NOT included:         remember_token (see "Remember-Me (Deferred)")
 ```
 
 ### Password reset support
 
 ```text
 purpose:            single-use, time-limited password-reset token storage
-ownership:           Identity & Organization, using Laravel's framework password-broker
-                     capability
 key fields:          email, token (hashed), created_at
-unique constraints:  framework-standard (typically one active token per email, superseded by a
-                     newer request)
 security-sensitive:  token (hashed, never plaintext)
 indexes:              email
-retention concerns:   expired/consumed tokens may be pruned; no financial/audit-history
-                     implication
 ```
 
-### MFA secret / recovery storage
+### MFA secret / recovery storage (separate table)
 
 ```text
-purpose:            TOTP secret and recovery-code storage, separate from the primary identity
-                     row to limit the blast radius of any read access to the users table
-ownership:           Identity & Organization (authentication domain only — see "MFA Secret
-                     Storage")
-key fields:          user_id (FK to users.id), secret (encrypted at rest), recovery_codes
-                     (each stored hashed, individually markable as used), created_at, updated_at
-unique constraints:  one active secret per user_id (baseline; multiple-device/backup-secret
-                     support is not specified here)
-security-sensitive:  secret (encrypted), recovery_codes (hashed) — the most sensitive columns in
-                     the entire IMP-002 schema
+purpose:            TOTP secret and recovery-code storage, separate from `users` to limit blast
+                     radius
+key fields:          user_id (FK to users.id), secret (encrypted at rest — recoverable, never
+                     hashed), pending_secret (encrypted, nullable — see "Enrollment"),
+                     recovery_codes (each stored hashed, individually markable as used),
+                     created_at, updated_at
+unique constraints:  one active secret per user_id (baseline)
+security-sensitive:  secret (encrypted), pending_secret (encrypted), recovery_codes (hashed) —
+                     the most sensitive columns in the entire IMP-002 schema
 indexes:              user_id
-retention concerns:   removed on MFA disable/reset; no financial/audit-history implication
 ```
 
 ### Invitation storage
 
 ```text
 purpose:            invitation lifecycle for Partner Representative / Internal Administrative
-                     Identity / Super Admin provisioning (see "Invitation Boundary")
-ownership:           Identity & Organization for the generic invitation mechanism; the *decision*
-                     to issue a Partner invitation still belongs to the Partner module once it
-                     exists — IMP-002 only owns the token/acceptance mechanics
-key fields:          token (hashed), intended_email, expires_at, accepted_at (nullable),
-                     created_at
-unique constraints:  token (hashed, effectively unique by construction)
-security-sensitive:  token (hashed, never plaintext)
+                     Identity / Super Admin provisioning
+key fields:          id, public_id (optional), intended_email, token_hash, issued_at, expires_at,
+                     accepted_at (nullable), revoked_at (nullable), issuer reference, revoker
+                     reference (nullable), created_at, updated_at
+security-sensitive:  token_hash (hashed, never plaintext)
 indexes:              intended_email, expires_at
-retention concerns:   expired/consumed invitations may be pruned; no financial/audit-history
-                     implication
+```
+
+### First Super Admin bootstrap evidence (Q25)
+
+```text
+purpose:            durable one-time guard + audit evidence that the initial bootstrap occurred
+key fields:          a minimal marker (e.g. a single-row/singleton record or a dedicated flag) —
+                     exact shape is an implementation detail; MUST NOT store the credential
+security-sensitive:  none (no credential stored here)
+retention concerns:   permanent — this is the guard that prevents a second initial bootstrap
 ```
 
 ### `sessions` (existing, IMP-001)
 
-```text
-ALREADY EXISTS. user_id becomes populated once User exists; no schema change anticipated. Any
-future schema change to sessions must be a new migration, per BRANCHING-POLICY.md "Migration
-Immutability" — never an edit to the IMP-001 migration.
-```
+ALREADY EXISTS. `user_id` becomes populated once `User` exists; no schema change anticipated.
 
 ### Cross-cutting
 
 ```text
-Foreign keys:       any later module referencing User (Donor context, Fundraiser Profile, Partner
-                    Profile, Beneficiary Profile, MFA/invitation storage above) does so via User's
-                    internal BIGINT id, per DATABASE-ARCHITECTURE.md "Identity Conventions."
-Case/normalization: email normalized (see "Email Normalization") before uniqueness comparison and
-                    storage.
-Money/DECIMAL:      not applicable — IMP-002 has no monetary columns.
+Foreign keys:        any later module referencing User does so via its internal BIGINT id.
+Case/normalization:  email and pending_email normalized before uniqueness comparison and storage.
+Money/DECIMAL:       not applicable.
 ```
 
 ---
@@ -995,16 +1198,24 @@ Money/DECIMAL:      not applicable — IMP-002 has no monetary columns.
 ## Transaction Boundaries
 
 ```text
-account/identity creation (self-registration, invitation acceptance, or provisioning) —
-  transactional
-password reset completion (token consumption + password update + token invalidation + other
-  session invalidation) — transactional
+account/identity creation (self-registration, invitation acceptance, or provisioning, including
+  the first Super Admin bootstrap) — transactional
+password change / password reset completion (rehash + session rotation + other-session
+  invalidation + assurance invalidation + reset-token invalidation) — transactional
+canonical email change promotion (old->new email swap + pending_email clear + verification
+  timestamp update + session rotation + other-session invalidation + stale reset-token
+  invalidation) — transactional
 email verification completion (mark verified + invalidate verification token) — transactional
-MFA enrollment completion (secret confirmation + recovery-code generation) — transactional
-MFA reset/disable (secret/recovery removal + audit event) — transactional
-invitation acceptance (token consumption + User creation + credential establishment) —
+MFA enrollment completion (pending secret confirmation + activation + recovery-code generation)
+  — transactional
+MFA recovery-code consumption — transactional (exactly one consumer succeeds under concurrency)
+MFA reset/disable (secret/recovery invalidation + assurance invalidation + audit event) —
   transactional
-security lock/unlock (state change + audit event) — transactional
+invitation acceptance (token consumption + User creation or binding + credential establishment)
+  — transactional
+persistent security-state transition (ACTIVE<->DISABLED, NONE<->SUSPENDED) — transactional
+first Super Admin bootstrap initialization (identity creation + durable one-time guard write) —
+  transactional
 ```
 
 ---
@@ -1012,89 +1223,50 @@ security lock/unlock (state change + audit event) — transactional
 ## Concurrency / Idempotency
 
 ```text
-duplicate registration:          unique index on email prevents a duplicate row; the application
-                                  layer must handle the resulting constraint violation as a normal
-                                  "identifier already in use" outcome, not a 500 error
-simultaneous password reset:      a consumed/expired token used a second time MUST fail safely
-                                  (covered by "single use" in "Password Reset")
-verification token replay:        a consumed verification token/link MUST be rejected on reuse
-multiple reset requests:          generating a new reset token may invalidate prior outstanding
-                                  ones (reasonable default)
-invitation replay:                a consumed/expired invitation token MUST be rejected on reuse,
-                                  with a generic error (see "Privacy")
-double MFA enrollment:            re-running enrollment while already enrolled either requires an
-                                  explicit reset first, or transactionally replaces the prior
-                                  secret and invalidates prior recovery codes — implementation may
-                                  choose either as long as no window exists where two secrets are
-                                  simultaneously valid
-concurrent account updates:        standard optimistic handling (e.g. `updated_at` check) is
-                                  sufficient; the Financial Idempotency invariant in
-                                  docs/03-database/DATABASE-INVARIANTS.md does not apply to
-                                  non-financial Identity records
+duplicate registration:       unique index on email prevents a duplicate row; handled as a normal
+                               "identifier already in use" outcome
+simultaneous password reset:   a consumed/expired token used a second time MUST fail safely
+verification/invitation token replay: a consumed token/link MUST be rejected on reuse
+multiple reset requests:       a new reset token may invalidate prior outstanding ones
+email-change race:              see "Canonical Email Change Lifecycle > Concurrency"
+invitation acceptance race:      see "Invitation Boundary > Lifecycle Rules"
+MFA enrollment race:             starting new enrollment invalidates any previous unconfirmed
+                                pending secret; no window has two simultaneously valid secrets
+MFA recovery-code race:          exactly one concurrent consumption attempt succeeds
+first-bootstrap race:            the durable one-time guard ensures at most one bootstrap
+                                succeeds even under a concurrent double-invocation of the command
+concurrent account updates:      standard optimistic handling (`updated_at` check) is sufficient;
+                                the Financial Idempotency invariant does not apply to
+                                non-financial Identity records
 ```
 
 ---
 
 ## Error Model
 
-```text
-validation error:              structured field-level errors (framework standard), safe to
-                                display
-authentication failure:         generic message (see "Privacy") — no field-level distinction
-                                between "unknown email," "wrong password," and "wrong MFA code"
-account security restriction:   generic, non-account-confirming message (see "Privacy")
-rate limit:                     standard HTTP 429-equivalent with a safe retry-after hint
-expired token:                  generic "this link/code has expired" (applies to verification,
-                                password-reset, and invitation tokens alike)
-invalid token:                  generic "this link/code is invalid"
-verification required:          a distinct, safe message shown only to an already-authenticated
-                                principal, since it inherently confirms account existence to the
-                                one party who already proved control of the credential
-```
+Generic messages for: authentication failure (no distinction between unknown email/wrong
+password/wrong MFA code), account security restriction, rate limit, expired/invalid token
+(verification, reset, or invitation alike). "Verification required" is shown only to an
+already-authenticated principal.
 
 ---
 
 ## Route Ownership
 
-Categories only — no route is implemented by this document:
-
-```text
-guest authentication:        login, donor/fundraiser self-registration
-invitation acceptance:        accept-invitation (credential establishment for Partner
-                              Representative / Internal Administrative Identity / Super Admin)
-authenticated account security: password change, account security state view, MFA
-                              enrollment/verification/reset management, logout, "logout other
-                              sessions"
-verification:                 verify-email confirmation endpoint, resend
-password recovery:            forgot-password request, reset-password completion
-```
-
-All routes remain same-origin under the single root domain, per MASTER-ARCHITECTURE.md's locked
-"Single root domain" principle — no separate auth subdomain. The exact routing shape (portal-scoped
-vs. a shared `/auth/*` path) remains an implementation-time decision.
+Categories only: guest authentication (login, donor/fundraiser self-registration); invitation
+acceptance; authenticated account security (password change, email change, account security
+state, MFA management, logout, "logout other sessions"); verification (verify-email, resend);
+password recovery (forgot/reset). Same-origin, single root domain, no separate auth subdomain.
 
 ---
 
 ## UI Boundary
 
-May implement, using the existing Inertia/Vue/Tailwind foundation from IMP-001:
-
-```text
-login UI
-donor registration UI
-fundraiser registration UI
-invitation acceptance UI (Partner Representative / Internal Administrative Identity / Super Admin)
-forgot password UI
-reset password UI
-email verification UI
-account security UI (password change, session list if "logout other sessions" is built)
-MFA enrollment UI (QR/secret display, confirmation)
-MFA challenge UI (login-time TOTP entry, recovery-code entry)
-```
-
-Must NOT implement: donor dashboard, fundraiser dashboard, partner dashboard, or admin business
-dashboard. A single neutral authenticated landing page is acceptable if needed to prove the
-authenticated flow renders end-to-end — it must not become a business dashboard.
+May implement: login, donor/fundraiser registration, invitation acceptance, forgot/reset
+password, email verification, email change, account security (password change, MFA management),
+MFA enrollment/challenge UI. Must NOT implement any business dashboard (donor/fundraiser/partner/
+admin). A single neutral authenticated landing page is acceptable to prove the flow renders
+end-to-end.
 
 ---
 
@@ -1103,99 +1275,81 @@ authenticated flow renders end-to-end — it must not become a business dashboar
 At minimum, before IMP-002 implementation may be considered complete:
 
 ```text
-donor self-registration succeeds and creates an Identity only
-fundraiser self-registration succeeds and grants no business authority
-partner representative / internal administrative identity / super admin CANNOT self-register via
-  the public registration endpoint
-invitation issuance, acceptance (correct email), rejection (wrong email), expiry, and replay
-credential hashing (password and MFA secret/recovery codes never stored/logged in plaintext)
-login success (with and without MFA enabled)
-login failure (wrong password) -> generic message, no enumeration
-login failure (unknown email) -> identical generic message
-MFA challenge success/failure; recovery-code single use
-session fixation protection (session ID changes on login)
-logout (session invalidated; ID rotated)
-account restriction (suspended/disabled/locked) -> authentication denied, generic message
-password reset: request -> generic response regardless of existence
-password reset: token single-use (second use fails); expired token fails
-password reset: other active sessions invalidated after completion
-email verification: valid token verifies; expired/invalid token fails; replay fails
-rate limiting: login, donor/fundraiser registration, password-reset request, verification resend,
-  TOTP verification, invitation acceptance — all throttled
-account enumeration resistance: timing/response-shape parity across "unknown email"/"wrong
-  password"/"wrong MFA code," and across "account exists"/"account does not exist" for
-  password-reset request and invitation acceptance
-CSRF: state-changing auth routes reject requests without a valid CSRF token
-database constraints: duplicate email rejected at the database level, not only in application
-  validation
-audit events: each event in "Audit Events" is actually emitted at its corresponding action
-guest/authenticated middleware behavior: guest-only routes reject an authenticated principal
-  appropriately; authenticated-only routes reject a guest
+donor/fundraiser self-registration; partner rep/internal admin/super admin CANNOT self-register
+invitation issuance, revocation, acceptance (correct email), rejection (wrong email/revoked/
+  expired), replay, and the email-uniqueness race (task item 20) resolved without duplicate
+  identities
+credential hashing (password, MFA secret encrypted not hashed, recovery codes hashed) never
+  plaintext in logs/responses
+login success/failure (with and without MFA); MFA challenge success/failure; recovery-code
+  single-use
+session fixation protection; logout invalidation and rotation
+DISABLED and SUSPENDED accounts cannot authenticate; transient lockout (not a persistent status)
+  denies authentication for its duration and only its duration
+password change: other sessions invalidated, current session rotated, ELEVATED reset, reset
+  tokens invalidated
+password reset: generic response regardless of existence; single-use; expiry; same invalidation
+  consequences as password change; old email stops being a valid reset target after email change
+canonical email change: pending email does not become login-valid until verified; promotion is
+  atomic; old email invalidated as login/reset target after promotion; rollback leaves current
+  email unchanged
+email verification: valid/expired/invalid/replay cases
+Authentication Assurance: STANDARD after login; ELEVATED only after fresh step-up; finite expiry
+  with fallback to STANDARD; invalidated by every trigger listed in "Authentication Assurance";
+  new session does not inherit prior ELEVATED
+MFA: enrollment not enabled until TOTP-confirmed; abandoned enrollment safe; secret encrypted;
+  recovery codes hashed and shown once; recovery replay rejected; regeneration invalidates old
+  codes; TOTP challenge throttled; replay protection on enrollment/step-up/reset confirmations;
+  disable/reset requires fresh credential + ELEVATED
+Q24 account/security model: DISABLED/SUSPENDED deny auth; unverified email is not confused with
+  lifecycle status; transient lockout not persisted as lifecycle state; business-approval status
+  never appears on User
+Q25 bootstrap: first bootstrap succeeds with no default credential; a second initial bootstrap
+  attempt is rejected; no public route can create a Super Admin; no RBAC schema is introduced by
+  IMP-002
+remember-me: not enabled in baseline; no remember_token behavior required
+rate limiting across every listed flow
+account enumeration resistance across every relevant flow
+CSRF on all state-changing auth routes
+database constraints: duplicate email rejected at the database level
+audit events: every listed event actually emitted
+guest/authenticated middleware behavior
 ```
 
-Explicitly required negative coverage: no test may assert or rely on a role, permission, scope, or
-business-authority check — IMP-002 has none, and its test suite must demonstrate the absence of
-authorization leakage into authentication (e.g. a Fundraiser's self-registered account is denied
-any Fundraiser-authority action, because no such authority exists yet at all — not because of a
-role check).
+Explicitly required negative coverage: no test may assert or rely on a role, permission, scope,
+or business-authority check.
 
 ---
 
 ## Security Testing
 
-```text
-plaintext credential prevention:  password/MFA-secret/recovery-code columns never contain a
-                                   plaintext value in test assertions or database inspection
-credential leakage:                password/token/MFA-secret values never appear in logs, error
-                                   responses, or serialized API/Inertia payloads
-token leakage:                     password-reset, verification, and invitation tokens never
-                                   appear in logs or are exposed via a non-owning request
-MFA secret protection:             the TOTP secret is never re-displayed after initial enrollment
-                                   confirmation, and never returned by any endpoint other than the
-                                   enrollment flow itself
-session fixation:                  covered above
-CSRF:                               covered above
-brute-force controls:              repeated failed logins/MFA challenges trigger rate
-                                   limiting/lockout
-expired token reuse:                covered above
-credential reset invalidation:      other active sessions are invalidated after a password reset
-security-restricted account authentication: covered above
-```
-
-Penetration testing is NOT claimed or required at this stage.
+Plaintext-credential prevention (password/MFA-secret/recovery-codes); credential/token leakage
+(logs, responses, payloads); MFA secret never re-displayed after enrollment; session fixation;
+CSRF; brute-force controls; expired-token reuse; credential/session invalidation on password
+change, password reset, and email-change promotion; security-restricted account authentication;
+first-bootstrap credential never persisted in plaintext anywhere (code, config, seeder, log,
+audit). Penetration testing is NOT claimed or required at this stage.
 
 ---
 
 ## Shared Hosting Compatibility
 
-Unchanged from the prior draft, reaffirmed for MFA specifically:
-
-```text
-Apache/LiteSpeed        unchanged
-PHP                      unchanged (8.3 baseline)
-MySQL                    unchanged
-database sessions        unchanged (reused, not replaced)
-database queue           unchanged
-cron                     unchanged
-Laravel Storage          unchanged
-compiled frontend assets  unchanged
-```
-
-MFA (TOTP) requires NO mandatory SMS provider (SMS is explicitly not the baseline, Q23), no
-mandatory external MFA SaaS, no mandatory Redis, and no mandatory WebSocket — TOTP verification is
-a stateless, local HMAC computation against a stored secret, not an external service call. Email
-delivery for verification/password-reset/invitation MUST use Laravel's standard mail
-configuration/transport, with no mandatory dependency on a specific transport service.
+Unchanged: Apache/LiteSpeed, PHP 8.3, MySQL, database sessions/queue, cron, Laravel Storage,
+compiled assets — all unchanged. MFA (TOTP via a maintained library) requires no mandatory SMS
+provider, external MFA SaaS, Redis, or WebSocket — TOTP verification is a stateless, local HMAC
+computation. The Q25 bootstrap command is a one-shot Artisan invocation, not a daemon. Email
+delivery uses Laravel's standard mail configuration with no mandatory transport-service
+dependency.
 
 ---
 
 ## Dependency Policy
 
-No new Composer/npm package is proposed for the non-MFA baseline (`Auth`, `Hash`, session,
-password broker, `RateLimiter`, `Crypt`, Blade/Inertia mail views are all framework capabilities).
-For TOTP specifically, see "MFA > Dependency Note" above — a narrowly-scoped addition may be
-warranted, but its selection is deferred to implementation-time Dependency Governance review, not
-decided here.
+No new package is proposed for the non-MFA baseline. For TOTP, a maintained RFC 6238 library is
+now a REQUIRED addition (not merely "may be warranted" — see "MFA > Implementation Contract"); its
+specific selection is deferred to implementation-time Dependency Governance review
+([CHANGE-CONTROL.md](../00-governance/CHANGE-CONTROL.md)), applying the selection criteria listed
+under "MFA."
 
 ---
 
@@ -1205,20 +1359,10 @@ decided here.
 NONE.
 ```
 
-Q21 (login identifier), Q22 (registration model), and Q23 (MFA policy) — the three items an
-earlier draft correctly flagged as blocking — are now FINAL/LOCKED and fully incorporated above.
-The Actor Catalog artifact gap is reclassified as a non-blocking documentation/materialization gap
-(see "Actor Catalog Artifact Gap"), not a Human Decision.
-
-**Correction:** an earlier revision of this specification also listed Beneficiary
-registration/authentication as an open item requiring a Human Decision. That was incorrect. Q7 —
-Hybrid Beneficiary Registration is already FINAL/LOCKED in
-[docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md).
-No new Human Decision is required for Beneficiary registration policy. What remains open is only
-an implementation-ownership question (which stage designs Q7's detailed mechanics, and whether a
-`User` identity is required) — recorded under "Deferred Items" as a deferred *implementation*
-item, not a deferred *business decision*, and it does not affect the `User` entity design or any
-baseline flow already specified.
+Q21-Q25 are all FINAL/LOCKED and materialized in the canonical
+[docs/01-requirements/HUMAN-DECISION-REGISTER.md](../01-requirements/HUMAN-DECISION-REGISTER.md),
+and fully incorporated above. Q7 (Beneficiary registration policy) is likewise FINAL/LOCKED and
+referenced, not reopened. The Actor Catalog artifact gap remains a non-blocking documentation gap.
 
 ---
 
@@ -1226,86 +1370,86 @@ baseline flow already specified.
 
 ```text
 [x] Authoritative sources available and read
-[x] Identity model unambiguous               -- PASS (User entity; email as sole login column;
-                                                see "Identity Model")
-[x] Login identifier unambiguous              -- PASS (Q21 — email)
-[x] Registration policy unambiguous            -- PASS (Q22 — hybrid by actor for Donor/
-                                                Fundraiser/Partner Representative/Internal
-                                                Administrative Identity/Super Admin; Beneficiary
-                                                policy separately locked by Q7 — implementation
-                                                ownership deferred, non-blocking, not a policy gap)
-[x] Password/reset model unambiguous          -- PASS (framework password-broker direction)
-[x] Verification rules unambiguous            -- PASS (email verification lifecycle specified;
-                                                pre-verification login behavior given an explicit,
-                                                reasoned default — see "Verification")
-[x] MFA requirement unambiguous                -- PASS (Q23 — configurable, TOTP baseline)
-[x] Authentication assurance model mapped     -- PASS (STANDARD/ELEVATED, TOTP as one ELEVATED
-                                                path)
-[x] Security restrictions mapped               -- PASS (neutral state set; explicitly separated
-                                                from business-approval states)
-[x] Database requirements defined              -- PASS (users, password-reset, MFA, invitation
-                                                tables all specified at requirement level)
-[x] Stage boundaries clear                     -- PASS
-[x] Tests defined                              -- PASS
-[x] Shared-hosting compatibility preserved     -- PASS
-[x] No architecture conflicts                  -- PASS
-[x] No unresolved implementation blocker        -- PASS
+[x] Q21-Q25 canonical authority exists            -- PASS (materialized in
+                                                    HUMAN-DECISION-REGISTER.md)
+[x] Identity model unambiguous                     -- PASS
+[x] Login identifier unambiguous                    -- PASS (Q21)
+[x] Registration policy unambiguous                  -- PASS (Q22; Beneficiary via Q7, deferred
+                                                    implementation only)
+[x] Email-change lifecycle deterministic             -- PASS (see "Canonical Email Change
+                                                    Lifecycle")
+[x] Invitation issuer/revocation model defined        -- PASS (see "Invitation Boundary")
+[x] Password/reset model unambiguous                 -- PASS
+[x] Password-change session consequences defined      -- PASS
+[x] Verification rules unambiguous                   -- PASS
+[x] Authentication Assurance lifecycle executable     -- PASS (fields, lifetime, invalidation
+                                                    triggers all specified)
+[x] MFA contract unambiguous                          -- PASS (maintained-library requirement;
+                                                    enrollment/recovery/reset/replay all defined)
+[x] Q24 account/security model fully applied          -- PASS
+[x] Q25 first-bootstrap model fully applied            -- PASS
+[x] Remember-me explicitly deferred                    -- PASS
+[x] Security restrictions mapped                      -- PASS
+[x] Database requirements defined                     -- PASS
+[x] Stage boundaries clear                             -- PASS
+[x] Tests defined                                      -- PASS
+[x] Shared-hosting compatibility preserved              -- PASS
+[x] No architecture conflicts                          -- PASS
+[x] No RBAC implementation leakage                      -- PASS (explicit negative test
+                                                    requirement; Q25's Super Admin bootstrap
+                                                    creates no RBAC schema)
+[x] No unresolved implementation blocker                -- PASS
 ```
 
-**Definition of Ready: PASS.** All three Human Decisions this specification itself depended on
-(Q21-Q23) are FINAL/LOCKED and incorporated; the Actor Catalog concern was resolved by
-reconciliation, not by a new decision; Beneficiary registration policy is separately already
-locked by the pre-existing Q7 (not an open Human Decision at all); the only remaining open item
-for Beneficiary is which later stage implements Q7's mechanics, which is non-blocking and does not
-affect anything IMP-002 itself specifies.
+**Definition of Ready: PASS.**
 
 ---
 
 ## Definition of Done
 
-Restated for forward reference (per
-[docs/00-governance/DEFINITION-OF-DONE.md](../00-governance/DEFINITION-OF-DONE.md)), to apply once
-implementation is separately authorized:
-
 ```text
-identity schema implemented (users, password-reset, MFA, invitation tables)
+identity schema implemented (users incl. pending_email/identity_status/security_restriction,
+  password-reset, MFA secret/recovery, invitation, bootstrap-guard tables)
 secure email + password authentication implemented
-approved registration models implemented per actor (Donor/Fundraiser self-registration;
-  Partner Representative/Internal Administrative Identity/Super Admin invitation/provisioning
-  only)
+approved registration models implemented per actor
+canonical email change lifecycle implemented (pending email, re-verification, atomic promotion,
+  session/reset-token invalidation)
 email verification implemented as specified
-password reset implemented securely
-TOTP MFA capability implemented (enrollment, verification, recovery, reset)
-assurance state (STANDARD/ELEVATED) exposed
-session security verified (fixation, rotation, logout)
+password reset implemented securely, with full session/assurance invalidation
+TOTP MFA capability implemented via a maintained library (enrollment, verification, recovery,
+  reset, replay protection)
+Authentication Assurance lifecycle implemented (finite ELEVATED lifetime, all invalidation
+  triggers wired)
+Q24 account/security model implemented (no persistent LOCKED status; brute-force lockout is
+  transient only)
+Q25 first Super Admin bootstrap CLI implemented, with durable one-time guard and no plaintext
+  credential anywhere
+remember-me NOT implemented (explicitly deferred)
+session security verified (fixation, rotation, logout, all invalidation triggers)
 rate limiting verified across all listed flows
 enumeration resistance tested
 audit events emitted
-RBAC/business authorization absent (no roles/permissions/scopes/authority tables or logic)
+RBAC/business authorization absent
 shared-hosting compatibility preserved
-tests passing (functional + security, per "Testing Requirements" / "Security Testing")
+tests passing (functional + security)
 independent review passing
 ```
-
-Not required at this stage: Beneficiary domain implementation (registration mechanics per the
-already-locked Q7, authentication if the Beneficiary domain stage determines it needs one),
-`/api/v1` authentication mechanism, Audit domain storage, retention/anonymization mechanism,
-System/Integration Principal job plumbing — all recorded under "Deferred Items." Beneficiary
-registration *policy* is not deferred — it is already decided (Q7); only its implementation is.
 
 ---
 
 ## Risks
 
 ```text
-Retrofitting a second login identifier later (per Q21's own change-control note) would require an
-  ACR/ADR and a database/validation rework — expected to be rare given Q21 is locked, not
-  contingent.
-The TOTP dependency choice (package vs. minimal direct implementation) should be resolved early in
-  implementation to avoid rework of the MFA secret-storage schema.
-When the Beneficiary domain stage designs Q7's (Hybrid Beneficiary Registration) detailed
-  mechanics, it may add a new actor row and a registration flow, but should not need to change the
-  `User` entity itself, given the module boundaries already established.
+The TOTP library selection should be resolved early in implementation to avoid rework of the MFA
+  secret-storage schema.
+Retrofitting remember-me later requires re-auditing every session-invalidation trigger in this
+  specification to add persistent-credential invalidation at each one — feasible, but should be
+  treated as a specification update, not a silent addition.
+When the Beneficiary domain stage designs Q7's detailed mechanics, it may add a new actor row and
+  a registration flow without needing to change the `User` entity itself.
+The Q25 bootstrap command's one-time guard must be implemented as a genuinely durable,
+  race-safe mechanism (not merely an application-level check) to withstand a concurrent
+  double-invocation during deployment automation.
 ```
 
 ---
@@ -1313,17 +1457,19 @@ When the Beneficiary domain stage designs Q7's (Hybrid Beneficiary Registration)
 ## Deferred Items (Non-Blocking)
 
 ```text
-Beneficiary domain implementation of Q7 (Hybrid Beneficiary Registration — already FINAL/LOCKED,
-  see docs/01-requirements/HUMAN-DECISION-REGISTER.md; only its detailed mechanics and stage
-  ownership are deferred, not the policy itself), and whether it requires a `User` identity
-API authentication mechanism (session vs. token vs. OAuth) for future /api/v1
+Beneficiary domain implementation of Q7 (policy locked; mechanics/stage ownership deferred)
+API authentication mechanism for future /api/v1
 System Principal / Integration Principal implementation ownership
-Audit domain storage/query mechanism (event emission points are specified; the sink is not built)
+Audit domain storage/query mechanism (emission points specified; sink not built)
 Retention/anonymization mechanism for closed identities
-Exact route paths for authentication (categories specified; paths not fixed)
-Administrative MFA reset authority (requires an IMP-003+ Authority Assignment; the self-service
-  path is specified now)
+Exact route paths for authentication
+Administrative MFA reset authority and administrative persistent-security-state transition
+  authority (both require an IMP-003+ Authority Assignment; self-service/mechanical paths are
+  specified now)
 Actor Catalog artifact under docs/06-domains/identity/ (documentation gap, not blocking)
+Remember-me (explicitly deferred per m01 — see "Remember-Me (Deferred)")
+Subsequent (post-first) Super Admin provisioning mechanism (uses IMP-003+'s ordinary provisioning
+  path, not the Q25 bootstrap command)
 ```
 
 ---
@@ -1331,7 +1477,7 @@ Actor Catalog artifact under docs/06-domains/identity/ (documentation gap, not b
 ## Implementation Gate
 
 ```text
-IMP-002 Specification:        READY FOR READINESS REVIEW
+IMP-002 Specification:        READY FOR TARGETED READINESS RE-AUDIT
 IMP-002 Definition of Ready:   PASS
 IMP-002 Implementation:       NOT AUTHORIZED
 IMP-003:                       NOT AUTHORIZED
@@ -1341,6 +1487,6 @@ STOP.
 
 Do not implement IMP-002. Do not create migrations, models, controllers, middleware, routes, UI,
 factories, seeders, or tests for this stage. Do not install any authentication/TOTP package.
-Implementation authorization requires an independent Codex readiness review and, if that passes,
-explicit Human/stage authorization, per
+Implementation authorization requires an independent Codex targeted readiness re-audit and, if
+that passes, explicit Human/stage authorization, per
 [docs/00-governance/IMPLEMENTATION-GOVERNANCE.md](../00-governance/IMPLEMENTATION-GOVERNANCE.md).
