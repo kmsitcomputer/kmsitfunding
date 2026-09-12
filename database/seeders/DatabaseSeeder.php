@@ -11,6 +11,10 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        //
+        $this->call([
+            RbacPermissionSeeder::class,
+            RbacAuthorityTypeSeeder::class,
+            RbacRoleSeeder::class,
+        ]);
     }
 }
