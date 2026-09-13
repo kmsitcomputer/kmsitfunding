@@ -2,11 +2,13 @@
 
 namespace Tests\Feature\Identity;
 
+use App\Models\Audit\AuditRecord;
 use App\Models\EmailChangeRequest;
 use App\Models\Invitation;
 use App\Models\MfaSecret;
 use App\Models\SuperAdminBootstrap;
 use App\Models\User;
+use App\Services\Audit\AuditWriter;
 use App\Services\Identity\EmailChangeService;
 use App\Services\Identity\IdentityAuditLogger;
 use App\Services\Identity\InvitationService;
@@ -113,7 +115,44 @@ class IdentityAuditFailureRollbackTest extends TestCase
 
     // --- Registration (identity.user.created / identity.user.self_registered) ---
 
-    public function test_forced_audit_failure_rolls_back_self_registration(): void
+    /**
+     * Binds IdentityAuditLogger to a variant that behaves exactly like the
+     * real production logger (real AuditWriter/PrincipalService resolution
+     * — an actual canonical audit append actually happens for every OTHER
+     * event) EXCEPT it throws when the given event name is appended. This
+     * is what IMP004-REAUDIT-R1's M05 finding requires: proving rollback
+     * when the SECOND of RegistrationService::register()'s two audit calls
+     * (identity_created succeeds, self_registration_completed fails) is
+     * the one that fails — a blanket-failing logger (bindFailingIdentityAuditLogger()
+     * above) only ever proves the FIRST call's failure, since it throws on
+     * every event unconditionally.
+     */
+    private function bindIdentityAuditLoggerFailingOnlyOn(string $failOnEvent): void
+    {
+        $this->app->bind(IdentityAuditLogger::class, fn ($app) => new class($app->make(AuditWriter::class), $app->make(PrincipalService::class), $failOnEvent) extends IdentityAuditLogger
+        {
+            public function __construct(AuditWriter $writer, PrincipalService $principals, private readonly string $failOnEvent)
+            {
+                parent::__construct($writer, $principals);
+            }
+
+            public function record(string $event, ?User $user, array $context = []): void
+            {
+                if ($event === $this->failOnEvent) {
+                    throw new \RuntimeException('forced identity audit failure: '.$event);
+                }
+
+                parent::record($event, $user, $context);
+            }
+        });
+    }
+
+    /**
+     * Proves rollback for the FIRST of RegistrationService::register()'s two
+     * audit calls (identity_created) failing — the blanket-failing logger
+     * never reaches self_registration_completed at all in this case.
+     */
+    public function test_forced_audit_failure_on_identity_created_rolls_back_self_registration(): void
     {
         $this->bindFailingIdentityAuditLogger();
 
@@ -121,10 +160,42 @@ class IdentityAuditFailureRollbackTest extends TestCase
             app(RegistrationService::class)->register('rollback-registration@example.com', 'a-strong-password-123');
             $this->fail('Expected the forced audit failure to propagate.');
         } catch (\RuntimeException $e) {
-            $this->assertStringContainsString('forced identity audit failure', $e->getMessage());
+            $this->assertStringContainsString('forced identity audit failure: identity_created', $e->getMessage());
         }
 
         $this->assertDatabaseMissing('users', ['email' => 'rollback-registration@example.com']);
+        $this->assertSame(0, AuditRecord::where('event_type', 'identity.user.created')->count());
+        $this->assertSame(0, AuditRecord::where('event_type', 'identity.user.self_registered')->count());
+    }
+
+    /**
+     * IMP004-IMPL-M05 (targeted, IMP004-REAUDIT-R1): identity_created
+     * succeeds and commits WITHIN the still-open transaction, THEN
+     * self_registration_completed fails — the entire transaction, including
+     * the already-appended identity_created row, must still roll back as
+     * one atomic unit (Q26 MUTATION_ATOMIC), never a partially-committed
+     * registration with one audit record but no User row, or vice versa.
+     */
+    public function test_forced_audit_failure_on_self_registered_second_event_rolls_back_entire_registration(): void
+    {
+        $this->bindIdentityAuditLoggerFailingOnlyOn('self_registration_completed');
+
+        try {
+            app(RegistrationService::class)->register('rollback-second-event@example.com', 'a-strong-password-123');
+            $this->fail('Expected the forced audit failure to propagate.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('forced identity audit failure: self_registration_completed', $e->getMessage());
+        }
+
+        // Business state: the User row created earlier in the SAME
+        // transaction as the first (successful) audit append must not
+        // survive the later rollback either.
+        $this->assertDatabaseMissing('users', ['email' => 'rollback-second-event@example.com']);
+
+        // Neither audit record may have committed — not the one that
+        // failed, and not the one that succeeded-then-rolled-back with it.
+        $this->assertSame(0, AuditRecord::where('event_type', 'identity.user.created')->count());
+        $this->assertSame(0, AuditRecord::where('event_type', 'identity.user.self_registered')->count());
     }
 
     // --- Invitation issue / revoke / accept ---

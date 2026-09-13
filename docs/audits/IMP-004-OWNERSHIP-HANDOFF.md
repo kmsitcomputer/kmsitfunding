@@ -274,6 +274,19 @@ IMP004-IMPL-M03 (MAJOR) — Unauthorized PRE_PRINCIPAL_SYSTEM invitation fallbac
   catalog; the IMP-002/IMP-004 contradiction itself remains open and is not this finding's to
   resolve)
 
+  CORRECTION (Remediation Pass 2, per targeted Codex re-audit IMP004-REAUDIT-R1-01): the
+  "Human Decision Required: YES" / "genuine IMP-002/IMP-004 contradiction" analysis directly
+  above was itself incorrect and is corrected here rather than erased. Earlier remediation
+  analysis classified the null-issuer test failures as a possible specification contradiction.
+  Independent Codex re-audit determined this was incorrect. Final disposition: invalid test
+  fixture / caller assumption — the 10 InvitationTest cases were themselves passing null where
+  the approved actor contract never actually supported it for ordinary issuance; IMP-002's
+  "where available" language describes historical/reference data shape, not a license for new
+  issuance calls to omit attribution. Existing approved actor contract remains sufficient. No
+  Human Decision required. See "Remediation Pass 2" below for the corrected fixtures and the
+  resulting narrow InvitationService API tightening (non-nullable $issuer/$revoker parameters;
+  the underlying `issuer_user_id`/`revoker_user_id` FK columns remain nullable).
+
 IMP004-IMPL-M04 (MAJOR) — Incomplete source-event/idempotency conflict comparison
   Finding: AuditWriter::resolveIdempotentReplay() only compared subject_type, subject_id,
   actor_principal_id, actor_principal_kind, and event_version — never metadata, execution_context,
@@ -350,6 +363,95 @@ Full-suite validation after all six patches (same commands as the prior review):
     concurrency test passing).
   - `vendor/bin/pint --test`: PASS. `npm run type-check`: PASS. `npm run build`: PASS (584
     modules). `composer audit`: PASS (no advisories). `git diff --check`: PASS.
+
+## Remediation Pass 2 (Targeted Codex Re-Audit)
+
+Codex targeted re-audit disposition on Remediation Pass 1: `IMP004-IMPL-M01/M02/M03/M04/m01 —
+RESOLVED`; `IMP004-IMPL-M05 — NOT RESOLVED`; new regression finding `IMP004-REAUDIT-R1-01 —
+MAJOR`. Human Decision Required: NO. Only these two items were in scope for this pass — no
+resolved finding was reopened.
+
+```
+IMP004-IMPL-M05 (MAJOR, continued) — Missing targeted forced-failure evidence for
+identity.user.self_registered
+  Finding: RegistrationService::register() emits TWO CRITICAL/MUTATION_ATOMIC events in
+  sequence — identity.user.created, then identity.user.self_registered. Pass 1's forced-failure
+  test used a blanket-failing logger, which always throws on the FIRST call
+  (identity.user.created) — it never actually exercised the case where the first append
+  succeeds and the SECOND one is what fails, so rollback of an already-appended first audit
+  record (within the same still-open transaction) was never proven.
+  Root Cause: test coverage gap — a blanket failure injector cannot selectively target the
+  second of two sequential calls.
+  Files Changed: tests/Feature/Identity/IdentityAuditFailureRollbackTest.php (new
+  bindIdentityAuditLoggerFailingOnlyOn() helper — a logger that behaves exactly like the real
+  production IdentityAuditLogger, real AuditWriter/PrincipalService resolution included, except
+  it throws only for one named event; the existing blanket-failing test was kept, renamed for
+  clarity, and a new second-event test added alongside it).
+  Fix: no production code change — RegistrationService's existing event order
+  (identity.user.created -> identity.user.self_registered) was preserved exactly; this closes a
+  test-evidence gap only.
+  Tests: test_forced_audit_failure_on_identity_created_rolls_back_self_registration (first-event
+  failure, renamed from Pass 1's test, unchanged assertions) and
+  test_forced_audit_failure_on_self_registered_second_event_rolls_back_entire_registration (new)
+  — proves identity.user.created's append succeeds and then rolls back anyway when
+  identity.user.self_registered fails immediately after it, in the same transaction: no User
+  row persisted, and NEITHER audit record (not the one that failed, not the one that
+  succeeded-then-rolled-back) exists afterward.
+  SQLite Result: PASS. MySQL Result: PASS.
+  Disposition: PATCHED — PENDING CODEX RE-AUDIT
+
+IMP004-REAUDIT-R1-01 (MAJOR) — Invalid null-issuer invitation test fixtures
+  Finding: the 10 InvitationTest cases failing since Pass 1's M03 revert were themselves invalid
+  fixtures, not evidence of a specification contradiction — see the correction recorded against
+  M03 above. Every one of them called InvitationService::issue()/revoke() with a null issuer/
+  revoker for what is an ordinary (non-bootstrap) issuance/revocation flow, which the approved
+  actor contract never actually supported.
+  Root Cause: test fixture / caller assumption error (Codex's exact classification): the tests
+  assumed a null issuer was a legitimate ordinary-flow input; it never was under the canonical
+  actor model.
+  Files Changed:
+    - tests/Feature/Identity/InvitationTest.php: every issue()/revoke() call across all 10 tests
+      now passes a real, freshly-created User (via a new makeIssuer() helper) instead of null —
+      resolved to a canonical Human Principal through the existing, unmodified PrincipalService
+      path; no Principal ID is fabricated.
+    - app/Services/Identity/InvitationService.php: issue()'s $issuer and revoke()'s $revoker
+      parameters tightened from `?User` to non-nullable `User` — the smallest type-level
+      correction justified by the fact that no null value has ever been a legitimate ordinary
+      call, per Codex's own recommendation to tighten the nullable contract. The
+      `invitations.issuer_user_id`/`revoker_user_id` FK columns themselves remain nullable in
+      the schema (historical/reference-only concerns, e.g. a referenced User later deleted, are
+      unrelated to what a NEW call may supply) — no migration was touched, no historical
+      nullability was removed.
+  Fix: as above. AuditActorKind::PrePrincipalSystem was NOT reintroduced for invitation events;
+  no `system:invitation_no_issuer` execution context was recreated; no new actor category was
+  invented — M03's resolved disposition is unchanged and was not reopened.
+  Null-issuer coverage preserved: test_invitation_issued_with_no_issuer_is_rejected_fail_closed
+  (tests/Feature/Audit/AuditFoundationTest.php, unchanged from Pass 1) continues to prove, by
+  calling IdentityAuditLogger directly, that a missing issuer fails closed with
+  AuditActorAttributionException — no unauthorized actor fallback, no fabricated
+  PRE_PRINCIPAL_SYSTEM attribution for invitation issuance.
+  Tests: all 10 InvitationTest cases now reach their actual substantive assertions (acceptance/
+  no-authority, wrong-email rejection, expiration, revocation, double-acceptance, uniqueness
+  race, acceptance-wins/revocation-wins mutual exclusion, public HTTP acceptance route) rather
+  than erroring on actor attribution before ever reaching them.
+  SQLite Result: PASS (10/10). MySQL Result: PASS (10/10).
+  Disposition: PATCHED — PENDING CODEX RE-AUDIT
+
+Human Decision Required: NO
+```
+
+Full-suite validation after both patches:
+  - SQLite (`php artisan test`): 0 failures, 0 errors (the M03-contradiction-attributed errors
+    from Pass 1 are gone — that was exactly what this pass corrected); MySQL-only concurrency
+    test skipped, as already approved in Pass 1.
+  - MySQL 8.4.11 (disposable `kmsitdonation_imp003_test`): 0 failures, 0 errors, including the
+    concurrency test passing.
+  - `vendor/bin/pint --test`: PASS. `npm run type-check`: PASS. `npm run build`: PASS.
+    `composer audit`: PASS. `git diff --check`: PASS.
+
+Q26 re-evaluated locally (not a Codex resolution — Codex alone determines RESOLVED):
+Q26 preserved: YES. MUTATION_ATOMIC proof inventory complete: YES (both of RegistrationService's
+two sequential CRITICAL events now each have their own targeted forced-failure/rollback proof).
 
 ## Non-Discard, Non-Adoption-Without-Review Notice
 
