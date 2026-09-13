@@ -123,6 +123,77 @@ section for this purpose (see that file for the exact fields).
   authority. Unchanged from the existing ChatGPT role in
   [IMPLEMENTATION-GOVERNANCE.md](IMPLEMENTATION-GOVERNANCE.md).
 
+## Amendment Clauses (Human-Approved Additions)
+
+The following clauses were explicitly approved by Human, verbatim, as additions to this
+provisional amendment. They are recorded here exactly and then restated operatively in the
+sections they affect (IMP-030 ownership matrix row and Codex role; Mission-Critical Claude
+Stages). They do not change this document's overall `PROPOSED — AWAITING INDEPENDENT CODEX
+REVIEW` status.
+
+> **Human, verbatim:**
+>
+> "Saya setuju.
+>
+> GOV-MM-001:
+> IMP-030 adalah Audit-Only Stage.
+> Codex menjadi Primary Audit Owner, bukan Primary Implementation Owner.
+> Codex tidak menjadi Independent Reviewer atas auditnya sendiri.
+> Hasil final IMP-030 memerlukan Human Final System Approval.
+> Remediation dikembalikan kepada Primary Implementation Owner IMP terkait dan kemudian Codex
+> melakukan re-audit.
+>
+> GOV-MM-002:
+> Claude Code menggunakan Per-IMP Model Binding untuk tahap mission-critical.
+> Sebelum implementasi setiap IMP yang dimiliki Claude Code, exact Claude model/name/identifier
+> yang tersedia harus dicatat dan mendapat Human approval.
+> Model tersebut kemudian dipin untuk IMP tersebut.
+> Silent substitution dilarang.
+> Perubahan model setelah binding memerlukan Model Change Request dan Human approval."
+
+### GOV-MM-001 — IMP-030 Audit-Only Stage
+
+IMP-030 is an **Audit-Only Stage**, not an implementation stage:
+
+- Codex is the **Primary Audit Owner** of IMP-030 — this is a distinct role from "Primary
+  Implementation Owner" used everywhere else in this document. IMP-030 has no Primary
+  Implementation Owner; nothing is implemented under IMP-030 itself.
+- Codex does **not** act as Independent Reviewer of its own IMP-030 audit — a formal reviewer
+  cannot independently review itself. There is therefore no Codex-independent-review step
+  between the IMP-030 audit output and Human Stage Gate for IMP-030 specifically (contrast with
+  every other IMP, where Codex reviews the Primary Implementation Owner's work).
+- The final result of IMP-030 requires **Human Final System Approval** directly — this is
+  additional to, and stronger than, the ordinary per-IMP Human Stage Gate: it is a whole-system
+  approval, not a single-stage one.
+- Any remediation finding that IMP-030's audit surfaces against a specific prior IMP is returned
+  to that IMP's own Primary Implementation Owner (per "Remediation Ownership" above) — Codex does
+  not remediate it itself. Once remediated, Codex performs a **re-audit** of that finding as part
+  of IMP-030, not a fresh independent review of a different owner's unrelated new work.
+
+This changes the "030 | Final Implementation Audit | Codex | ..." matrix row's semantics: "Codex"
+in the Primary Owner column for IMP-030 means **Primary Audit Owner**, never "Primary
+Implementation Owner" — see the matrix row's note below.
+
+### GOV-MM-002 — Per-IMP Model Binding for Claude Code Mission-Critical Stages
+
+For each of the mission-critical stages assigned to Claude Code (see "Mission-Critical Claude
+Stages" below), Claude Code uses **Per-IMP Model Binding**, not a single fixed model identifier
+for all of them:
+
+- Before implementation of that specific IMP begins, the exact Claude model name/identifier
+  actually available for use must be recorded and must receive explicit Human approval.
+- That exact model is then **pinned/bound** to that IMP only — not to Claude Code's role in
+  general, and not automatically carried over to the next mission-critical IMP.
+- Silent substitution is prohibited — the same rule as "Model Version Pinning"/"Model Change
+  Control" above, applied per-IMP rather than once for the whole baseline.
+- Changing the bound model after binding (e.g. a newer Claude generation becomes available mid-
+  stage) requires a Model Change Request and fresh Human approval, exactly as "Model Change
+  Control" describes — it does not get a lighter-weight process merely because it is Claude
+  rather than a Command Code model.
+
+Each mission-critical IMP's execution evidence (see "Execution Evidence" below) must therefore
+carry a "Claude Model Binding" record in addition to the standard fields.
+
 ## Non-Concurrent Ownership Rule
 
 Preserves and strengthens the existing rule from
@@ -199,12 +270,16 @@ must never result in concurrent editing.
 | 027 | Security Hardening | Claude Code | DeepSeek V4 Pro |
 | 028 | Performance | Qwen 3.8 Max 0902 | DeepSeek V4 Pro |
 | 029 | Deployment | Kimi K3 | DeepSeek V4 Pro |
-| 030 | Final Implementation Audit | Codex | Kimi/DeepSeek READ ONLY if explicitly required |
+| 030 | Final Implementation Audit (Audit-Only Stage) | Codex — **Primary Audit Owner**, not Primary Implementation Owner (see GOV-MM-001) | Kimi/DeepSeek READ ONLY if explicitly required |
 
 For IMP-004 onward, Codex remains the Independent Formal Reviewer unless an explicitly approved
 exception is recorded. IMP-000 through IMP-003 were completed under the prior single-owner
 (Claude Code) governance and this table does not retroactively alter their FINAL/LOCKED status or
 evidence.
+
+IMP-030 is the sole exception to "one Primary Implementation Owner per IMP": it has no Primary
+Implementation Owner at all, because it implements nothing — see "GOV-MM-001 — IMP-030 Audit-Only
+Stage" above for the full ownership/review/remediation contract that applies to it instead.
 
 ## Mission-Critical Claude Stages
 
@@ -218,6 +293,12 @@ Command Code model:
 - IMP-015 Withdrawal
 - IMP-016 Refund
 - IMP-027 Security Hardening
+
+Per **GOV-MM-002** (see "Amendment Clauses" above), each of these stages uses **Per-IMP Model
+Binding**: the exact Claude model available is recorded and Human-approved before that specific
+IMP's implementation begins, then pinned to that IMP only. It is not a single binding that
+carries across all seven stages, and it is not satisfied by this document's general "Claude Code"
+baseline entry alone.
 
 ## Model Version Pinning
 
@@ -285,6 +366,46 @@ Human Approval Authority: Human
 Concurrent Editing: PROHIBITED
 ```
 
+### Claude Model Binding (Mission-Critical Stages Only, GOV-MM-002)
+
+In addition to the standard fields above, each of the seven Mission-Critical Claude Stages must
+record, before implementation begins:
+
+```
+Bound Model Name/Identifier:
+Binding Recorded Date:
+Human Approver (binding):
+Human Approval Date (binding):
+Model Change Requests against this binding (if any): list, each with date + Human approval
+```
+
+Example:
+
+```
+IMP-009 Payment Hub
+Primary Implementation Owner: Claude Code
+Bound Model Name/Identifier: <exact Claude model identifier available at binding time>
+Binding Recorded Date: <date>
+Human Approver (binding): Human
+Human Approval Date (binding): <date>
+Model Change Requests against this binding: none
+```
+
+### IMP-030 Execution Evidence (GOV-MM-001)
+
+IMP-030 records a variant of the standard fields, reflecting its Audit-Only Stage / Primary Audit
+Owner contract instead of a Primary Implementation Owner:
+
+```
+IMP-030
+Primary Audit Owner: Codex
+Independent Reviewer of this audit: NONE (Codex cannot review its own audit — see GOV-MM-001)
+Findings returned to: <Primary Implementation Owner of each affected prior IMP>
+Remediation commit(s): <per affected IMP>
+Re-audit result: <per affected IMP>
+Human Final System Approval: <status>
+```
+
 ## Specialist Authority
 
 A Specialist Reviewer is advisory by default. Specialist review must not:
@@ -318,6 +439,13 @@ Primary implementation complete
 
 During formal review: `CODING: NO`, unless Human explicitly authorizes a separate ownership
 transition.
+
+**Exception:** IMP-030 (see GOV-MM-001 under "Amendment Clauses"). Because Codex is IMP-030's own
+Primary Audit Owner, this sequence's "Codex independent review" step does not apply to IMP-030
+itself — Codex cannot independently review its own audit. IMP-030's output goes directly to
+**Human Final System Approval** instead of an intermediate Codex-review step. This exception is
+scoped to IMP-030 alone; Codex remains the Independent Formal Reviewer for every implementation
+IMP (004 and onward) exactly as described elsewhere in this document.
 
 ## Human Authority
 
@@ -367,6 +495,31 @@ Creation Authorization:
                      baseline and ownership matrix. Does NOT authorize IMP-004 implementation,
                      application source changes, architecture/database/security/financial/
                      business-rule changes, or git push.
+
+Amendment Clause Approval (GOV-MM-001, GOV-MM-002):
+  Authority:        Human
+  Statement:        "Saya setuju.
+
+                     GOV-MM-001:
+                     IMP-030 adalah Audit-Only Stage.
+                     Codex menjadi Primary Audit Owner, bukan Primary Implementation Owner.
+                     Codex tidak menjadi Independent Reviewer atas auditnya sendiri.
+                     Hasil final IMP-030 memerlukan Human Final System Approval.
+                     Remediation dikembalikan kepada Primary Implementation Owner IMP terkait
+                     dan kemudian Codex melakukan re-audit.
+
+                     GOV-MM-002:
+                     Claude Code menggunakan Per-IMP Model Binding untuk tahap mission-critical.
+                     Sebelum implementasi setiap IMP yang dimiliki Claude Code, exact Claude
+                     model/name/identifier yang tersedia harus dicatat dan mendapat Human
+                     approval. Model tersebut kemudian dipin untuk IMP tersebut. Silent
+                     substitution dilarang. Perubahan model setelah binding memerlukan Model
+                     Change Request dan Human approval."
+  Scope:            Approves incorporating GOV-MM-001 and GOV-MM-002 into this still-provisional
+                     amendment. Does not by itself move this document's overall Status out of
+                     PROPOSED, and does not authorize IMP-004 (or IMP-030) work — see
+                     "Independent Codex Review" and "Final Human Lock Approval" below, both still
+                     PENDING for the amendment as a whole (GOV-MM-001/002 included).
 
 Independent Codex Review:
   Status:            PENDING

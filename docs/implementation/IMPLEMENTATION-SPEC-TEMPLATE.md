@@ -21,6 +21,27 @@ Human Approval Authority:      Human
 Concurrent Editing:            PROHIBITED
 ```
 
+If this IMP is one of the Mission-Critical Claude Stages (see MULTI-MODEL-OWNERSHIP.md), also
+record the GOV-MM-002 Per-IMP Model Binding before implementation begins:
+
+```
+Bound Model Name/Identifier:
+Binding Recorded Date:
+Human Approver (binding):
+Human Approval Date (binding):
+Model Change Requests against this binding: none / list
+```
+
+If this IMP is the Audit-Only Stage (IMP-030), use the GOV-MM-001 fields instead of "Primary
+Implementation Owner" above:
+
+```
+Primary Audit Owner:              Codex
+Independent Reviewer of this audit: NONE (see GOV-MM-001)
+Findings returned to:             <Primary Implementation Owner of each affected prior IMP>
+Human Final System Approval:
+```
+
 ## Objective
 
 What must be achieved.
