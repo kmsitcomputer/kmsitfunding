@@ -641,8 +641,10 @@ there is no code path by which a caller can downgrade an event's criticality at 
 `persistence_strategy` — never a third criticality value, never caller-selectable:
 
 ```
-persistence_strategy: MUTATION_ATOMIC   (every CRITICAL mutation event — the existing/default
-                                          case for all 28 migrated events plus email_verified)
+persistence_strategy: MUTATION_ATOMIC   (every event classified CRITICAL among the 28 migrated
+                                          events, including email_verified — NON_CRITICAL migrated
+                                          events such as login_succeeded/login_failed/logout use
+                                          neither strategy, per "Non-Critical Events")
 persistence_strategy: DENIAL_DURABLE    (security.authorization.denied only, for now — see
                                           "Denial Event Persistence Semantics" below)
 ```
@@ -724,18 +726,64 @@ be atomic with**: the entire point of the event is that nothing was authorized t
    audit-failure-reporting-via-audit-write loop).
 ```
 
+### Transaction Ownership Invariant (IMP004-PASS2-M01)
+
+The sequencing in "Transaction Placement" below is only safe if the `DB::transaction(...)` closure
+that throws the denial is the **outermost** database transaction on that connection at the moment
+it opens. Laravel supports nested `DB::transaction()` calls via savepoints: if a caller already
+has its own transaction open when it invokes a DENIAL_DURABLE-capable method (e.g. some future
+code wraps a call to `RolePermissionService::grant()` inside its own `DB::transaction()`), then
+the denial exception only unwinds the INNER savepoint — the outer, caller-owned transaction
+remains open, its own lock/commit lifecycle remains entirely outside this method's control, and a
+plain insert executed without its own explicit transaction wrapper would silently join that still-
+open outer transaction rather than committing independently — its durability would then depend on
+whatever the outer, unrelated caller eventually does (commit or roll back for its own reasons),
+defeating "DURABLE" in `DENIAL_DURABLE`.
+
+This specification resolves that by **making the unsafe configuration impossible to reach
+silently, rather than attempting to engineer a mechanism that tolerates arbitrary nesting depth**
+(nesting-tolerant designs reintroduce the same class of lock/commit-ordering risk one level up, as
+the caller's own transaction can equally be nested inside another). Any service method capable of
+emitting a `DENIAL_DURABLE` event **must own the outermost transaction** for its own operation:
+
+```
+Before opening its own DB::transaction(...), such a method MUST verify DB::transactionLevel()
+IS 0 (Laravel's own nesting-depth counter for the connection in use).
+
+IF DB::transactionLevel() > 0 (an ambient transaction is already open on this connection):
+    the method MUST NOT proceed with its normal locking/mutation/denial logic under that ambient
+    transaction — this is a violation of the method's calling contract, never treated as an
+    ordinary business-authorization outcome — the implementation raises a distinct, clearly-named
+    error (e.g. TransactionOwnershipViolationException, never the same exception type/message as
+    an authorization denial) immediately, before any lockForUpdate() call or mutation attempt.
+
+IF DB::transactionLevel() IS 0:
+    proceed exactly per "Transaction Placement" below — the method's own DB::transaction(...) is
+    guaranteed to be the outermost one, so its rollback on denial is a full, real ROLLBACK (not a
+    savepoint release), and "the original transaction no longer exists" (used below) is always
+    literally true.
+```
+
+This is a calling-contract constraint, not new infrastructure: `DB::transactionLevel()` is an
+existing Laravel API, the check is a single conditional at method entry, and the failure mode is a
+fast, loud, immediately-visible error in development/testing — never a silently-lost denial record
+or a deadlock reaching production. No Human Decision is required: this is an architectural
+implementation detail of how a DENIAL_DURABLE-capable service must be structured, not a business,
+security, or financial policy choice.
+
 ### Transaction Placement (Deadlock-Safe Sequencing)
 
-The actual `RolePermissionService::grant()` self-escalation check (the concrete call site this
-specification must remain implementable against) throws its denial exception **while still
-inside** its `DB::transaction()` closure, with `lockedActor`/`lockedRole`/`lockedPermission` held
-via `lockForUpdate()`. Attempting to write the denial event to ANY connection — the same one or a
-second one — WHILE those locks are still held risks exactly the lock-inversion/contention
-IMP004-REAUDIT-M01 identified: a second connection's FK-reference read against a row the first
-connection holds `FOR UPDATE` must wait for the first connection to finish, but the first
-connection's own code (same PHP call stack) is simultaneously waiting for the second connection's
-write to return before it can continue and let the transaction close — a self-inflicted lock-wait
-timeout under MySQL, not a theoretical risk.
+Given the Transaction Ownership Invariant above holds (verified at method entry), the actual
+`RolePermissionService::grant()` self-escalation check (the concrete call site this specification
+must remain implementable against) throws its denial exception **while still inside** its own,
+now-guaranteed-outermost `DB::transaction()` closure, with `lockedActor`/`lockedRole`/
+`lockedPermission` held via `lockForUpdate()`. Attempting to write the denial event to ANY
+connection — the same one or a second one — WHILE those locks are still held risks exactly the
+lock-inversion/contention IMP004-REAUDIT-M01 identified: a second connection's FK-reference read
+against a row the first connection holds `FOR UPDATE` must wait for the first connection to
+finish, but the first connection's own code (same PHP call stack) is simultaneously waiting for
+the second connection's write to return before it can continue and let the transaction close — a
+self-inflicted lock-wait timeout under MySQL, not a theoretical risk.
 
 **Required sequencing** — the denial audit write happens strictly AFTER the enclosing mutation
 transaction has already unwound (rolled back) and its locks are already released, never
@@ -743,14 +791,17 @@ concurrently with them:
 
 ```
 1. Inside DB::transaction(...): the self-escalation check throws its (unchanged) RuntimeException
-   exactly as today. Laravel's DB::transaction() wrapper catches this, calls ROLLBACK (releasing
-   every lockForUpdate() row lock this closure held), and re-throws the SAME exception object —
-   this is existing, unmodified Laravel/IMP-003 behavior, not a new mechanism this spec invents.
+   exactly as today. Because the Transaction Ownership Invariant guarantees this closure is the
+   outermost transaction, Laravel's DB::transaction() wrapper catches this, calls a REAL, FULL
+   ROLLBACK (not a savepoint release — releasing every lockForUpdate() row lock this closure
+   held), and re-throws the SAME exception object — this is existing, unmodified Laravel/IMP-003
+   behavior, not a new mechanism this spec invents.
 
 2. The calling method (e.g. grant()) wraps its OWN call to DB::transaction(...) in a try/catch.
    By the time this catch block runs, step 1's rollback has already completed and every lock is
    already released — there is no lock contention risk at this point, on the same connection or
-   a different one, because the original transaction no longer exists.
+   a different one, because (given the invariant held) the original transaction was truly the
+   outermost one and no longer exists.
 
 3. Inside that catch block, if the caught exception is a recognized denial (per the registry's
    DENIAL_DURABLE classification for the applicable event), the calling method persists
@@ -758,7 +809,7 @@ concurrently with them:
    its own since it is one row — using the ordinary default connection. A second, separate DB
    connection is PERMITTED as an implementation choice for additional isolation, but is never
    REQUIRED — either is safe now, because the unsafe window (locks still held) has already
-   closed.
+   closed and there is no ambient transaction left for the insert to silently join.
 
 4. The calling method then re-throws the ORIGINAL exception object unchanged (not a new one) —
    access remains denied exactly as it always was; step 3 only ran an insert in between.
@@ -769,15 +820,19 @@ same call stack are held; it never performs FK validation against a row exclusiv
 same synchronous chain (the lock is gone by step 3); it never changes the DENY result; the
 resulting audit-failure reporting path (§4 above) has no recursive dependency on this same
 persistence step; and it introduces no new infrastructure (no Redis/Kafka/message broker) —
-`DB::transaction()`'s own catch/rollback/rethrow behavior is what Laravel already does today.
+`DB::transaction()`'s own catch/rollback/rethrow behavior is what Laravel already does today. The
+Transaction Ownership Invariant is what makes "the original transaction no longer exists" always
+literally true rather than an unstated assumption — a nested/nested-inside-a-caller scenario is
+rejected outright at method entry, before it can ever reach the sequencing above.
 
 Implementation must validate this exact sequencing against both MySQL 8.x (proving no deadlock or
 lock-wait timeout at the real self-escalation call site under InnoDB) and SQLite (the default
-regression suite) — see "Required Test Plan" §DENIAL EVENT and §MYSQL LOCK BEHAVIOR below. SQLite
-does not need to simulate a genuine second concurrent connection to validate this sequencing,
-since the safety property this section specifies does not depend on connection count — it depends
-on the mutation transaction having already closed before the denial write runs, which is
-observable and testable identically under either database.
+regression suite) — see "Required Test Plan" §DENIAL EVENT and §MYSQL LOCK BEHAVIOR below,
+including the required nested-transaction-violation test. SQLite does not need to simulate a
+genuine second concurrent connection to validate this sequencing, since the safety property this
+section specifies does not depend on connection count — it depends on the mutation transaction
+having already closed before the denial write runs, which is observable and testable identically
+under either database.
 
 ## Audit Record Schema (Proposed — No Migration Created)
 
@@ -1157,10 +1212,23 @@ DENIAL EVENT (IMP004-SPEC-M04, sequencing per IMP004-REAUDIT-M01/M02):
     topology — a single-connection sequential implementation is sufficient and is what this
     specification requires be validated)
 
+TRANSACTION OWNERSHIP INVARIANT (IMP004-PASS2-M01):
+  - calling a DENIAL_DURABLE-capable method (e.g. RolePermissionService::grant()) normally, with
+    no ambient transaction already open (DB::transactionLevel() === 0 at entry), proceeds exactly
+    per "Transaction Placement" with no violation raised
+  - calling the same method from WITHIN an already-open, caller-controlled DB::transaction() (a
+    genuine nested-transaction scenario) is REJECTED at method entry with the distinct
+    TransactionOwnershipViolationException (or repository-equivalent name) — never silently
+    proceeding under the ambient transaction, and never conflated with an authorization-denial
+    exception
+  - the violation is raised BEFORE any lockForUpdate() call or mutation attempt — no lock is
+    acquired under the violating (nested) scenario
+  - this test is required under both SQLite and MySQL 8.x
+
 MYSQL LOCK BEHAVIOR (IMP004-REAUDIT-M01):
   - the actual RolePermissionService::grant() self-escalation path, exercised against a disposable
     MySQL 8.x instance under InnoDB, completes the denial + audit write with no deadlock and no
-    lock-wait timeout
+    lock-wait timeout, with the Transaction Ownership Invariant satisfied (no ambient transaction)
   - repeating the same self-escalation attempt concurrently from two separate requests does not
     produce a circular wait between the mutation transaction's FOR UPDATE locks and the denial
     audit insert
@@ -1321,7 +1389,9 @@ checklist:
     audit failure never permits access, failure is reported not silent, denial-audit write is
     sequenced strictly after the enclosing mutation transaction's rollback with no MySQL deadlock/
     lock-wait timeout at the actual self-escalation call site, criticality is representable as
-    CRITICAL/DENIAL_DURABLE (M04, IMP004-REAUDIT-M01/M02)
+    CRITICAL/DENIAL_DURABLE, and the Transaction Ownership Invariant (DB::transactionLevel() === 0
+    at entry, hard rejection otherwise) is enforced and tested under both SQLite and MySQL (M04,
+    IMP004-REAUDIT-M01/M02, IMP004-PASS2-M01)
 [ ] Registry-derived visibility class implemented: criticality and visibility are never
     caller-supplied; financial-reference visibility applies uniformly wherever a financial
     reference appears (primary subject, secondary subject, or metadata); audit.read.financial_
@@ -1346,14 +1416,14 @@ checklist:
 [ ] Ledger/Payment/Commission/Approval/Search-Reporting/API remain unimplemented by this stage
 ```
 
-## Finding Disposition (Specification Remediation Pass 1 + Targeted Re-Audit Pass 2)
+## Finding Disposition (Specification Remediation Passes 1-3)
 
-Resolution status for every Codex specification-audit finding addressed across both remediation
-passes. Codex's own targeted re-audit confirmed IMP004-SPEC-M01/M02/M03/M05/m01 as **RESOLVED**;
-IMP004-SPEC-M04 and IMP004-SPEC-M06 were found NOT RESOLVED and are patched again below as
-IMP004-REAUDIT-M01/M02/m01 — those three remain **PATCHED — PENDING INDEPENDENT RE-AUDIT**
-(this pass does not claim Codex has accepted them; only Codex's own next re-audit can confirm
-that).
+Resolution status for every Codex specification-audit finding addressed across three remediation
+passes. Codex's targeted re-audits confirmed IMP004-SPEC-M01/M02/M03/M05/m01 and
+IMP004-REAUDIT-M02/m01 as **RESOLVED**. IMP004-REAUDIT-M01 was found NOT RESOLVED on its first
+patch attempt and is patched again below as IMP004-PASS2-M01, which remains
+**PATCHED — PENDING INDEPENDENT RE-AUDIT** (this pass does not claim Codex has accepted it; only
+Codex's own next re-audit can confirm that). IMP004-PASS2-E01 (EDITORIAL) is also patched below.
 
 ```
 IMP004-SPEC-M01  RESOLVED (confirmed by Codex targeted re-audit)
@@ -1387,20 +1457,9 @@ IMP004-SPEC-m01  RESOLVED (confirmed by Codex targeted re-audit)
   Section(s): "Retention Compatibility (Structural Only)" -> "Terminal Purge-Evidence Rule" (new),
   "Required Test Plan" PURGE EVIDENCE group, "Definition of Done (IMP-004-Specific)".
 
-IMP004-REAUDIT-M01  PATCHED — PENDING INDEPENDENT RE-AUDIT
-  Finding: unsafe/contradictory mandated independent second DB connection for
-  security.authorization.denied, risking lock inversion against the actual
-  RolePermissionService::grant() self-escalation call site's lockForUpdate() locks.
-  Section(s): "Denial Event Persistence Semantics" (rewritten — the mandatory second-connection
-  requirement is removed; safety now comes from sequencing the denial-audit write strictly after
-  the enclosing mutation transaction's own rollback/lock-release, using DB::transaction()'s
-  existing catch/rollback/rethrow behavior — a second connection becomes an optional
-  implementation choice, never a requirement), "Transaction Placement (Deadlock-Safe Sequencing)"
-  (rewritten with the exact call-stack-grounded mechanism), "Required Test Plan" DENIAL EVENT and
-  new MYSQL LOCK BEHAVIOR groups, "Acceptance Criteria" (SHARED HOSTING/ROLLBACK lines corrected),
-  "Definition of Done (IMP-004-Specific)".
+IMP004-REAUDIT-M01  NOT RESOLVED (first patch attempt) — see IMP004-PASS2-M01 below (Pass 3)
 
-IMP004-REAUDIT-M02  PATCHED — PENDING INDEPENDENT RE-AUDIT
+IMP004-REAUDIT-M02  RESOLVED (confirmed by Codex targeted re-audit)
   Finding: security.authorization.denied's criticality was not representable in the two-value
   CRITICAL/NON_CRITICAL model, and prior text described it as "neither" — an unrepresentable/
   contradictory registry state.
@@ -1413,7 +1472,7 @@ IMP004-REAUDIT-M02  PATCHED — PENDING INDEPENDENT RE-AUDIT
   Contract Consistency" (new, consolidating that persistence_strategy — like criticality — is
   registry-owned and never caller-selectable).
 
-IMP004-REAUDIT-m01  PATCHED — PENDING INDEPENDENT RE-AUDIT
+IMP004-REAUDIT-m01  RESOLVED (confirmed by Codex targeted re-audit)
   Finding: the `source_domain` conditional requirement (required whenever `source_event_id` is
   present) was implicit, relying only on DB composite-uniqueness behavior which does not enforce
   "supplied together."
@@ -1423,8 +1482,39 @@ IMP004-REAUDIT-m01  PATCHED — PENDING INDEPENDENT RE-AUDIT
   source_domain itself confirmed registry/trusted-producer-derived, never arbitrary caller
   input), "Required Test Plan" SOURCE_EVENT_ID group (invalid-partial-pair and no-idempotency-
   identity cases added), "Security Negative Tests" (source_domain spoofing).
+
+IMP004-PASS2-M01  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Finding: the Pass 2 sequencing fix assumed that exiting the service's own `DB::transaction()`
+  closure always means the physical transaction "no longer exists," which is false when that
+  closure is nested inside an already-open, caller-controlled transaction (Laravel resolves
+  nested `DB::transaction()` calls via savepoints) — a scenario the specification did not
+  constrain, detect, or handle, leaving the denial-audit write's durability and lock-safety
+  dependent on an unstated call-stack assumption.
+  Section(s): "Denial Event Persistence Semantics" -> new "Transaction Ownership Invariant"
+  subsection (any DENIAL_DURABLE-capable method must verify `DB::transactionLevel() === 0` at
+  entry, before any lock/mutation attempt, and must raise a distinct
+  `TransactionOwnershipViolationException`-equivalent error — never proceed silently under an
+  ambient caller transaction — if that check fails; this makes the unsafe nested configuration
+  impossible to reach silently rather than attempting to engineer a mechanism that tolerates
+  arbitrary nesting depth, which would reintroduce the same class of risk one level up).
+  "Transaction Placement (Deadlock-Safe Sequencing)" (updated to state its guarantees hold GIVEN
+  the invariant above, rather than as an unconditional claim). "Required Test Plan" — new
+  TRANSACTION OWNERSHIP INVARIANT group, and the MYSQL LOCK BEHAVIOR group updated to note the
+  invariant is satisfied in its scenario. "Definition of Done (IMP-004-Specific)" updated.
+  No Human Decision required — this is an architectural/calling-contract constraint on how a
+  DENIAL_DURABLE-capable service must be structured, not a business/security/financial policy
+  choice.
+
+IMP004-PASS2-E01  PATCHED
+  Finding: "Persistence Strategy" described `MUTATION_ATOMIC` as covering "all 28 migrated events
+  plus email_verified," but email_verified is already one of the 28, and several of the 28
+  (login_succeeded, login_failed, logout) are NON_CRITICAL, not MUTATION_ATOMIC.
+  Section(s): "Criticality Classification" -> "Persistence Strategy" wording corrected to "every
+  event classified CRITICAL among the 28 migrated events, including email_verified" with an
+  explicit note that NON_CRITICAL migrated events use neither strategy. Confirmed non-blocking to
+  Human Implementation Authorization, per the finding's own classification.
 ```
 
-No new Human Decision was introduced by either remediation pass — all findings across both passes
-were remediable within the existing Q26/Q27/Q28 authority and the pre-existing Level 1-4
-baseline, consistent with Codex's own `HUMAN DECISION REQUIRED = 0` in both audits.
+No new Human Decision was introduced by any remediation pass — every finding across all three
+passes was remediable within the existing Q26/Q27/Q28 authority and the pre-existing Level 1-4
+baseline, consistent with Codex's own `HUMAN DECISION REQUIRED = 0` in every audit.
