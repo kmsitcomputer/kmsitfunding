@@ -33,12 +33,13 @@ class IdentityAuditLogger
      * Actor modes: 'principal' (resolve the canonical Principal for $user,
      * fail-closed if $user is null — IMP004-IMPL-M03: the pre-principal
      * actor catalog is NOT expanded to cover a null invitation issuer/
-     * revoker; see the class-level note and
-     * docs/audits/IMP-004-OWNERSHIP-HANDOFF.md for the resulting,
-     * explicitly-flagged IMP-002/IMP-004 conflict); 'unauthenticated' /
-     * 'pre_principal_system' (registry-declared pre-principal attribution,
-     * actor always NULL, for the two specifically pre-approved cases only —
-     * see IMP004-SPEC-M02).
+     * revoker; ordinary invitation issuance requires canonical Human
+     * attribution, per InvitationService::issue()/revoke()'s non-nullable
+     * $issuer/$revoker parameters — see docs/audits/IMP-004-OWNERSHIP-HANDOFF.md
+     * "Remediation Pass 2" for the independent audit disposition);
+     * 'unauthenticated' / 'pre_principal_system' (registry-declared
+     * pre-principal attribution, actor always NULL, for the two
+     * specifically pre-approved cases only — see IMP004-SPEC-M02).
      *
      * @var array<string, array{0: string, 1: string, 2: string}>
      */

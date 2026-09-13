@@ -426,13 +426,16 @@ class AuditFoundationTest extends TestCase
     {
         // IMP004-IMPL-M03: the approved actor catalog is NOT expanded to
         // cover invitation issue/revoke — PrePrincipalSystem remains reserved
-        // for the specific, named Q25 bootstrap CLI path only. A null issuer
-        // (an intentional, locked IMP-002 "Invitation Boundary" possibility —
-        // "records who revoked it, where available") has no approved
-        // canonical attribution under IMP-004 and is REJECTED fail-closed
-        // here, rather than silently attributed to a fabricated or expanded
-        // actor kind. This is the flagged IMP-002/IMP-004 contradiction — see
-        // docs/audits/IMP-004-OWNERSHIP-HANDOFF.md.
+        // for the specific, named Q25 bootstrap CLI path only. Ordinary
+        // invitation issuance requires canonical Human attribution; a null
+        // issuer has no approved canonical attribution under IMP-004 and is
+        // REJECTED fail-closed here, rather than silently attributed to a
+        // fabricated or expanded actor kind. Independent Codex re-audit
+        // (IMP004-REAUDIT-R1-01) confirmed this is invalid fixture/caller
+        // assumption territory, not a specification contradiction — the
+        // existing approved actor model is sufficient and no Human Decision
+        // is required. See docs/audits/IMP-004-OWNERSHIP-HANDOFF.md
+        // "Remediation Pass 2" for the full disposition.
         $this->expectException(AuditActorAttributionException::class);
 
         app(IdentityAuditLogger::class)->record('invitation_issued', null, [
