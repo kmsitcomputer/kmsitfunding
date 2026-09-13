@@ -97,10 +97,16 @@ section for this purpose (see that file for the exact fields).
 **As of Amendment V2 (PROPOSED — see "Amendment V2" below for the full record), the Command Code
 implementation-agent generation is DeepSeek V4.1 Flash / Qwen 3.8 Flash / Kimi K2.7 Code.** The
 original V1 generation (Kimi K3 / Qwen 3.8 Max 0902 / DeepSeek V4 Pro) is retired from prospective
-ownership — see "Retired Models (V1 Generation)" below. No IMP has yet been implemented under
-either generation of this multi-model governance (IMP-004 is the first, and its implementation
-remains not authorized regardless of Amendment V2's status), so this retirement rewrites no
-historical execution record.
+ownership — see "Retired Models (V1 Generation)" below. No IMP has completed or finalized governed
+implementation evidence under either generation of this multi-model governance — IMP-004 is the
+first candidate, its implementation execution has never been authorized to run to completion under
+this governance (see `docs/implementation/IMP-004-audit-governance-foundation.md` "Status" for its
+exact current authorization/hold state), and this retirement rewrites no such finalized historical
+execution record. This is distinct from whether any UNCOMMITTED, pre-finalization implementation
+artifact exists in the working tree — one does (see "Pre-Existing Implementation Artifacts /
+Ownership-Provenance Review" in the IMP-004 specification linked above), and it remains outside
+this or any Amendment V2 acceptance pending its own ownership-provenance review; this document does
+not claim it does not exist.
 
 ### DeepSeek (Primary Implementation Owner)
 
@@ -395,10 +401,14 @@ NEW (Amendment V2 baseline, per "Approved Model Baseline" above):
 
 This replacement is PROSPECTIVE ONLY. No historical record is rewritten: IMP-000 through IMP-003
 were completed under the prior single-owner (Claude Code) governance, before either Command Code
-generation existed in this document at all, and are unaffected. No IMP has been implemented under
-the V1 Command Code generation either — IMP-004 remains the first candidate, and its Primary
-Implementation Owner simply changes from Kimi K3 (V1) to DeepSeek V4.1 Flash (V2) as a matter of
-prospective assignment, not a historical correction.
+generation existed in this document at all, and are unaffected. No IMP has completed or finalized
+governed implementation evidence under the V1 Command Code generation either — IMP-004 remains the
+first candidate, and its Primary Implementation Owner simply changes from Kimi K3 (V1) to DeepSeek
+V4.1 Flash (V2) as a matter of prospective assignment, not a historical correction. This is
+distinct from the pre-existing, uncommitted, pre-Amendment-V2 IMP-004 implementation artifacts
+that already exist in the working tree, whose provenance is not fully known and which remain
+outside acceptance under either generation until the ownership-provenance review required by
+`docs/implementation/IMP-004-audit-governance-foundation.md` is completed.
 ```
 
 ### Exact Model ID Verification
@@ -452,18 +462,28 @@ and does not reopen Q26/Q27/Q28. However:
 ```
 IMP-004 IMPLEMENTATION EXECUTION — HOLD
 
-Hold released only when BOTH:
+Hold released only when ALL of the following are true:
   1. Amendment V2 itself is FINAL / LOCKED (independent Codex audit PASS + separate Human Final
-     Approval for V2, recorded in "Approval" below — not yet done); AND
+     Approval for V2, recorded in "Approval" below — not yet done);
   2. The DeepSeek V4.1 Flash Primary Implementation Owner assignment for IMP-004 is valid under
      that locked baseline (i.e. Amendment V2's Model Version Pinning entry for DeepSeek is in
      effect — no separate per-IMP BOUND state machine is introduced for Command Code models here;
-     that stronger mechanism remains GOV-MM-002's Claude-specific one).
+     that stronger mechanism remains GOV-MM-002's Claude-specific one);
+  3. This document's IMP-004 specification
+     (`docs/implementation/IMP-004-audit-governance-foundation.md`) has its owner metadata
+     synchronized to this baseline (done — see that document's "Implementation Ownership");
+  4. The ownership-provenance review of the pre-existing, uncommitted, pre-Amendment-V2 IMP-004
+     implementation artifacts already present in the working tree is completed and recorded (see
+     that same specification's "Pre-Existing Implementation Artifacts / Ownership-Provenance
+     Review" and `docs/audits/IMP-004-OWNERSHIP-HANDOFF.md` — not yet done); and
+  5. DeepSeek V4.1 Flash explicitly accepts ownership of the continuing implementation following
+     that review.
 
-Until both conditions hold, IMP-004 implementation execution does not proceed, regardless of the
+Until all conditions hold, IMP-004 implementation execution does not proceed, regardless of the
 Human's prior "IMP-004 Implementation Authorized" statement — that statement authorized
 IMP-004's implementation in principle; it did not, and could not, bind it to an owner this
-amendment had not yet finalized.
+amendment had not yet finalized, and it did not resolve the separate provenance question raised by
+artifacts that already exist outside this governance's own acceptance process.
 ```
 
 IMP-004's Primary Implementation Owner, once the hold above is released: `DeepSeek V4.1 Flash`

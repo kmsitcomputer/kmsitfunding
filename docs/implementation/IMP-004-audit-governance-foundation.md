@@ -2,26 +2,35 @@
 
 ## Status
 
-READY (for independent Codex specification review — see "Implementation Ownership" below;
-implementation itself is NOT authorized)
+READY (Codex specification audit: 0 BLOCKER/MAJOR/MINOR/EDITORIAL/HUMAN DECISION REQUIRED; Human
+Implementation Authorization: GRANTED — "Saya setuju. IMP-004 Implementation Authorized." — but
+EXECUTION remains on HOLD; see "Implementation Ownership" and "Pre-Existing Implementation
+Artifacts / Ownership-Provenance Review" below for the exact release conditions)
 
 ## Implementation Ownership
 
 Per [docs/00-governance/MULTI-MODEL-OWNERSHIP.md](../00-governance/MULTI-MODEL-OWNERSHIP.md) —
 no implicit/default model substitution is permitted; if the assigned model/owner is unavailable,
-stop and report rather than substituting silently.
+stop and report rather than substituting silently. This section reflects Governance Amendment V2
+(`PROPOSED`, not yet `FINAL / LOCKED` — see that document's "Amendment V2 — Command Code Model
+Generation Replacement"); it is synchronized here at Level 5 to match Level 6 rather than left to
+silently diverge, per the canonical source-of-truth hierarchy (a Level 6 governance patch does not
+override Level 5 specification metadata — this update explicitly reconciles the two).
 
 ```
 Stage Type:   NORMAL IMPLEMENTATION STAGE
 ```
 
 ```
-Primary Implementation Owner:  Kimi K3
-Primary Model:                 Kimi K3
-Exact Model ID:                moonshotai/Kimi-K3
-Execution Environment:         Command Code GOAT
-Specialist Reviewer(s):        DeepSeek V4 Pro (deepseek/deepseek-v4-pro) — READ ONLY
-Independent Formal Reviewer:   Codex (CODING: NO)
+Primary Implementation Owner:  DeepSeek V4.1 Flash
+Primary Model:                 DeepSeek V4.1 Flash
+Exact Model ID:                deepseek/deepseek-v4.1-flash
+Execution Environment:         Command Code
+Specialist Reviewer(s):        NONE by default (Amendment V2) — an optional specialist may be
+                                added later only if technically justified, and must be READ ONLY
+                                when used; primary ownership remains with DeepSeek V4.1 Flash
+Independent Formal Reviewer:   Codex (CODING: NO) — does not implement IMP-004, does not become
+                                co-owner
 Human Approval Authority:      Human
 Concurrent Editing:            PROHIBITED
 ```
@@ -29,12 +38,86 @@ Concurrent Editing:            PROHIBITED
 IMP-004 is not one of the Mission-Critical Claude Stages (IMP-009/010/011/014/015/016/027) — the
 GOV-MM-002 Claude Per-IMP Model Binding block does not apply to this stage.
 
-**`IMP-004 IMPLEMENTATION IS NOT AUTHORIZED.`** Creation and Codex/Human approval of this
-specification does not authorize Kimi K3 (or any model) to modify application code. Implementation
-requires a later, separate, explicit Human statement equivalent to:
-`Saya setuju. IMP-004 Implementation Authorized.` Approval of HD-IMP004-01/02/03 (Q26-Q28) must
-not be read as that authorization — those decisions govern *what* IMP-004 must build; they do not
-authorize *building* it.
+### Owner Transition Record
+
+```
+Previous prospective Primary Owner (Amendment V1, superseded):
+  Kimi K3 / moonshotai/Kimi-K3
+  Specialist: DeepSeek V4 Pro (deepseek/deepseek-v4-pro) — READ ONLY
+
+Current prospective Primary Owner (Amendment V2, PROPOSED):
+  DeepSeek V4.1 Flash / deepseek/deepseek-v4.1-flash
+  Specialist: NONE by default
+```
+
+This is an ownership **transition**, not a historical rewrite: Kimi K3 never implemented any part
+of IMP-004 under this governance (IMP-004 implementation has never been authorized to execute —
+see "Status" above and "Pre-Existing Implementation Artifacts" below), so there is no completed
+Kimi K3 work being reattributed. Conversely, DeepSeek V4.1 Flash has not authored any existing
+artifact either — see "Pre-Existing Implementation Artifacts / Ownership-Provenance Review" below
+for the required review before any such artifact may be treated as DeepSeek's own work.
+
+**`IMP-004 IMPLEMENTATION EXECUTION IS ON HOLD.`** Human Implementation Authorization is GRANTED
+in principle ("Saya setuju. IMP-004 Implementation Authorized.") and is model-neutral — it
+authorized implementing IMP-004, not a specific owner — so changing the Primary Implementation
+Owner from Kimi K3 to DeepSeek V4.1 Flash does not, by itself, require re-obtaining that
+authorization. However, actual execution remains on HOLD until ALL of the following are true:
+
+```
+1. Governance Amendment V2 passes Codex re-audit.
+2. Human gives Final Approval to Amendment V2.
+3. Amendment V2 is materialized as FINAL / LOCKED.
+4. This specification's owner metadata is synchronized with Amendment V2 (this patch).
+5. The ownership-provenance review of pre-existing uncommitted IMP-004 artifacts (see below) is
+   completed and recorded.
+6. DeepSeek V4.1 Flash explicitly accepts ownership of the continuing implementation.
+```
+
+Approval of HD-IMP004-01/02/03 (Q26-Q28) must not be read as execution authorization — those
+decisions govern *what* IMP-004 must build; they do not authorize *building* it, and do not
+override the HOLD above.
+
+## Pre-Existing Implementation Artifacts / Ownership-Provenance Review
+
+This repository's working tree contains substantial **uncommitted** IMP-004-shaped implementation
+work (a migration, models, services, enums, and edits to already-FINAL/LOCKED IMP-002/IMP-003
+services) predating Amendment V2's finalization. Per governance instruction, this specification
+does **not** inspect or modify that code's content — it only records the required governance
+disposition:
+
+```
+Existing work status:     UNCOMMITTED / PRE-AMENDMENT-V2
+Provenance:                PARTIALLY KNOWN / UNKNOWN where not independently provable — this
+                            specification does not assert who or what produced it
+Disposition:                QUARANTINED FROM ACCEPTANCE UNTIL REVIEWED — neither adopted nor
+                            required to be discarded by default
+Authorship policy:          No retroactive re-attribution — adopting an artifact later does not
+                            imply DeepSeek V4.1 Flash authored it originally, and does not imply
+                            Kimi K3 (or any other model) completed IMP-004
+```
+
+Before DeepSeek V4.1 Flash may resume/continue IMP-004 implementation using or replacing any of
+this pre-existing material, the following handoff sequence is required (see
+`docs/audits/IMP-004-OWNERSHIP-HANDOFF.md` for the recorded governance/provenance metadata this
+produces — that record is provenance tracking, not implementation acceptance):
+
+```
+1. Inventory existing uncommitted IMP-004 artifacts.
+2. Record known provenance (branch, creation period, prior authorized owner/model if known,
+   "unknown" where not provable).
+3. New Primary Owner (DeepSeek V4.1 Flash) performs a READ/REVIEW of the existing implementation.
+4. New Primary Owner explicitly chooses, per artifact: ADOPT / REMEDIATE / REPLACE.
+5. Adoption does not retroactively reattribute prior authorship.
+6. From handoff acceptance onward, DeepSeek V4.1 Flash is the sole active implementation owner
+   for IMP-004 — the one-owner invariant applies from that point forward exactly as it did before.
+7. Concurrent editing between whatever produced the pre-existing artifacts and the new owner is
+   prohibited at every step of this sequence, consistent with "ONE IMP / ONE PRIMARY
+   IMPLEMENTATION OWNER".
+```
+
+This governance requirement is materialized here and in the dedicated handoff record; it is not
+executed by this remediation pass, which performs no code inspection, no adoption decision, and
+no implementation of any kind.
 
 ---
 
