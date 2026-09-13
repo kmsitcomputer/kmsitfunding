@@ -91,7 +91,7 @@ prior to Q26-Q28 — this specification is now the authoritative Level 5 detail 
 - Audit-read authorization foundation: Permission + Domain-Aware Scope (Q27)
 - Basic query/filter foundation (actor, subject, event_type, date range, correlation ID) —
   backend only, no UI
-- Migration of the 27 existing Identity + RBAC events onto the canonical sink (§"Existing Event
+- Migration of the 28 existing Identity + RBAC events onto the canonical sink (§"Existing Event
   Migration")
 - request_id/correlation_id foundation (no current consumer requires it yet; built anyway per
   readiness §4.7/§SHOULD)
@@ -170,14 +170,53 @@ None directly. Hard boundary restated: `AUDIT != LEDGER`, `AUDIT != FINANCIAL CO
 financial resource/event by identifier, but audit is never an alternate financial source of
 truth — Ledger remains sole authority for accounting facts.
 
-## Idempotency
+## Idempotency (IMP004-SPEC-M06)
 
-Audit-event creation carries an optional `source_event_id`/idempotency key field (nullable,
-unique-when-present) so that a future retrying caller (e.g. a webhook handler, once IMP-009+
-exists) can safely call the writer more than once for logically the same occurrence without
-producing duplicate canonical rows. IMP-004 does not implement retry logic itself — it only
-ensures the schema/contract does not make reliable future retry-safe integration impossible
-(readiness §20).
+`source_event_id` exists so a **trusted producer** with its own stable source-of-truth identity
+for an occurrence (e.g. a future webhook handler receiving a provider's own event ID, once
+IMP-009+ exists) can safely call the canonical `AuditWriter` more than once for logically the
+same occurrence — a legitimate retry — without producing a duplicate canonical row. It is:
+
+```
+- OPTIONAL: most events (including all 28 currently migrated Identity/RBAC events) have no
+  natural external source identity and simply omit it.
+- TRUSTED-PRODUCER-SUPPLIED: only the emitting service itself supplies it (from its own upstream
+  source), never derived from unvalidated end-user request input.
+- NORMALIZED: trimmed, case-preserved as supplied by the producer (case sensitivity is the
+  producer's own concern — IMP-004 does not reinterpret it).
+- BOUNDED: a fixed maximum length (an implementation-time parameter, not invented here as a
+  specific byte count without evidence — mirrors "oversized metadata" being similarly deferred).
+- NOT globally unique by itself — see uniqueness scope below.
+```
+
+**Uniqueness scope**: `UNIQUE (source_domain, source_event_id, event_type)` — never a bare
+global-`source_event_id` uniqueness rule, because two entirely unrelated producers (or the same
+producer emitting two different canonical event types from one upstream occurrence) could
+otherwise collide on an identifier neither controls relative to the other. `source_domain` is a
+new, small, registry-known string identifying the trusted producer namespace (e.g. `identity`,
+`rbac`, and reserved for a future `payment_provider:<name>`-style value) — supplied by the
+emitting service, not the end caller, exactly like `event_type` itself.
+
+**Duplicate (legitimate retry) behavior**: given the SAME scoped key
+(`source_domain` + `source_event_id` + `event_type`) submitted again for what the producer
+asserts is semantically the same canonical audit emission, `AuditWriter` returns/references the
+EXISTING canonical audit record — it does **not** create a duplicate row, and does **not** throw
+merely because this is a legitimate retry.
+
+**Conflicting reuse behavior**: given the SAME scoped key but an incompatible event
+identity/immutable payload (e.g. the same `source_domain`+`source_event_id`+`event_type` but
+materially different core attribution — a different `subject_id`, for instance — indicating the
+producer reused an identifier incorrectly rather than legitimately retried), `AuditWriter`
+**rejects** the write as an idempotency conflict (a distinct, clearly-named exception, never
+silently overwriting the original row — audit rows are never updated, per "Immutability").
+
+**Null behavior**: when `source_event_id` is null (the ordinary case for the 28 already-migrated
+events), no uniqueness constraint applies at all — the composite unique index is defined so that
+NULL values do not collide with each other (standard SQL NULL-distinct unique-index semantics,
+already relied upon nowhere else problematically in this schema).
+
+IMP-004 does not implement retry logic itself — it only ensures the schema/contract does not make
+reliable future retry-safe integration impossible (readiness §20).
 
 ## Concurrency
 
@@ -202,7 +241,30 @@ See "Required Test Plan" below (§ mirrors the originating instruction's §31-32
 
 ## Acceptance Criteria
 
-See "Acceptance Criteria" below.
+```
+FUNCTIONAL:      all 29 canonical active/target events (28 migrated + 1 new denial event) persist
+                 via the canonical AuditWriter with identical semantic content to today's
+                 log-channel payloads, plus the 5 reserved catalog events registered but unemitted
+SECURITY:        no audit record ever contains a hard-prohibited secret category (§Redaction)
+AUTHORIZATION:   audit read enforces the full Q27 formula plus registry-derived visibility class
+                 (§Registry-Derived Visibility Class); Super Admin has no unearned automatic access
+DATA INTEGRITY:  no application code path can UPDATE or DELETE a persisted audit record absent an
+                 authorized purge path; source_event_id idempotency behaves exactly per §Idempotency
+ROLLBACK:        every CRITICAL event (including email_verified) proves forced-audit-failure
+                 rollback; the denial event proves DENY always propagates regardless of its own
+                 audit-persistence outcome, via an independent, transaction-surviving boundary
+ACTOR INTEGRITY: pre-Principal cases (unauthenticated, pre_principal_system) never fabricate a
+                 human actor and are unreachable for any event whose registry entry forbids them
+REDACTION:       allow-list mechanism verified against a comprehensive negative-data test set
+PRIVACY:         Q16 mechanism-level configurability is structurally present
+DATABASE:        migrations apply cleanly on MySQL 8.x (disposable instance) with the same
+                 evidence bar as IMP-003; SQLite regression suite passes
+MYSQL:           fresh migration, constraint (including the composite source_event_id uniqueness),
+                 and concurrency behavior independently verified on a disposable MySQL 8.x database
+GOVERNANCE:      Codex independent re-audit passes with 0 BLOCKER/MAJOR before Human Stage Gate
+SHARED HOSTING:  no new mandatory infrastructure dependency (the denial-event independent
+                 connection is a second connection to the same database, not new infrastructure)
+```
 
 ## Forbidden Changes
 
@@ -229,12 +291,76 @@ IMP-004-specific criteria in "Definition of Done (IMP-004-Specific)" below.
 
 ## Canonical Actor
 
-Audit attribution uses the canonical `Principal` model from IMP-003, never `users.id` directly:
+Audit attribution uses the canonical `Principal` model from IMP-003 where one legitimately
+exists, but **not every audit event has an authenticated human Principal at the moment it is
+emitted** (IMP004-SPEC-M02) — an unknown-email failed login and the first Q25 bootstrap step both
+occur with no resolvable canonical Principal. The specification distinguishes:
 
 ```
-actor_principal_id     BIGINT unsigned, FK -> principals.id, NOT NULL
-actor_principal_kind   ENUM/string: 'human' | 'system' | 'integration'  (mirrors
-                        App\Enums\PrincipalKind — reused, not reinvented)
+ACTOR PRINCIPAL       — a resolved, canonical App\Models\Rbac\Principal (human/system/
+                         integration), used whenever one legitimately exists at emission time.
+EXECUTION ORIGIN /
+  CONTEXT             — a controlled, registry-defined, non-Principal attribution used ONLY for
+                         the specific, explicitly registered cases where no canonical Principal
+                         can legitimately exist yet — never a fallback for an ordinary
+                         programming-error null, and never caller-suppliable as an arbitrary
+                         string.
+```
+
+Schema (supersedes the earlier NOT NULL draft):
+
+```
+actor_principal_id     BIGINT unsigned, FK -> principals.id, NULLABLE
+actor_principal_kind   ENUM/string: 'human' | 'system' | 'integration' | 'unauthenticated' |
+                        'pre_principal_system'
+                        ('human'/'system'/'integration' mirror App\Enums\PrincipalKind, reused
+                        not reinvented; 'unauthenticated'/'pre_principal_system' are NEW,
+                        audit-only values with no PrincipalKind equivalent — they never appear in
+                        `principals.principal_kind`, only on the audit row)
+execution_context      string, NULLABLE — REQUIRED (NOT NULL) precisely when
+                        actor_principal_id IS NULL; NULL/unused when a real Principal is present
+```
+
+### Canonical Actor (Pre-Principal Cases)
+
+```
+actor_principal_kind = 'human' | 'system' | 'integration'
+    -> actor_principal_id MUST be non-null (enforced by the writer/registry, not merely
+       convention) — this is the ordinary case, covering every event except the two below.
+
+actor_principal_kind = 'unauthenticated'
+    -> actor_principal_id MUST be null.
+    -> execution_context is a FIXED, registry-supplied constant identifying the unauthenticated
+       entry point (e.g. "http:login_attempt") — never free-form caller input.
+    -> Legitimate ONLY for an event that is itself evidence of a failed/incomplete
+       authentication attempt (currently: identity.session.login_failed). An attempted
+       identifier (e.g. the normalized email that was typed) MAY appear in that event's own
+       allow-listed metadata as data-about-the-attempt — it is never promoted to
+       actor_principal_id, because it is unverified.
+
+actor_principal_kind = 'pre_principal_system'
+    -> actor_principal_id MUST be null.
+    -> execution_context is a FIXED, registry-supplied constant identifying the specific trusted,
+       deterministic, operator-invoked execution path that legitimately runs before any
+       canonical Principal can exist (currently: "cli:identity:bootstrap-super-admin", for
+       identity.bootstrap.first_super_admin_completed — the Q25 first-bootstrap CLI command,
+       which by definition runs before BridgeFirstSuperAdmin ever creates the first Principal).
+       This is NOT a general-purpose "system did something" bucket — it is registered per
+       specific, named, already-locked execution path, never opened up for arbitrary future use
+       without its own registry entry.
+
+Application/calling code NEVER supplies `execution_context` as a free string parameter — it is
+resolved by the AuditWriter/registry from a small, closed, per-event-registration set of allowed
+values (mirroring how `event_type` itself is validated against the registry). A caller cannot
+invent a new execution_context value merely by passing one — only a registered event that
+declares actor_principal_kind IN ('unauthenticated','pre_principal_system') may use one, and only
+its own pre-declared constant.
+
+No caller-supplied arbitrary actor identity is ever trusted: for the ordinary
+human/system/integration cases, `actor_principal_id` is always container/context-resolved (the
+authenticated Principal, the current job's System Principal, etc.), never taken from unvalidated
+request input — this restates and extends IMP-003's already-proven "stale/forged caller model"
+defense (see "Security Negative Tests").
 ```
 
 For human actors, `actor_principal_id` is sufficient to resolve the acting `User` at read time
@@ -246,7 +372,9 @@ by IMP-003's `non_human_principal_deactivated` event (`kind` + catalog ID + `pri
 
 No impersonation/delegation field is added — no approved impersonation capability exists in any
 reviewed architecture document; inventing one here would be exactly the kind of policy invention
-this specification must not perform.
+this specification must not perform. No new authority/permission semantics are created by the
+`unauthenticated`/`pre_principal_system` actor kinds — they exist solely to make attribution
+deterministic and honest; they never confer, imply, or check any authorization outcome.
 
 ## Event Taxonomy
 
@@ -272,7 +400,16 @@ Rules:
   pattern) before it can be emitted — an unregistered event_type is a hard error at write time,
   never silently accepted as an arbitrary free-form string.
 - event_version is a small integer, starting at 1, incremented only when an event's REQUIRED
-  metadata shape changes incompatibly (additive optional fields do not require a version bump).
+  metadata shape, criticality, or visibility classification changes incompatibly (additive
+  optional fields do not require a version bump). A version increment always creates a NEW,
+  additional registry entry for `(event_type, new_version)` — it never edits the existing entry
+  for `(event_type, old_version)` in place. A record written under an old version remains
+  interpretable exactly as it was at write time (its criticality, metadata contract, and
+  visibility classification are permanently pinned to the version it was written with — see
+  "Historical Reproducibility of Visibility"); a future version never rewrites, reinterprets, or
+  reclassifies a historical record written under a prior version. Do not bump the version merely
+  because implementing code changed — only an incompatible CONTRACT change (shape/criticality/
+  visibility) warrants a new version.
 - Namespace segments are reserved per domain (identity, rbac, security, admin — populated now;
   approval, financial, payment, ledger, content, campaign, donation, partner, fundraiser,
   beneficiary, distribution, integration, system — reserved for later domains to register their
@@ -282,12 +419,33 @@ Rules:
 
 ## Existing Event Migration
 
-All 27 currently-implemented Identity + RBAC events, mapped onto the canonical taxonomy. Every
-mapped event's `actor_requirement` is `actor_principal_id + actor_principal_kind` per "Canonical
-Actor" above (omitted per-row for brevity); "Required Metadata" lists only fields beyond that
-pair and `subject_type`/`subject_id`.
+**Verified repository inventory (IMP004-SPEC-M01)** — counted directly from every
+`->record('...')` call site under `app/Services/Identity/`, `app/Http/Controllers/Auth/`,
+`app/Console/Commands/BootstrapSuperAdmin.php`, `app/Services/Rbac/`, and
+`app/Console/Commands/BridgeFirstSuperAdmin.php`:
 
-### Identity (18 events, IMP-002)
+```
+Identity existing events            = 19
+RBAC existing events                = 9
+-----------------------------------------
+Existing runtime inventory          = 28
+
+New denial event (F-01)             = 1
+-----------------------------------------
+Canonical active/target events      = 29
+
+Reserved-but-deferred catalog events = 5
+-----------------------------------------
+Total registry entries (incl. reserved) = 34
+```
+
+All 28 currently-implemented Identity + RBAC events, mapped onto the canonical taxonomy. Every
+mapped event's `actor_requirement` is `actor_principal_id + actor_principal_kind` per "Canonical
+Actor" above (omitted per-row for brevity, except where "Canonical Actor (Pre-Principal Cases)"
+below overrides it); "Required Metadata" lists only fields beyond that pair and
+`subject_type`/`subject_id`.
+
+### Identity (19 events, IMP-002)
 
 | Existing Event | Canonical Event | Criticality | Failure Semantics | Subject | Required Metadata |
 |---|---|---|---|---|---|
@@ -297,19 +455,29 @@ pair and `subject_type`/`subject_id`.
 | `invitation_revoked` | `identity.invitation.revoked` | CRITICAL | fail-closed | `invitation` | — |
 | `invitation_accepted` | `identity.invitation.accepted` | CRITICAL | fail-closed | `invitation` | — |
 | `login_succeeded` | `identity.session.login_succeeded` | NON_CRITICAL | fail-open + report | `user` | — |
-| `login_failed` | `identity.session.login_failed` | NON_CRITICAL | fail-open + report | `user` (nullable — unknown email attempts) | `reason` |
+| `login_failed` | `identity.session.login_failed` | NON_CRITICAL | fail-open + report | `user` (nullable — unknown email attempts) † | `reason` |
 | `logout` | `identity.session.logout` | NON_CRITICAL | fail-open + report | `user` | — |
 | `password_changed` | `identity.credential.password_changed` | CRITICAL | fail-closed | `user` | — |
 | `password_reset_completed` | `identity.credential.password_reset_completed` | CRITICAL | fail-closed | `user` | — |
 | `email_change_requested` | `identity.email.change_requested` | CRITICAL | fail-closed | `user` | — |
 | `email_change_completed` | `identity.email.change_completed` | CRITICAL | fail-closed | `user` | — |
 | `email_change_conflicted` | `identity.email.change_conflicted` | CRITICAL | fail-closed | `user` | `conflict_reason_code` |
-| `email_verified` | `identity.email.verified` | NON_CRITICAL | fail-open + report | `user` | — |
+| `email_verified` | `identity.email.verified` | **CRITICAL** (was NON_CRITICAL — see IMP004-SPEC-M03) | **fail-closed** | `user` | — |
 | `mfa_enrolled` | `identity.mfa.enrolled` | CRITICAL | fail-closed | `user` | — |
 | `mfa_recovery_code_used` | `identity.mfa.recovery_code_used` | CRITICAL | fail-closed | `user` | — |
 | `mfa_recovery_codes_regenerated` | `identity.mfa.recovery_codes_regenerated` | CRITICAL | fail-closed | `user` | — |
 | `mfa_reset_or_disabled` | `identity.mfa.reset_or_disabled` | CRITICAL | fail-closed | `user` | — |
-| `first_super_admin_bootstrap_completed` | `identity.bootstrap.first_super_admin_completed` | CRITICAL | fail-closed | `user` | — |
+| `first_super_admin_bootstrap_completed` | `identity.bootstrap.first_super_admin_completed` | CRITICAL | fail-closed | `user` | — ‡ |
+
+† `login_failed`'s actor is `UNAUTHENTICATED`, never a resolved human Principal — see "Canonical
+Actor (Pre-Principal Cases)" below. This applies regardless of whether the attempted email
+resolves to a real `user` (subject present) or not (subject `NULL`): authentication itself
+failed, so nothing proves who was typing, independent of whether the target account exists.
+
+‡ `first_super_admin_bootstrap_completed`'s actor is `PRE_PRINCIPAL_SYSTEM`
+(`execution_context = cli:identity:bootstrap-super-admin`), not the newly-created `user` (which
+is this event's *subject*, not its actor) — no canonical Principal exists for anyone at this
+point in the Q25 bootstrap sequence. See "Canonical Actor (Pre-Principal Cases)" below.
 
 ### RBAC (9 events, IMP-003)
 
@@ -359,20 +527,18 @@ authorization_denied_security_critical:
     RolePermissionService::grant(), a Financial Authority check failure on an actually-attempted
     financial action once such checks exist). Canonical event: `security.authorization.denied`
     (namespace `security`, not `rbac`, since this concern is cross-cutting beyond RBAC alone).
-    Criticality: CRITICAL — but "fail-closed" here means "the DENY must still be recorded even
-    though the underlying operation is ALREADY being rejected" — i.e. the audit write failure
-    must not additionally suppress the (already-happening) denial's HTTP/exception response; it
-    must, however, still be reported and never silently dropped (same "no silent audit loss"
-    principle from Q26, adapted: there is no mutation to roll back here, since the whole point is
-    that nothing was mutated — the audit-write failure itself must raise/report, not swallow).
     Required metadata: `attempted_action, denial_reason` (e.g. `self_escalation`,
     `financial_authority_check_failed`), never the target resource's sensitive field values (per
     the existing IMP-003 "Audit Contract" prohibition, preserved here).
     Emission call sites are added to the ALREADY-EXISTING IMP-002/IMP-003 services (e.g.
     RolePermissionService's self-escalation throw site) as part of the migration in this stage —
-    this does not reopen or alter IMP-003's authorization LOGIC (the DENY decision itself is
-    unchanged), it only adds an audit emission call alongside an existing throw, consistent with
-    "PATCH, DO NOT REWRITE".
+    this does not reopen or alter IMP-003's authorization LOGIC (the DENY decision itself, its
+    exception type, and its message are all UNCHANGED), it only adds an audit emission call
+    alongside an existing throw, consistent with "PATCH, DO NOT REWRITE". Its exact persistence
+    and failure-precedence semantics (IMP004-SPEC-M04) are specified separately in "Denial Event
+    Persistence Semantics" below — a denial has no authorized mutation to roll back, so it is
+    explicitly NOT described as "critical/fail-closed" in the same sense as a mutation event; see
+    that section for the deterministic model.
 ```
 
 ### F-02 Disposition — Redaction Strategy
@@ -395,6 +561,15 @@ proof already exists (it does not); it specifies the obligation to create it.
 CRITICAL      (default for any unclassified event, per Q26)
 NON_CRITICAL  (explicit opt-out only, per event registration in the taxonomy registry)
 ```
+
+**Criticality is owned exclusively by the canonical event registry, never by the runtime
+caller.** An emitting call site selects/requests a canonical `event_type` — it does not, and
+cannot, pass a `criticality` argument to `AuditWriter::record()`; the writer looks criticality up
+from the registry entry for that `event_type`+`event_version`, identically to how it resolves
+metadata allow-list, actor requirements, and visibility class (see "Registry-Derived Visibility
+Class"). An unregistered `event_type` is rejected outright (see "Event Taxonomy"); a registered
+event with no explicit criticality declaration defaults to `CRITICAL`/fail-closed, per Q26 —
+there is no code path by which a caller can downgrade an event's criticality at the call site.
 
 CRITICAL mutation pattern (already proven correct by IMP-003; required for every CRITICAL event
 in the migration tables above):
@@ -428,6 +603,64 @@ its own persistence failure internally and:
    reported risk, not a silent one).
 ```
 
+## Denial Event Persistence Semantics (IMP004-SPEC-M04)
+
+`security.authorization.denied` is neither CRITICAL nor NON_CRITICAL in the mutation sense —
+there is **no authorized business mutation to roll back**, because the entire point of the event
+is that nothing was authorized to happen. Describing it with the CRITICAL mutation pattern
+("mutation + audit in one transaction, rollback on audit failure") would be meaningless (there is
+nothing to roll back) and describing it as NON_CRITICAL ("fail-open silently") would risk making
+exactly the highest-value security evidence the least reliable. This specification gives it its
+own, third, deterministic contract:
+
+```
+1. The original authorization check determines DENY. This decision, its exception type, and its
+   message are entirely owned by the calling service (e.g. RolePermissionService) and are NEVER
+   altered by anything in this section.
+
+2. Before the denial exception is allowed to propagate to the caller, the emitting code attempts
+   to persist `security.authorization.denied` through the canonical AuditWriter, using an
+   INDEPENDENT persistence boundary — a separate DB connection/transaction scope from whatever
+   enclosing transaction the denying service may currently be inside (see "Transaction Placement"
+   below). This is a deliberate, named exception to the "same transaction as the mutation" rule:
+   there IS no mutation transaction to join for a denial (or, if there is an enclosing
+   transaction from a caller that is ABOUT to roll back specifically because this denial is being
+   thrown, joining it would guarantee the audit row never survives — the opposite of what a
+   denial record exists for).
+
+3. access result = DENY, ALWAYS, unconditionally, regardless of step 2's outcome:
+   - If the audit persistence in step 2 SUCCEEDS: the original authorization denial (exception/
+     domain-equivalent result) propagates to the caller UNCHANGED.
+   - If the audit persistence in step 2 FAILS: the original authorization denial STILL propagates
+     to the caller UNCHANGED. Access NEVER becomes allowed because the audit write failed — a
+     failure of the evidence-recording step must never be interpreted as, or converted into, a
+     more permissive outcome.
+
+4. If step 2 fails, that failure is NOT silent: it is reported through an approved operational/
+   security failure path (e.g. a dedicated `security_audit_failures` log channel, or the ordinary
+   application error log tagged distinctly, mirroring "Non-Critical Events" §2's reporting
+   discipline) — visible to operations/monitoring, and available for a test assertion to observe
+   — but this reporting happens ALONGSIDE the unchanged denial propagation in step 3, never
+   INSTEAD of it, and never by raising a second, different exception that could replace or mask
+   the original denial in the caller's own exception-handling logic.
+```
+
+### Transaction Placement
+
+If the code path that produces the denial is itself running inside an enclosing DB transaction
+(e.g. `RolePermissionService::grant()`'s self-escalation check fires partway through that
+method's `DB::transaction()` closure), the denial-audit write in step 2 above uses a **separate,
+independently-committing connection scope** (a second named Laravel database connection to the
+same physical database — a standard, shared-hosting-compatible Laravel feature, not new
+infrastructure) rather than a nested transaction/savepoint on the SAME connection. This matters
+because a savepoint-based "nested transaction" on the same connection is still rolled back if the
+outer transaction rolls back — and the outer transaction WILL roll back here, specifically
+because the thrown denial exception unwinds it. Using an independent connection means the denial
+record commits immediately and durably, regardless of what the enclosing (about-to-be-rolled-
+back) transaction ultimately does. No distributed transaction, message queue, or other new
+infrastructure is introduced — this is a single additional same-database connection, resolved by
+`AuditWriter` internally for this one event category only.
+
 ## Audit Record Schema (Proposed — No Migration Created)
 
 | Field | Type | Nullable | Purpose | Privacy | Index | FK Behavior | Historical Durability |
@@ -437,15 +670,17 @@ its own persistence failure internally and:
 | `event_version` | unsigned tinyint | NO | shape versioning | none | no | — | permanent |
 | `criticality` | enum `critical`/`non_critical` | NO | §Criticality | none | no | — | permanent |
 | `occurred_at` | datetime (µs precision) | NO | when the fact occurred | none | yes | — | permanent |
-| `actor_principal_id` | BIGINT unsigned | NO | §Canonical Actor | low (an ID, not PII itself) | yes (with `occurred_at`) | FK -> `principals.id`, RESTRICT (never cascade-delete audit on Principal removal — Principal rows are tombstoned, never hard-deleted, per IMP-003) | permanent — Principal tombstoning does not remove the FK target row |
-| `actor_principal_kind` | enum human/system/integration | NO | §Canonical Actor | none | no | — | permanent |
+| `actor_principal_id` | BIGINT unsigned, nullable | YES (see M02) | §Canonical Actor | low (an ID, not PII itself) | yes (with `occurred_at`) | FK -> `principals.id`, RESTRICT (never cascade-delete audit on Principal removal — Principal rows are tombstoned, never hard-deleted, per IMP-003); NULL only when `actor_principal_kind` is `unauthenticated`/`pre_principal_system` | permanent — Principal tombstoning does not remove the FK target row |
+| `actor_principal_kind` | enum human/system/integration/unauthenticated/pre_principal_system | NO | §Canonical Actor | none | no | — | permanent |
+| `execution_context` | string, nullable | YES (NOT NULL exactly when `actor_principal_id` IS NULL) | §Canonical Actor (Pre-Principal Cases) | none — a fixed registry constant, never free text | no | — | permanent |
 | `subject_type` | string | NO | §Record Structure | none | yes (with `subject_id`, `occurred_at`) | — | permanent |
 | `subject_id` | BIGINT unsigned, nullable | YES | §Record Structure | depends on subject | yes | no FK constraint (subject can be any domain's table; a polymorphic reference is by design not enforced at the DB layer, consistent with not letting Audit dictate every future domain's own migration order) | permanent; deliberately NOT a hard FK so a subject's own table lifecycle never constrains audit durability |
 | `request_id` | ULID/string, nullable | YES | §Correlation | none | yes | — | permanent |
 | `correlation_id` | ULID/string, nullable | YES | §Correlation | none | yes | — | permanent |
 | `authentication_assurance` | enum STANDARD/ELEVATED, nullable | YES | security-relevant queries | none | no | — | permanent |
 | `policy_version_ref` | string, nullable | YES | §Governance Foundation policy-version hook | none | no | — | permanent |
-| `source_event_id` | string, nullable, unique-when-present | YES | §Idempotency | none | yes (unique) | — | permanent |
+| `source_domain` | string, nullable | YES | §Idempotency/M06 — identifies the trusted producer namespace (e.g. `identity`, `rbac`, a future `payment_provider:xyz`) | none | yes (composite, see M06) | — | permanent |
+| `source_event_id` | string, nullable | YES | §Idempotency/M06 | none | yes (composite `UNIQUE(source_domain, source_event_id, event_type)`, not a bare unique) | — | permanent |
 | `metadata` | JSON | YES | allow-listed event-specific fields, per §Redaction | varies per event — governed by the allow-list itself | no (not indexed; queried fields must be promoted to a real column, not searched inside JSON) | — | permanent |
 | `created_at` | datetime | NO | row-insert timestamp (distinct from `occurred_at` in case of any future non-instantaneous ingestion) | none | no | — | permanent |
 
@@ -520,6 +755,30 @@ event shape for "a purge happened" and the absence of a delete API — it does N
 engine, the eligibility evaluator, or the hold mechanism themselves; those are explicitly
 `DEFERRED` per §Proposed Deliverables in the readiness document.
 
+### Terminal Purge-Evidence Rule (IMP004-SPEC-m01)
+
+Without an explicit terminal rule, `governance.audit.purged` (the purge governance evidence event
+itself) would eventually become old enough to be, itself, eligible for the very retention
+policy/purge batch process that created it — producing unbounded recursive purge-evidence-of-
+purge-evidence generation. This specification prevents that deterministically:
+
+```
+A governance.audit.purged record is EXCLUDED, permanently and unconditionally, from the
+eligibility set of the SAME retention policy/purge batch process that produced it — it is never
+a candidate for purge under the policy it is evidence of.
+
+governance.audit.purged records are instead subject to their OWN, SEPARATELY AUTHORIZED retention
+classification (a distinct policy_version_ref / registry classification from whatever ordinary
+events a given policy governs) — this specification does not invent that separate classification
+or its duration; it only requires that one exist and be distinct before any purge capability is
+built (a future implementation-time obligation, not resolved by this document).
+```
+
+No arbitrary permanent retention duration is invented by this rule, and no legal retention number
+is created — the rule only prevents the specific recursive/self-consuming failure mode; the
+actual retention period for purge-evidence records remains exactly as deferred as every other
+retention duration under Q17.
+
 ## Audit Read Authorization
 
 Full canonical formula (per Q27), reusing [RBAC-ARCHITECTURE.md](../05-rbac/RBAC-ARCHITECTURE.md)
@@ -528,27 +787,82 @@ Full canonical formula (per Q27), reusing [RBAC-ARCHITECTURE.md](../05-rbac/RBAC
 ```
 Authenticated
 AND Applicable Subject Context
-AND Permission                          (new: audit.read.* family — see below)
+AND Permission                          (registry-derived — see "Registry-Derived Visibility
+                                          Class" below; never chosen by the reading caller)
 AND Domain-Aware Scope                  (existing DATA-SCOPE-MODEL.md taxonomy, keyed off
                                           subject_type/subject_id)
 AND Ownership/Subject Rule where applicable
-AND Business Authority where applicable  (e.g. a financial-category audit record may require an
+AND Business Authority where applicable  (e.g. a financial-reference record may require an
                                           Authority Type beyond plain Permission — see below)
 AND Authentication Assurance where required
 AND No Security Restriction
 ```
 
-Default: **DENY**. New Permission family (registered in the existing `PermissionRegistry`
-pattern, not a competing mechanism): `audit.read` (baseline: read NON_CRITICAL/general events
-within the actor's own applicable scope) and `audit.read.security` /
-`audit.read.financial_reference` as separate, narrower permissions for higher-sensitivity
-categories — **Super Admin is not granted any of these three by default**; each requires its own
-explicit Role/Permission grant through the existing IMP-003 `RolePermissionService`, exactly like
-any other permission. Financial-category audit records (those whose `subject_type` references a
-future financial domain resource) additionally may require a Business Authority check once such
-domains exist — this specification reserves the hook (`policy_version_ref`/`subject_type`-based
-routing) without inventing a financial Authority Type that has no corresponding financial domain
-yet.
+Default: **DENY**.
+
+### Registry-Derived Visibility Class (IMP004-SPEC-M05)
+
+Every registered `(event_type, event_version)` pair — never a bare `event_type` alone, so a
+future version bump can change classification going forward without altering how an OLD, already
+-written record is read (see "Historical Reproducibility of Visibility" below) — declares, as
+part of its registry entry, a fixed, non-caller-selectable set of read requirements:
+
+```
+visibility_class                (e.g. GENERAL, SECURITY, PRIVACY_SENSITIVE — a closed list, not
+                                 free text)
+required_permission             (which audit.read.* permission this event's BASE visibility_class
+                                 requires — see permission family below)
+scope_resolver                  (which DATA-SCOPE-MODEL.md scope type applies to this event's
+                                 subject_type, e.g. GLOBAL_PLATFORM for RBAC catalog events)
+subject/domain_resolver         (how to derive the applicable scope instance from subject_id,
+                                 where applicable)
+authentication_assurance_requirement (STANDARD or ELEVATED, where the event's sensitivity
+                                 warrants requiring the READER to hold ELEVATED assurance, not
+                                 just the original actor)
+financial_reference_fields      (a list of this event's OWN allow-listed metadata field names —
+                                 from "Redaction / Safe Serialization" — that, WHEN POPULATED on
+                                 a given instance, additionally require
+                                 audit.read.financial_reference for that specific record,
+                                 regardless of the event's base visibility_class)
+```
+
+The reading code (the query/authorization service) NEVER supplies or chooses any of the above —
+it looks them up from the registry using the persisted `event_type`+`event_version`, exactly as
+`event_type` itself is already registry-validated at write time. A caller cannot request "treat
+this record as GENERAL visibility" — the classification is a property of what was registered for
+that event, not a runtime parameter.
+
+**Permission family** (registered in the existing `PermissionRegistry` pattern, not a competing
+mechanism): `audit.read` (baseline — satisfies any event whose registry entry declares
+`visibility_class: GENERAL` and has no populated `financial_reference_fields`),
+`audit.read.security` (required whenever `visibility_class: SECURITY`), and
+`audit.read.financial_reference` (required whenever `visibility_class: FINANCIAL_REFERENCE`, OR
+whenever ANY of that event's registry-declared `financial_reference_fields` is non-null on the
+specific record being read — this applies uniformly regardless of whether the financial
+reference is the record's primary subject, a secondary subject, or buried in allow-listed
+metadata; there is no code path that only checks the primary `subject_type`). **Super Admin is
+not granted any of these three by default** — each requires its own explicit Role/Permission
+grant through the existing IMP-003 `RolePermissionService`, exactly like any other permission.
+
+**`audit.read.financial_reference` is explicitly NOT financial business authority.** It grants
+only the ability to see that an authorized audit record contains a reference to a financial
+resource (e.g. a future `payment_id`) — it never grants, implies, or substitutes for the ability
+to inspect or operate on the financial domain resource itself. Actually reading/acting on that
+financial resource still requires the source financial domain's own scope and Business Authority
+check, entirely independent of this permission, per the unchanged Q27 formula above.
+
+### Historical Reproducibility of Visibility
+
+Because classification is keyed to `(event_type, event_version)` and the registry's own version
+history is immutable code (a new classification requires a NEW `event_version`, never an edit to
+an existing version's entry — see "Event Versioning"), an already-written record's effective
+visibility never silently changes because someone edits today's registry — reclassifying a
+concern requires shipping a new version and does not retroactively alter how old rows, still
+tagged with the old version, are read. `visibility_class` etc. are NOT persisted redundantly on
+every row; they are deterministically resolved from the row's own already-persisted
+`event_type`+`event_version` at read time, against that version's permanently-fixed registry
+entry — this avoids duplicating authorization policy data across millions of rows while still
+guaranteeing reproducibility.
 
 ## Correlation Foundation
 
@@ -573,14 +887,18 @@ absolute rule, mirroring the "Redaction" section's absolute prohibitions.
 
 ## Authentication Integration (IMP-002 Migration)
 
-The 18 events in the Identity migration table above move onto the canonical `AuditWriter`,
+The 19 events in the Identity migration table above move onto the canonical `AuditWriter`,
 replacing `IdentityAuditLogger`'s direct `Log::channel('identity_audit')` call — **no change to
 any IMP-002 authentication business rule**. Per Q26/F-03, every event marked CRITICAL in that
 table requires a forced-failure rollback test (currently absent — this is new required test
-coverage, not a claim of existing coverage). `login_failed`/`login_succeeded`/`logout`/
-`email_verified` remain `NON_CRITICAL` — an ordinary failed login attempt is explicitly NOT
-elevated to transactional-authority-mutation status merely by migrating sinks, consistent with
-the originating instruction's caution against that exact mistake.
+coverage, not a claim of existing coverage). `login_failed`/`login_succeeded`/`logout` remain
+`NON_CRITICAL` — an ordinary failed login attempt is explicitly NOT elevated to
+transactional-authority-mutation status merely by migrating sinks, consistent with the
+originating instruction's caution against that exact mistake. `email_verified` is now
+**CRITICAL** (IMP004-SPEC-M03 — email verification is a persistent Identity state mutation, a
+deterministic application of Q26, not an exception to it): the `email_verified_at` write and the
+canonical audit append are one atomic transaction; a forced audit-append failure rolls back the
+verification state change, leaving no partial/orphan verification and no orphan audit record.
 
 ## RBAC Integration (IMP-003 Migration)
 
@@ -660,6 +978,15 @@ MySQL 8.x (disposable instance only — never the real/unknown configured databa
 ## Required Test Plan
 
 ```
+EVENT INVENTORY:
+  - all 28 existing (19 Identity + 9 RBAC) events have a canonical mapping registered
+  - the new security.authorization.denied event is registered
+  - the 5 reserved catalog events (role_registered, role_retired, permission_registered,
+    permission_deprecated, authority_type_registered) are registered but confirmed NOT emitted
+    by any current runtime path (a test asserting no emission call site exists for them, or
+    equivalently that they never appear in captured audit output during the full suite run)
+  - no two existing runtime events map to the same canonical event_type (no duplicate mapping)
+
 PERSISTENCE:
   - canonical event append succeeds and persists exactly the declared fields
   - an unregistered event_type is rejected (hard error, not silently accepted)
@@ -670,12 +997,41 @@ ACTOR:
   - System Principal attribution correctness
   - Integration Principal attribution correctness
 
-ATOMICITY (CRITICAL events):
+PRE-PRINCIPAL ACTOR (IMP004-SPEC-M02):
+  - unknown-email login_failed persists with actor_principal_kind = unauthenticated,
+    actor_principal_id = NULL, and no fabricated human actor
+  - first_super_admin_bootstrap_completed persists with actor_principal_kind =
+    pre_principal_system, execution_context = the fixed bootstrap constant, and
+    actor_principal_id = NULL
+  - a CRITICAL event whose registry entry does NOT declare unauthenticated/pre_principal_system
+    as an allowed actor kind rejects an attempt to write it with a NULL actor_principal_id
+    (deterministic execution-context attribution cannot be bypassed into an ordinary NULL)
+
+CRITICALITY OWNERSHIP:
+  - a call site cannot override a registered event's criticality
+  - an unclassified/unregistered event defaults to CRITICAL and is rejected until registered
+
+EMAIL VERIFICATION (IMP004-SPEC-M03):
+  - successful verification persists state (`email_verified_at`) + audit atomically
+  - forced audit-append failure rolls the verification state back
+  - no partial verification state after a forced failure
+  - no orphan audit record after rollback
+
+ATOMICITY (CRITICAL mutation events):
   - critical mutation + audit success -> both persist
   - forced audit-write failure -> mutation rolls back entirely (extend existing RBAC pattern to
-    every Identity CRITICAL event per F-03's disposition, and to the new
-    security.authorization.denied event)
+    every Identity CRITICAL event per F-03's disposition)
   - no partial critical mutation ever observable after a forced failure
+
+DENIAL EVENT (IMP004-SPEC-M04):
+  - a self-escalation denial remains denied (unchanged exception/message) and produces no
+    business mutation, with security.authorization.denied persisted successfully
+  - forced security.authorization.denied persistence failure still results in DENY — access
+    never becomes allowed
+  - the forced persistence failure is reported through the operational/security failure path,
+    not silently dropped
+  - the denial audit record survives even though the enclosing transaction (if any) rolls back
+    due to the thrown denial exception (proves the independent persistence boundary)
 
 IMMUTABILITY:
   - unauthorized update attempt is rejected/has no effect
@@ -687,20 +1043,29 @@ REDACTION:
   - a metadata value outside the declared allow-list cannot bypass rejection via any encoding
   - sensitive HTTP headers/raw payloads are never persisted
 
-AUTHORIZATION (read):
+VISIBILITY / AUTHORIZATION (read) (IMP004-SPEC-M05):
   - default DENY for an actor with no audit.read.* permission
   - authorized, correctly-scoped read succeeds
   - unauthorized read is denied
   - cross-scope read attempt is denied
   - Super Admin without an explicit audit.read.* grant is denied (proves no automatic access)
-  - high-sensitivity (security/financial-reference) category requires its own narrower
-    permission, not satisfied by the baseline audit.read alone
+  - baseline `audit.read` does NOT expose a SECURITY-classified event
+  - baseline `audit.read` does NOT expose a record whose registry-declared
+    financial_reference_fields are populated, even when the event's own base visibility_class is
+    GENERAL — proves the metadata-level financial-reference check applies regardless of location
+  - a financial reference present as the PRIMARY subject invokes the same
+    audit.read.financial_reference requirement as one present only in metadata (proves uniform
+    treatment "regardless of location")
+  - source-domain/applicable scope is still enforced even when the higher-sensitivity permission
+    is held (holding audit.read.financial_reference alone does not bypass scope)
+  - audit.read.financial_reference does not grant any ability to read/operate on the referenced
+    financial domain resource itself
 
 IDENTITY INTEGRATION:
-  - all 18 migrated events persist via the canonical sink with identical semantic content to
+  - all 19 migrated events persist via the canonical sink with identical semantic content to
     today's log-channel payloads
-  - CRITICAL Identity events roll back their mutation on forced audit failure (new coverage,
-    closing F-03)
+  - CRITICAL Identity events (including email_verified) roll back their mutation on forced audit
+    failure (new coverage, closing F-03)
 
 RBAC INTEGRATION:
   - all 9 migrated events persist via the canonical sink
@@ -711,10 +1076,24 @@ TRANSACTION ROLLBACK:
   - an audit row inserted inside a transaction that is later rolled back for an unrelated reason
     does not survive (standard DB transaction behavior, explicitly tested rather than assumed)
 
+SOURCE_EVENT_ID (IMP004-SPEC-M06):
+  - a legitimate retry (same source_domain + source_event_id + event_type) returns/references the
+    existing canonical audit record, no duplicate row created
+  - the same source_event_id in a DIFFERENT valid producer scope (different source_domain or
+    different event_type) does not collide with an unrelated record
+  - a conflicting reuse (same scoped key, incompatible core attribution) is rejected as an
+    idempotency conflict, not silently accepted or silently overwritten
+  - a NULL source_event_id never participates in the uniqueness constraint
+
 CONCURRENCY:
   - two concurrent CRITICAL mutations for different subjects both persist correctly with no
     cross-contamination
-  - duplicate `source_event_id` is rejected/deduplicated, not silently double-inserted
+  - two concurrent writes with the same scoped source_event_id resolve deterministically to one
+    canonical row (no race producing two rows)
+
+PURGE EVIDENCE (IMP004-SPEC-m01):
+  - a governance.audit.purged record is excluded from the eligibility set of the same purge batch
+    that produced it (no recursive self-qualification)
 
 MYSQL:
   - mandatory disposable MySQL 8.x runtime evidence per "SQLite + MySQL Test Matrix" above
@@ -726,6 +1105,13 @@ MYSQL:
 - actor spoofing (a caller-supplied, not container-resolved, Principal ID is never trusted —
   mirrors IMP-003's existing "stale caller-supplied model" defense pattern)
 - Principal spoofing / forged Principal ID (reload+validate, do not trust a passed-in ID alone)
+- execution_context spoofing (a caller attempting to supply an arbitrary, non-registered
+  execution_context string, or to claim `unauthenticated`/`pre_principal_system` for an event
+  whose registry entry does not permit that actor kind, is rejected — see "Canonical Actor
+  (Pre-Principal Cases)")
+- criticality/visibility override attempt (a caller attempting to pass an explicit criticality or
+  visibility_class value is rejected/ignored — both are registry-derived only, see "Criticality
+  Classification" and "Registry-Derived Visibility Class")
 - subject spoofing where relevant (a caller cannot attribute an event to a subject_id it has no
   relationship to, where the emitting service itself is responsible for supplying the correct ID)
 - unregistered event_type rejected
@@ -776,11 +1162,28 @@ checklist:
 
 ```
 [ ] Canonical audit persistence exists (schema, model, AuditWriter contract)
-[ ] Canonical taxonomy/registry exists, with all 28 canonical events registered (27 migrated +
-    1 new: security.authorization.denied) plus the 5 reserved-but-unemitted catalog events
-[ ] Identity (18) + RBAC (9) integration completed per the migration tables
-[ ] Critical atomicity demonstrated for every CRITICAL event (new Identity-side + new
-    security.authorization.denied coverage, plus unchanged RBAC coverage)
+[ ] Canonical taxonomy/registry exists, with 29 canonical active/target events registered
+    (28 migrated — 19 Identity + 9 RBAC — + 1 new: security.authorization.denied) plus the 5
+    reserved-but-unemitted catalog events (34 total registry entries including reserved)
+[ ] Identity (19) + RBAC (9) integration completed per the migration tables
+[ ] Pre-Principal actor cases (unauthenticated, pre_principal_system) supported and tested,
+    with no fabricated human actor and no arbitrary caller-supplied execution_context (M02)
+[ ] email_verified reclassified CRITICAL, with atomic state+audit persistence and forced-failure
+    rollback coverage (M03)
+[ ] Denial-event persistence semantics implemented and tested: DENY always propagates unchanged,
+    audit failure never permits access, failure is reported not silent, independent persistence
+    boundary survives the enclosing transaction's rollback (M04)
+[ ] Registry-derived visibility class implemented: criticality and visibility are never
+    caller-supplied; financial-reference visibility applies uniformly wherever a financial
+    reference appears (primary subject, secondary subject, or metadata); audit.read.financial_
+    reference confirmed to grant no financial-domain business authority (M05)
+[ ] source_event_id idempotency implemented exactly per the composite
+    (source_domain, source_event_id, event_type) scope: legitimate retry deduplicates, conflicting
+    reuse is rejected, NULL never collides (M06)
+[ ] Terminal purge-evidence rule implemented: governance.audit.purged records excluded from their
+    own producing purge batch's eligibility set (m01)
+[ ] Critical atomicity demonstrated for every CRITICAL event (new Identity-side + email_verified +
+    unchanged RBAC coverage)
 [ ] Allow-list redaction demonstrated (F-02 resolved in code, not only in this specification)
 [ ] Audit-read authorization demonstrated (Q27; default DENY; no automatic Super Admin access)
 [ ] Immutability demonstrated (no update/delete surface)
@@ -792,3 +1195,57 @@ checklist:
 [ ] IMP-000/001/002/003 FINAL/LOCKED evidence unmodified
 [ ] Ledger/Payment/Commission/Approval/Search-Reporting/API remain unimplemented by this stage
 ```
+
+## Finding Disposition (Specification Remediation Pass 1)
+
+Resolution status for the Codex specification-audit findings addressed by this remediation pass.
+None of these should be read as Codex having already accepted the resolution — each is
+**PATCHED — PENDING INDEPENDENT RE-AUDIT** until Codex's own re-audit confirms it.
+
+```
+IMP004-SPEC-M01  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Section(s): "Existing Event Migration" (verified inventory block: 19 Identity + 9 RBAC = 28
+  existing, +1 new denial event = 29 canonical active/target, +5 reserved = 34 total registry
+  entries), "Identity (19 events, IMP-002)" table heading, "Authentication Integration"
+  (19-event reference), "Required Test Plan" EVENT INVENTORY group, "Definition of Done
+  (IMP-004-Specific)". Counts verified directly against every `->record(...)` call site in
+  app/Services/Identity/, app/Http/Controllers/Auth/, app/Console/Commands/
+  BootstrapSuperAdmin.php, app/Services/Rbac/, and app/Console/Commands/
+  BridgeFirstSuperAdmin.php — matches Codex's reported counts exactly; no repository-evidence
+  discrepancy was found.
+
+IMP004-SPEC-M02  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Section(s): "Canonical Actor" (rewritten), "Canonical Actor (Pre-Principal Cases)" (new),
+  "Audit Record Schema" (actor_principal_id now nullable, actor_principal_kind extended,
+  execution_context column added), Identity migration table footnotes † and ‡, "Required Test
+  Plan" PRE-PRINCIPAL ACTOR group, "Security Negative Tests" (execution_context spoofing).
+
+IMP004-SPEC-M03  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Section(s): Identity migration table (`email_verified` row), "Authentication Integration",
+  "Required Test Plan" EMAIL VERIFICATION group, "Definition of Done (IMP-004-Specific)".
+
+IMP004-SPEC-M04  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Section(s): "F-01 Disposition" (`authorization_denied_security_critical` entry rewritten),
+  "Denial Event Persistence Semantics" (new, including "Transaction Placement"), "Required Test
+  Plan" DENIAL EVENT group, "Definition of Done (IMP-004-Specific)".
+
+IMP004-SPEC-M05  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Section(s): "Audit Read Authorization" (rewritten with "Registry-Derived Visibility Class" and
+  "Historical Reproducibility of Visibility"), "Audit Record Schema" (source_domain/visibility
+  notes), "Required Test Plan" VISIBILITY / AUTHORIZATION group, "Definition of Done
+  (IMP-004-Specific)".
+
+IMP004-SPEC-M06  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Section(s): "Idempotency" (rewritten with exact composite-uniqueness/retry/conflict/null
+  semantics), "Audit Record Schema" (`source_domain` column added, `source_event_id` uniqueness
+  corrected to composite), "Required Test Plan" SOURCE_EVENT_ID group, "Definition of Done
+  (IMP-004-Specific)".
+
+IMP004-SPEC-m01  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Section(s): "Retention Compatibility (Structural Only)" → "Terminal Purge-Evidence Rule" (new),
+  "Required Test Plan" PURGE EVIDENCE group, "Definition of Done (IMP-004-Specific)".
+```
+
+No new Human Decision was introduced by this remediation pass — all seven findings were
+remediable within the existing Q26/Q27/Q28 authority and the pre-existing Level 1-4 baseline,
+consistent with Codex's own `HUMAN DECISION REQUIRED = 0` in the original audit.
