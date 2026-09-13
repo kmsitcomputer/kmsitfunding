@@ -4,11 +4,17 @@
 
 ```
 Stage:                        IMP-005 — CMS
-Document State:               SPECIFICATION DRAFT — READY FOR INDEPENDENT REVIEW
+Document State:               SPECIFICATION — HUMAN DECISIONS RESOLVED (Q29-Q33) —
+                              READY FOR INDEPENDENT SPECIFICATION REVIEW
 Implementation Authorization: NOT GRANTED
 Repository Baseline:          master @ f1aef3d59c2f5fa9361890bed8afa138f134680f
                               (IMP-000..IMP-004 FINAL / LOCKED — see
                               docs/audits/IMP-004-FINALIZATION.md and prior finalization records)
+Human Decisions:              HD-IMP005-01..05 answered FINAL / LOCKED by the Human Authority and
+                              materialized as Q29-Q33 in docs/01-requirements/HUMAN-DECISION-REGISTER.md
+                              — this specification is patched to reflect those answers (section 25)
+Human Decisions Required:     0
+OPEN HUMAN DECISIONS:         0
 This document changes:        NO code, NO migrations, NO routes, NO tests, NO production config.
 ```
 
@@ -21,13 +27,16 @@ LOCKED               — direct requirement/consequence of Level 1-4 authoritati
 ENGINEERING CHOICE   — implementation detail consistent with the locked baseline, not itself a
                        business/architecture rule; follows the IMP-003 precedent of explicit
                        ENGINEERING CHOICE labeling.
-HUMAN DECISION       — a genuine unresolved business/product question this specification must NOT
-                       answer alone; collected in section 25.
+HUMAN DECISION       — a product/business decision made by the Human Authority. ALL FIVE questions raised by
+                       the first draft of this specification were answered by the Human Authority
+                       and are now LOCKED Level 1 entries Q29-Q33 (section 25); nothing remains
+                       open.
 ```
 
-Nothing in this document may be treated as new locked architecture. On Human approval of the
-answer set in section 25 plus independent review, this document becomes the Level 5 implementation
-specification for IMP-005.
+Nothing in this document may be treated as new locked architecture. HD-IMP005-01..05 have been
+answered by the Human Authority (materialized as Q29-Q33 in the Level 1 register); with this
+patched specification plus a clean independent review and a separate Human authorization act, this
+document becomes the Level 5 implementation specification for IMP-005.
 
 ---
 
@@ -36,7 +45,8 @@ specification for IMP-005.
 Read and reconciled under [docs/00-governance/DOCUMENT-AUTHORITY.md](../00-governance/DOCUMENT-AUTHORITY.md):
 
 ```
-Level 1  docs/01-requirements/HUMAN-DECISION-REGISTER.md            (Q1-Q28)
+Level 1  docs/01-requirements/HUMAN-DECISION-REGISTER.md            (Q1-Q33; Q29-Q33 are the
+                                                                      IMP-005 CMS decisions)
 Level 2  docs/01-requirements/MASTER-REQUIREMENTS.md                (§3 routes, §4 tech, §5 hosting, §6 domains)
 Level 3  docs/02-architecture/MASTER-ARCHITECTURE.md                (locked principles incl.
          "Theme = presentation only", "Admin/Super Admin = fixed backoffice (not theme-controlled)")
@@ -92,11 +102,11 @@ This task prepared the specification only. Implementation authorization is a sep
 ## 2. Objective
 
 Deliver the CMS (the managed-content half of the Module Ownership "Content Experience" module):
-organization-controlled managed content — pages, articles, revisions, media, and the supporting
-lifecycle, slugs, SEO metadata, and (conditionally) navigation — safely manageable from the fixed
-admin backoffice and consumable by the public website content contract, with zero authority over
-financial, payment, ledger, RBAC, authentication, or business-domain state, and without
-implementing the Theme Engine (IMP-006).
+organization-controlled managed content — pages, articles, revisions, and media, with lifecycle,
+slugs, minimal scheduling, and SEO metadata — safely manageable from the fixed admin backoffice and
+consumable by the public website content contract, with zero authority over financial, payment,
+ledger, RBAC, authentication, or business-domain state, and without implementing the Theme Engine
+(IMP-006) or menu/navigation composition (deferred to IMP-006 by Q30).
 
 ## Source Requirements
 
@@ -116,12 +126,13 @@ MASTER-ARCHITECTURE: Theme = presentation only; Admin = fixed backoffice; single
 
 ---
 
-## 3. Scope (LOCKED-DERIVED core + explicitly proposed)
+## 3. Scope (locked baseline and engineering details)
 
 ```
 IN SCOPE (LOCKED-derived):
   - Managed Page identity + lifecycle + revisions          (MODULE-OWNERSHIP §2 "Page", "Content Revision")
-  - Managed Article identity + lifecycle + revisions       (MODULE-OWNERSHIP §2 "Article", "News" — see HD-05)
+  - Managed Article identity + lifecycle + revisions       (MODULE-OWNERSHIP §2 "Article", "News"
+      — per Q33, News is a CLASSIFICATION of Article, not an independent entity)
   - Append-only Content Revision model                     (MODULE-OWNERSHIP §2)
   - Media library for CMS content (upload/validation/serving of content imagery & documents)
       — required to render pages/articles at all; governed by SECURITY-ARCHITECTURE
@@ -137,19 +148,29 @@ IN SCOPE (LOCKED-derived):
   - Same-origin Inertia admin backoffice screens for CMS management (fixed design system — LOCKED)
   - Public content-resolution contract consumed by web surfaces (section 18/24)
 
-IN SCOPE (conditional — implemented only if the matching Human Decision is answered YES):
-  - Menu / Navigation management                            (HD-02)
-  - Scheduled publish / unpublish                           (HD-04)
-  - Editorial review/approval workflow                      (HD-01)
-  - Multilingual content                                    (HD-03)
+IN SCOPE (Human-Decision-resolved):
+  - Scheduled publish / unpublish, minimal form             (Q32 LOCKED: publish_at/unpublish_at
+      timestamps + Laravel Scheduler/Cron execution through the ordinary guarded service paths)
+
+RESOLVED-OUT (Human-Decision-locked, recorded so their absence is decided, not overlooked):
+  - Editorial review/approval workflow          OUT — Q29 (permission separation is the baseline)
+  - Menu / navigation management                OUT — Q30 (deferred to IMP-006; IMP-005 supplies
+      only the content/destination contract navigation targets)
+  - Multilingual content                      OUT — Q31 (single-locale baseline, additive-ready)
+  - Independent "News" entity                 OUT — Q33 (classification of Article via validated article_type)
 ```
 
 ## 4. Out of Scope (MUST NOT be implemented in IMP-005)
 
 ```
 - Theme Engine: themes, templates, sections, components/blocks rendering, theme selection,
-  theme presentation configuration storage — ALL IMP-006 (LOCKED boundary, see section 6).
+  theme presentation configuration, rendering pipeline, per-surface skin — ALL IMP-006 (LOCKED
+  boundary, see section 6). Menu/navigation presentation configuration is explicitly IMP-006
+  territory per Q30.
 - Page-builder / drag-drop section composition UI (not present in any approved baseline content).
+- Editorial approval workflow, reviewer queue, or editorial approval matrix (Q29 — none in v1).
+- Translation tables, locale-specific publication workflow, localized-slug framework, or locale
+  fallback engine (Q31 — none in v1).
 - Any mutable/derived financial state; any write to ledger/payment/donation/commission/withdrawal/
   refund/approval domains (LOCKED — AGENTS.md "Financial Rules", "Locked Decisions").
 - RBAC role/permission administration (IMP-003 owns the mechanism; IMP-005 only REGISTERS its own
@@ -196,14 +217,14 @@ Locked presentation chain (preserved unchanged):
 
 | Concern | Owner |
 |---|---|
-| Content identities, lifecycles, revisions, bodies, slugs, media, SEO data, menus data | **IMP-005 CMS** |
-| Theme registry/selection, templates, sections, components/blocks, presentation configuration, rendering pipeline, per-surface skin | **IMP-006 Theme Engine** |
+| Content identities, lifecycles, revisions, bodies, slugs, media, SEO data, neutral destinations | **IMP-005 CMS** |
+| Theme registry/selection, templates, sections, components/blocks, presentation configuration, menu/navigation presentation, rendering pipeline, per-surface skin | **IMP-006 Theme Engine** |
 | Public portal shells / campaign pages / donor views UI | later domain stages + IMP-006 |
 
 Interface between them (the only thing IMP-005 exposes):
 
 ```
-ContentResolutionService (read contract, defined in section 18/24):
+ContentResolverService (read contract, defined in section 18/24):
   resolve(path)      -> PublishedContent | null   (identity, published revision data, meta)
   mediaTokenResolver -> maps embedded media ULID tokens in content to current public URLs
 ```
@@ -214,7 +235,7 @@ Rules:
 LOCKED        IMP-005 must NOT implement themes/templates/sections or any rendering theming.
 LOCKED        "Theme = presentation only" (MASTER-ARCHITECTURE) — presentation never gains
               content or business authority; content never stores theme/template decisions.
-ENGINEERING   IMP-005 content bodies are theme-agnostic (semantic HTML or neutral block JSON,
+ENGINEERING   IMP-005 content bodies are theme-agnostic (semantic HTML,
               section 20); they must render acceptably inside the IMP-006 contract later without
               content rewrites.
 LOCKED        Admin/backoffice CMS screens live in the FIXED design system and are NOT
@@ -222,9 +243,11 @@ LOCKED        Admin/backoffice CMS screens live in the FIXED design system and a
 ```
 
 `MODULE-OWNERSHIP` §2 lists "Theme presentation configuration" inside the Content Experience
-module; that ownership belongs to the module, but its implementation is scheduled with IMP-006
-(the Theme Engine stage) — IMP-005 creates no theme tables. Recorded so this deferral is explicit
-and reviewable, not a silent scope move.
+module; per Q30 the Human Authority confirmed that this — including menu/navigation presentation
+configuration — is scheduled with IMP-006 (the Theme Engine stage). IMP-005 creates no theme or
+menu tables and supplies only the canonical content/destination contract (section 21) that later
+navigation composition targets. Recorded so this deferral is explicit and reviewable, not a silent
+scope move.
 
 ## 7. CMS must not become authority (LOCKED restatement)
 
@@ -272,9 +295,8 @@ Hard guarantees (each test-enforced, section 29):
   first segment (section 14). The reserved set is a code registry (single source), seeded from
   MASTER-REQUIREMENTS §3 prefixes + IMP-002 auth routes + framework paths (storage, up,
   favicon.ico, robots.txt, sitemap.xml) — validated at write time, not merely UI-hinted.
-- No menu item or redirect row may point INTO a protected prefix in a way that proxies a
-  protected resource (external link scheme allowlist; internal targets restricted to public
-  system prefixes or managed content).
+- CMS redirects use only canonical internal published paths; they cannot proxy protected
+  resources. CMS has no menu configuration (section 21).
 ```
 
 ## 9. Domain model / entity inventory
@@ -285,27 +307,28 @@ form is evaluated below and kept only where it is necessary to deliver those con
 
 ```
 LOCKED-derived entities:
-  Page            managed page identity                 -> cms_pages
-  Article         managed article identity (News: HD-05) -> cms_articles
-  ContentRevision append-only revision of either         -> cms_content_revisions
+  Page            managed page identity                       -> cms_pages
+  Article         managed article identity (News = its
+                  classification per Q33, no separate entity) -> cms_articles
+  ContentRevision append-only revision of either              -> cms_content_revisions
 
 Justified support entities (ENGINEERING CHOICE, required for the LOCKED entities to work):
-  MediaAsset      uploaded content media                 -> cms_media_assets
-  SlugHistory     redirect-on-slug-change (section 14)   -> cms_slug_history
-  Category        article/news grouping; the lightest device for the
-                  Article-vs-News question and public indexes -> cms_categories + cms_article_categories
+  MediaAsset      uploaded content media                      -> cms_media_assets
+  SlugHistory     redirect-on-slug-change (section 14)        -> cms_slug_history
+  Article classification: validated article_type on its revision (ARTICLE | NEWS), exposed
+                  through Article's selected revision; no taxonomy support entity.
 
-Conditional (only on the matching Human Decision):
-  Menu, MenuItem  (HD-02)                                -> cms_menus, cms_menu_items
-  Approval gate fields/states (HD-01)                    -> (no tables; reuses Approval module? NO —
-                                                            deferred: HD-01 defines the need first)
-  Translation rows (HD-03)                               -> (design sketch only, section 17)
+Human-Decision-resolved removals (NOT built in IMP-005):
+  Menu, MenuItem                    REMOVED — Q30 (deferred to IMP-006 presentation config)
+  Approval gate states/tables       REMOVED — Q29 (no editorial approval workflow in v1)
+  Translation rows / locale engine  REMOVED — Q31 (single-locale baseline; stable IDs and
+                                      explicit text ownership preserve additive compatibility)
+  Separate News entity              REMOVED — Q33 (classification of Article)
 
 Explicitly NOT modeled (rejected derivations, with reason):
-  Separate "News" table          — see HD-05; default recommendation is category/flag on Article.
-  Tag entity                     — no approved requirement; categories are sufficient for v1.
+  Tag entity                     — no approved requirement; article_type provides the required NEWS classification.
   ContentStatus entity           — lifecycle is a column + validated transition rules, not a table.
-  PublicationSchedule entity     — publish_at/unpublish_at columns on identity (HD-04), not a table.
+  PublicationSchedule entity     — publish_at/unpublish_at columns on identity (Q32), not a table.
   SeoMetadata entity             — columns on the revision (versioned with content), not a table.
   Redirect entity (generic)      — only slug-change redirects are justified (CMS-owned source
                                    routes); no wildcard/regex/user-defined redirects (no baseline).
@@ -346,21 +369,63 @@ RETIRED    -> ARCHIVED       (archive)         requires content.archive
 ARCHIVED   -> any            FORBIDDEN (restore = create new content; terminal, simple, audited)
 ```
 
-Optional extensions (each gated on its Human Decision):
+Human-locked baseline; engineering representation:
 
 ```
-SCHEDULED  (HD-04) — NOT a separate status column value: DRAFT/RETIRED rows with a future
-             publish_at/unpublish_at; a scheduler poll executes the normal publish/unpublish
-             service path (same guards, same audit events, cron-compatible, no new infrastructure).
-             Rejected alternative: an invented SCHEDULED lifecycle state — it duplicates the
-             pointer semantics and complicates every guard; derive scheduling from timestamps.
-IN_REVIEW / APPROVED (HD-01) — approval workflow NOT invented here: the baseline defines no
-             editorial approval requirement (Q13-Q15 approval matrices are financial/distribution/
-             withdrawal; the Approval module owns "approval mechanics" for domains that need it).
-             If HD-01 = none, publish separation (content.publish distinct from content.update)
-             remains the interim control. If HD-01 = required, it becomes an additive state pair
-             (DRAFT -> IN_REVIEW -> APPROVED|REJECTED -> PUBLISHED) with its own audit events and
-             a NEW spec patch before implementation — implementers must not build it on guesses.
+Q29: No IN_REVIEW/APPROVED states, reviewer queue, multi-step editorial approval, approval matrix
+     or workflow engine. content.create/content.update never imply content.publish. The approval
+     predicate is inapplicable for CMS only, using the canonical evaluator's existing semantics.
+Q31: SINGLE-LOCALE CONTENT BASELINE; no per-locale publication status or language switching.
+Q32: Nullable publish_at/unpublish_at on Page/Article express pending intent. No persistent
+     SCHEDULED state: timestamps avoid duplicating the existing lifecycle. This minimal state
+     representation is an ENGINEERING CHOICE under the Human decision.
+     Schedule creation/change/cancellation requires content.publish within scope; content edits
+     separately require content.update. A publisher needs no editorial review step.
+     PUBLISHED -> PUBLISHED replaces its current revision with a selected DRAFT through the same
+     publication service; it is not a new lifecycle state.
+```
+
+### Scheduled execution contract (Q32; engineering mechanics)
+
+```
+Ownership: PublicationService owns schedule configuration/execution. Laravel Scheduler invokes
+content:run-scheduled-transitions each minute through Cron, inline PHP in bounded batches.
+No Redis, Supervisor, PM2, WebSocket, production Node runtime or separate workers are required.
+
+Time: config/app.php uses UTC. Persist/compare UTC instants at database datetime precision.
+Accept explicit-offset ISO-8601 input, normalize to UTC, reject ambiguous timezone-less input.
+Admin input/display labels its timezone and converts explicitly; payloads serialize UTC. Capture
+one UTC cutoff per run; published_on is display metadata, never the scheduling clock.
+
+Human intent: lock the identity, authorize content.publish, validate lifecycle and save timestamps,
+schedule_version, scheduled_by_principal_id, scheduled_at and scheduled_revision_id. Publish binds
+to an owned DRAFT, or the retained published revision for RETIRED re-publication. Standalone
+unpublish requires PUBLISHED. New deadlines must be future; if both exist, unpublish_at must be
+later than publish_at. Unpublish-only intent binds scheduled_revision_id to the current published
+revision so its target/source is explicit; it cannot withdraw a later manual replacement. No scheduled archive. Increment schedule_version on configuration/change/
+cancellation; require expected version/revision on Human requests, rejecting stale requests 409.
+
+Revision binding: freeze a scheduled draft until an authorized publisher cancels/reschedules;
+content.update alone cannot change its body/title/slug/classification/media dependencies. Target
+must still belong to the identity and not be SUPERSEDED at execution. Immediate Human publish,
+unpublish or archive cancels pending intent atomically; stale cron cannot override that action.
+
+Execution: select due timestamps <= cutoff (not equality, so missed cron runs are caught).
+For each identity, one service-owned outermost transaction: lockForUpdate, re-read schedule version,
+state/timestamps, validate System and source Human eligibility (section 12), target and lifecycle,
+perform authorized transition, consume timestamps, append canonical audit and commit.
+Due publish: DRAFT/RETIRED -> PUBLISHED, or replace PUBLISHED with its bound new DRAFT.
+Due unpublish: PUBLISHED -> RETIRED. If both deadlines were missed, consume the expired window
+without briefly publishing: leave DRAFT/RETIRED nonpublic or retire existing PUBLISHED content;
+clear both timestamps, emit schedule_expired, plus unpublished only when retirement occurred.
+
+Idempotency/concurrency: every Human/scheduler writer locks the same identity; stale scheduler
+versions are no-ops. Consumed timestamps + state guards prevent duplicate mutation/event on rerun.
+Overlapping cron runs serialize per row; no infrastructure-dependent mutex is needed for safety.
+Canceled/archived/superseded/conflicting intent never forces publication. Invalid pending intent is
+blocked and operationally reported for publisher correction; transient failures leave due work
+pending. Business rollback preserves pending deadlines for next cron recovery. NON_CRITICAL audit
+failure follows IMP-004: never replay a committed transition just to recover a missing audit event.
 ```
 
 Transition discipline (LOCKED per IMP-003/004 patterns): invalid transitions are rejected in the
@@ -402,23 +467,33 @@ metadata allow-list, visibility class, actor constraints; unregistered event = h
 default fail-closed for unclassified; `NON_CRITICAL` is explicit opt-out; `security.authorization.denied`
 (DENIAL_DURABLE) already exists and covers unauthorized CMS attempts — no new denial event.
 
-Proposed CMS event set (justification per event; nothing blindly copied):
+CMS event classification (ENGINEERING CHOICE applying Q26/IMP-004):
 
-| event_type (v1) | crit. | strategy | subject | justification |
+| event_type (v1) | crit. | strategy | subject | justification / failure consequence |
 |---|---|---|---|---|
-| `content.page.created` | NON_CRITICAL | — | page | routine authoring; visibility-neutral |
-| `content.page.updated` | NON_CRITICAL | — | page | draft edits; content data in audit metadata is prohibited anyway |
-| `content.page.published` | CRITICAL | MUTATION_ATOMIC | page | changes public trust surface (defacement vector) |
-| `content.page.unpublished` | CRITICAL | MUTATION_ATOMIC | page | withdraws public visibility |
-| `content.page.archived` | CRITICAL | MUTATION_ATOMIC | page | destructive-class lifecycle (terminal) |
-| `content.article.created` | NON_CRITICAL | — | article | same as page |
-| `content.article.updated` | NON_CRITICAL | — | article | same as page |
-| `content.article.published` | CRITICAL | MUTATION_ATOMIC | article | public visibility change |
-| `content.article.unpublished` | CRITICAL | MUTATION_ATOMIC | article | visibility withdrawal |
-| `content.article.archived` | CRITICAL | MUTATION_ATOMIC | article | destructive-class lifecycle |
-| `content.media.uploaded` | NON_CRITICAL | — | media asset | high volume; intake is not itself a trust change |
-| `content.media.deleted` | CRITICAL | MUTATION_ATOMIC | media asset | destroys shared content dependency; security-relevant removal |
-| `content.menu.updated` | CRITICAL | MUTATION_ATOMIC | menu | **only if HD-02 YES** — navigation is a public link/phishing surface |
+| `content.page.created` | NON_CRITICAL | neither | page | Draft creation changes no authority; commit may survive reported audit loss. |
+| `content.page.updated` | NON_CRITICAL | neither | page | Draft edits preserve public history; no security/governance authority mutation. |
+| `content.page.published` | NON_CRITICAL | neither | page | Generic public content grants no backend authority; revision evidence persists, so reported audit loss need not block publishing. |
+| `content.page.unpublished` | NON_CRITICAL | neither | page | Ordinary content withdrawal changes no authority; audit outage must not prevent withdrawal. |
+| `content.page.archived` | NON_CRITICAL | neither | page | Terminal state preserves identities/revisions; it does not destroy security or financial evidence. |
+| `content.article.created` | NON_CRITICAL | neither | article | Editorial draft creation including NEWS has no authority consequence. |
+| `content.article.updated` | NON_CRITICAL | neither | article | Draft/classification edits retain history; classification is not authorization. |
+| `content.article.published` | NON_CRITICAL | neither | article | Editorial publication including NEWS has the same non-authority consequence as Page. |
+| `content.article.unpublished` | NON_CRITICAL | neither | article | Editorial withdrawal can safely commit during reported audit failure. |
+| `content.article.archived` | NON_CRITICAL | neither | article | Retains identity/history; terminal content state alone is not security-critical evidence. |
+| `content.media.uploaded` | NON_CRITICAL | neither | media asset | Validated public media intake grants no authority; validation remains fail-closed independently. |
+| `content.media.deleted` | NON_CRITICAL | neither | media asset | Only unreferenced public CMS media is removed; row remains and sensitive/evidentiary files are outside CMS. |
+| `content.page.schedule_updated` | NON_CRITICAL | neither | page | Authorized content intent/source persists in the row even if audit fails; creates no principal authority. |
+| `content.article.schedule_updated` | NON_CRITICAL | neither | article | Same bounded durable intent including NEWS; reported audit loss can be accepted. |
+| `content.page.schedule_expired` | NON_CRITICAL | neither | page | Consumes an expired window without disclosure or security/authority mutation. |
+| `content.article.schedule_expired` | NON_CRITICAL | neither | article | Same expired-window handling for Article, with no separate News authority. |
+
+All listed content mutations may commit on reported NON_CRITICAL audit persistence failure.
+Public visibility and terminal state alone do not justify CRITICAL inflation. Security-critical
+unauthorized attempts retain `security.authorization.denied`, CRITICAL/DENIAL_DURABLE: evidence
+concerns attempted unauthorized authority use; DENY stays DENY on audit failure. IMP-004 is unchanged.
+Registry actor constraints: Human for authoring/schedule_updated; Human or System for publish/
+unpublish and media cleanup; System for schedule_expired. No menu or separate News events.
 
 Explicitly NOT registered: `cms.page.deleted_or_archived` as a hard-delete event (hard deletes of
 managed content are forbidden, section 27); `content.revision.*` beyond publish flows (revision
@@ -431,13 +506,17 @@ Per-event definition template (all registry-owned axes must be present; example 
 ```
 event_type            content.page.published
 event_version         1
-criticality           CRITICAL
-persistence_strategy  MUTATION_ATOMIC
+criticality           NON_CRITICAL
+persistence_strategy  neither (null; IMP-004 non-critical semantics)
 visibility_class      general   (read requires audit.read; no financial refs — never set those fields)
 subject_type          cms_page  (subject_id = page BIGINT id; not nullable)
-actor kinds           user principal (authenticated admin actor); kind fixed by registry
+actor kinds           human principal (authenticated admin actor) OR system principal for the
+                      Q32 scheduler-executed transition (see "Scheduled transition attribution"
+                      below); kinds fixed by the registry entry, never by the caller
 required metadata allow-list:
     revision_id (int)  from_status (string)  to_status (string)  slug (string)  is_homepage (int 0/1)
+    schedule_version (int), scheduled_at (UTC string), scheduled_revision_id (int),
+    publish_at/unpublish_at (UTC strings where applicable), scheduled_by_principal_id (int; required for scheduled transitions)
     — content body / media bytes are NEVER metadata; hard-prohibited-key rule applies unchanged
 assurance at write    STANDARD unless security policy classifies publish as high-risk later
                       (AUTHENTICATION-ASSURANCE's enumerated high-risk categories do not include
@@ -446,10 +525,35 @@ source_event_id       omitted (local producer, like the 28 migrated events — n
                       identity to deduplicate against)
 ```
 
+Scheduled transition attribution (Q32; IMP-004 Canonical Actor / IMP-003 catalog):
+
+```
+- Reference seeding registers content.scheduler in system_principals AND its linked principals
+  row, using existing lifecycle/grant mechanisms. Explicit content.publish + ORGANIZATION grant
+  is required; catalog code alone is not authority. No new actor kind or audit sink.
+- actor_principal_kind = system on execution; actor_principal_id = principals.id, NEVER the
+  system_principals catalog id. Schedule configuration records the real Human actor, without
+  impersonation. Execution metadata links subject + schedule_version + scheduled_at + selected
+  revision + scheduled_by_principal_id to the durable source intent.
+- The active System Principal passes the canonical evaluator: explicit permission, scope,
+  restriction and resource checks, with existing System context semantics (no fake user session).
+  Revalidate source Human eligibility for content.publish in the same scope/restriction context;
+  if no longer eligible, block until a currently authorized Human cancels/replaces the schedule.
+  Both existing Human intent and current checks must hold; Cron creates no new business authority.
+- Actual security-critical denials use the existing denial contract after releasing transaction
+  locks. State no-ops are not denials; there is no blanket authorization exemption for execution.
+- Schedule_updated has Human actor and operation (configured/rescheduled/cancelled); registry
+  metadata allow-list includes the schedule source/version/revision/timestamps above. Scheduled
+  publication/unpublication/expiry requires these source fields; unrelated manual events omit them.
+- State/version/consumed timestamps provide business idempotency (section 10). source_event_id
+  is omitted: the durable source is not an audit-record FK, since a NON_CRITICAL intent event may
+  be lost while its persisted source fields survive.
+```
+
 Non-critical persistence follows IMP-004 §"Non-Critical Events" exactly (best-effort, logged as
 `audit_write_failed`, never queued, never blocks the authoring flow).
 
-## 13. Database architecture (DRAFT — no migrations in this task)
+## 13. Database architecture sketch (no migrations in this task)
 
 Conventions (LOCKED): BIGINT unsigned PK/FK; ULID public identifiers; `utf8mb4`; DECIMAL never
 needed (no money in CMS); strong referential integrity; MySQL 8.x primary target with SQLite test
@@ -477,21 +581,29 @@ columns            title (string 255), status (string 16: DRAFT|PUBLISHED|RETIRE
                    is_homepage (TINYINT bool default 0) + generated column homepage_uniq
                    (nullable, = id WHEN is_homepage=1) UNIQUE — at most one homepage, enforced by
                    DB on both engines (unique index ignores NULLs),
-                   publish_at / unpublish_at (nullable datetimes — present only if HD-04 YES),
+                   publish_at / unpublish_at (nullable datetimes — Q32 LOCKED scheduling columns;
+                     due-timestamp execution via scheduler, section 10),
+                   schedule_version BIGINT UNSIGNED NOT NULL default 0,
+                   scheduled_by_principal_id FK principals nullable RESTRICT, scheduled_at nullable,
+                   scheduled_revision_id FK cms_content_revisions nullable RESTRICT; active intent
+                   requires source Human/timestamp and publish intent requires owner-matching
+                   target revision (service guards); consumed intent retains source fields until
+                   the next authorized schedule change,
                    created_by_principal_id FK principals RESTRICT, updated_by_principal_id FK
                    principals RESTRICT
 unique             (slug) among non-ARCHIVED rows via DB: enforced with a nullable generated
                    "active_slug" column (= slug unless status=ARCHIVED) + UNIQUE index, so an
                    archived page frees its slug while keeping history — MySQL 8 & SQLite 3.35+
                    both support this; validated in the §29 matrix
-indexes            (status), (updated_at), active_slug unique (above)
+indexes            (status), (updated_at), (publish_at, id), (unpublish_at, id), active_slug unique (above)
 soft-delete        NONE — ARCHIVED status is the lifecycle; no deleted_at duplication
 security           ULID used in URLs/admin payloads; BIGINT id stays internal (IDOR surface reduced)
 ```
 
 ### `cms_articles`
 ```
-Same shape as cms_pages (title, status, pointers, is_homepage absent, slug unique among non-ARCHIVED
+Same shape as cms_pages (title, status, pointers, scheduling timestamps/source/version fields
+and due indexes; is_homepage/homepage_uniq absent; slug unique among non-ARCHIVED
 scoped to the article namespace: active_slug stores '<article_prefix>/'.slug with prefix from
 config — prefix itself must avoid reserved first segments at config boot).
 extra columns:   excerpt (string 511, nullable), published_on (date nullable) — display metadata,
@@ -508,6 +620,11 @@ owner              page_id (FK cms_pages RESTRICT, nullable) XOR article_id (FK 
                      soft polymorphic (type,id) pair; SQLite enforces CHECK as well
 columns            revision_no (BIGINT, per-owner increasing), state (DRAFT|PUBLISHED|SUPERSEDED),
                    title (string 255 — versioned: titles change with revisions),
+                   article_type (string 16; ARTICLE|NEWS for Article, NULL for Page),
+                   CHECK: Page owner => NULL; Article owner => ARTICLE or NEWS; new Article
+                   drafts default ARTICLE, service + DB validation rejects unknown values,
+                   slug (string 191; requested canonical slug snapshot, validated by SlugService;
+                     publication moves identity.slug atomically; frozen with a scheduled draft),
                    body_html (LONGTEXT, sanitized per section 20),
                    meta_title (string 255 null), meta_description (string 511 null),
                    og_title (string 255 null), og_description (string 511 null),
@@ -546,18 +663,14 @@ indexes            (sha256), (status), (mime_type), (uploaded_by, archived_at)
 deletion           archive-only row lifecycle (section 27); physical purge separate, never FK-linked
 ```
 
-### `cms_categories`
-```
-purpose            article grouping (and the Article/News taxonomy device pending HD-05)
-pk                 id; ulid; name (string 127), slug (string 191, unique among non-ARCHIVED via
-                   same generated-column pattern), description nullable, parent_id self-FK nullable
-                   RESTRICT (one level of nesting allowed by validation — no unbounded trees)
-```
+### Article classification (Q33; minimal engineering representation)
 
-### `cms_article_categories`
-```
-pivot: article_id FK RESTRICT, category_id FK RESTRICT, composite PK (article_id, category_id)
-```
+Article exposes `article_type` through its selected revision. Public listing/filtering uses only
+the published revision's ARTICLE/NEWS value; draft classification cannot change public listings.
+News shares Article revisions, publication, authorization, audit, slugs, scheduling, lifecycle
+and SEO. No categories/pivot, generic taxonomy engine, News table or NewsService is required.
+Additional classification values need a justified specification/change-control update. This
+unification covers generic editorial content only; classification carries no security authority.
 
 ### `cms_slug_history`
 ```
@@ -572,19 +685,17 @@ rules              rows are written ONLY by the publish/slug-change services (sy
                    the old path 404s (no dangling redirects to non-content)
 ```
 
-### Conditional tables (HD-gated — spec sketch only, NOT built unless approved)
+### Human-Decision-resolved exclusions (recorded; NOT built)
 ```
-cms_menus          id, ulid, code (string 64 UNIQUE — semantic location key like 'primary'), name,
-                   status DRAFT|PUBLISHED; cms_menu_items: id, menu_id FK CASCADE (items belong to
-                   the menu), parent_id self-FK RESTRICT, label (string 191), target_type
-                   (PAGE|EXTERNAL), page_id FK RESTRICT null, url string null (CHECK pair with
-                   type), sort_order (INT), enabled (TINYINT); max depth validated = 2.
-content approvals  NO tables in this spec — HD-01 must first decide whether approval is required;
-                   if YES, a spec patch defines storage before implementation (baseline gives no
-                   design license here).
-translations       HD-03 only: recommended shape = locale column on cms_content_revisions +
-                   per-locale pointers on identity (draft_published per locale); NO new identity
-                   rows. Design sketch only.
+cms_menus / cms_menu_items   NOT created in IMP-005 — Q30 defers menu/navigation presentation
+                             configuration to IMP-006, where the module's "Theme presentation
+                             configuration" ownership lands. IMP-005 contributes only the stable
+                             destination contract (section 21) that such composition will target.
+Content approval storage     NOT created — Q29 (no editorial approval workflow in v1: no tables,
+                             no reviewer queue, no Approval-module integration, no approval states).
+Translation/locale tables    NOT created per Q31: no locale columns, localized revisions, locale
+                             indexes/pointers, translation joins or fallback trees.
+News / taxonomy tables       NOT created: Q33 uses Article revision classification.
 ```
 
 ### Full-text note
@@ -603,7 +714,7 @@ Normalization (deterministic, code-owned service):
   the create/update returns 422 with the suggested alternative shown by the client.
 Uniqueness scope:
   pages — global across all active (non-ARCHIVED) pages (single root domain => one global path
-  namespace); articles — global within the configured article prefix; categories — own namespace;
+  namespace); articles — global within the configured article prefix; no locale uniqueness scope;
   slug_history old_paths — global among active rows.
   DB-enforced per section 13 generated-column uniques; service re-checks inside the transaction.
 Reserved (NEVER claimable, code registry, validated on write AND asserted at boot):
@@ -645,6 +756,8 @@ Partner (IMP-018): Partner Profile content belongs to Partner domain (MODULE-OWN
   CMS manages only org-wide content about partners (e.g. a partner-program explainer page).
   No partner-owned content rows, no partner scope on cms_* tables.
 Fundraiser (IMP-013): same rule via MODULE-OWNERSHIP §5 (Fundraiser Profile is Fundraising domain).
+Beneficiary, Distribution, Impact, Donation and financial domains retain canonical data and
+  lifecycle/authority in their own modules; generic Article classification cannot absorb them.
 Donor-facing notices: global CMS content under ORGANIZATION ownership — allowed (pages/articles).
 Public projections rule (MODULE-OWNERSHIP §2): any future "latest campaigns block" style feature
   consumes a controlled projection PROVIDED by the business domain — the projection contract is
@@ -655,13 +768,16 @@ Public projections rule (MODULE-OWNERSHIP §2): any future "latest campaigns blo
 ## 17. Localization
 
 ```
-The materialized baseline (Levels 1-4) specifies NO multilingual content requirement. The app UI
-locale stack (en/id via Laravel localization) is not a content-translation requirement.
-=> HD-03. Recommended default: IMP-005 ships SINGLE-LOCALE content; the revision table already
-   carries content per-row, so an additive `locale CHAR(5) DEFAULT 'id'` + per-locale pointers
-   (sketch in section 13) is the reserved growth path — no rewrite needed if a later decision adds
-   it. Localized slugs and per-locale publication status are undefined until HD-03 exists; do not
-   design them now.
+RESOLVED — Q31 (LOCKED, Level 1): CMS v1 uses a SINGLE-LOCALE content baseline.
+- No translation tables, no locale-specific publication workflow, no localized-slug framework,
+  no fallback engine in IMP-005 (restated in section 4/13).
+- The app UI locale stack (en/id via Laravel localization) remains an interface concern and is
+  NOT a content-translation requirement.
+- ADDITIVE-READY (Q31) means stable non-language-specific IDs and explicit revision text-field
+  ownership. No speculative locale columns, localized revisions, translation joins, per-locale
+  pointers/indexes, fallback trees or language-switching logic; future design is not prescribed.
+- Any move to multilingual content requires its own future Human Decision + stage/change control
+  (Q31); nothing here pre-empts it, and nothing here implements it.
 ```
 
 ## 18. Services
@@ -673,8 +789,11 @@ service-transactional with in-transaction audit append (house pattern from IMP-0
   PageService / ArticleService   create/update identity + active draft revision (guard:
                                  permissions via policies, slug validation, sanitization hook)
   PublicationService             publish / unpublish / retire / archive / republish; revision swap
-                                 transaction (section 26); scheduling executor invoked by scheduler
-                                 (HD-04); homepage assignment here (singleton guard)
+                                 transaction (section 26); scheduled-transition executor invoked by
+                                 the Laravel Scheduler (Q32; console command
+                                 content:run-scheduled-transitions, running as the cataloged
+                                 content.scheduler System Principal — section 12 attribution);
+                                 homepage assignment here (singleton guard)
   RevisionService                revision reads/history listing; rollback-by-copy (creates new
                                  draft revision, never rewrites history)
   SlugService                    normalization + reserved-registry check + uniqueness check +
@@ -687,10 +806,9 @@ service-transactional with in-transaction audit append (house pattern from IMP-0
   ContentSanitizer               input body -> allow-listed body (section 20); pure, unit-tested
   ContentResolverService         public read path: path -> published page (or slug_history 301)
                                  -> presentation-neutral payload for web/theme contract
-  MenuService                    (HD-02 only) CRUD + reorder transaction + publication pointer
 Controllers (thin): Http/Controllers/Admin/Content/* (Inertia, fixed backoffice) and
 Http/Controllers/Content/PublicContentController (catch-all resolver + media token resolution).
-Policies: ContentPagePolicy, ContentArticlePolicy, MediaPolicy, (MenuPolicy) — each delegates to
+Policies: ContentPagePolicy, ContentArticlePolicy, MediaPolicy — each delegates to
 the canonical IMP-003 AuthorizationEvaluator (never bare role checks).
 ```
 
@@ -738,7 +856,7 @@ Duplicate handling: sha256 computed; if an ACTIVE asset with same hash exists, t
   the duplicate (operator chooses); no silent dedupe.
 Media deletion: blocked while ANY non-ARCHIVED page/article (draft or published) body references
   the media token (query at delete time — authoritative check inside the delete transaction with
-  row locks on referencing identity rows); on delete success (CRITICAL audit
+  row locks on referencing identity rows); on delete success (NON_CRITICAL audit
   content.media.deleted) row -> ARCHIVED, file purged later by the cleanup scheduler.
 Orphan cleanup: scheduled command (cron, shared-hosting compatible) archives rows whose owner
   content is ARCHIVED/absent AND no references remain, then physically deletes files after a
@@ -781,20 +899,17 @@ Implementation mechanism: dedicated well-maintained sanitizer library (e.g. HTML
   pass identically on both engines.
 ```
 
-## 21. Navigation (HD-02 gated)
+## 21. Neutral destinations; navigation deferred (Q30)
 
-```
-If approved: menus as section 13 sketch. Validation: external targets https-only in v1 (no http
-override flag); internal targets must resolve to a
-published page or an allowed public system prefix — menus CANNOT target protected prefixes;
-hierarchy depth 2 max; sort_order integers reorder via single transaction (section 26);
-enabled flag per item; labels plain-text validated.
-LOCKED principle regardless of HD-02 answer: navigation visibility is NOT authorization —
-  hiding a menu item never grants or restricts access; the backend AND-chain is the only gate;
-  menu management grants no domain authority (menu update permission is content-domain only,
-  GENERAL visibility audit, no security/financial refs).
-Locale on menu items: undefined until HD-03; v1 menus are single-locale.
-```
+IMP-005 exposes Page/Article stable ULIDs, canonical slugs/paths and neutral destinations
+`{content_id, content_kind, canonical_path, title}` for currently published content. It stores no
+menu rows, labels/order/hierarchy/layout configuration or theme-specific rendering options.
+No MenuService, NavigationBuilder, menu builder or composition engine. IMP-006 owns menu/navigation
+presentation, theme selection, templates and Section/Component/Block presentation structures;
+their database design and implementation are outside IMP-005.
+
+Navigation visibility never grants or restricts backend authorization. Destinations are links,
+not access tokens; protected resources always apply their own server-side authorization.
 
 ## 22. Authorization
 
@@ -810,7 +925,7 @@ capability with CMS-appropriate terms:
       (BUSINESS-AUTHORITY-MODEL lists only financial/refund/withdrawal/distribution/zakat/
       partner_verifier/beneficiary_verifier; inventing a 'content_authority' type is FORBIDDEN)
   AND Valid Resource State — transition guards (section 10) e.g. publish only from DRAFT/RETIRED
-  AND Required Approval State — only if HD-01 introduces one (undefined today => not built)
+  AND Required Approval State — inapplicable to CMS v1 per Q29; no reviewer workflow
   AND Authentication Assurance — STANDARD for all CMS capabilities (AUTHENTICATION-ASSURANCE's
       high-risk categories are financial/security/authority configuration; CMS publishing is not
       listed; do not require ELEVATED without a policy source)
@@ -835,9 +950,9 @@ content.view             read/manage-list pages, articles, revisions, history, m
                          browse plane)                    — READ
 content.create           create pages/articles (+drafts)  — EDIT
 content.update           edit drafts, replace draft revision, slug/title changes on non-published,
-                         media metadata, (menu item edits if HD-02) — EDIT
-content.publish          publish / unpublish / re-publish (+ scheduled executor authority,
-                         homepage assignment)             — PUBLICATION (separate from edit)
+                         media metadata (cannot alter a bound scheduled draft) — EDIT
+content.publish          publish / unpublish / re-publish; schedule configuration/change/
+                         cancellation and guarded System execution; homepage assignment             — PUBLICATION (separate from edit)
 content.archive          archive (terminal lifecycle) + media delete/replace-with-removal —
                          DESTRUCTIVE (separate from publish)
 content.media.upload     upload intake only               — EDIT-plane, kept separate (upload is
@@ -846,8 +961,8 @@ content.media.upload     upload intake only               — EDIT-plane, kept s
 
 Rejected as unnecessary v1: per-entity permission explosion (page/article/media/menu triples),
 seo.* (SEO fields ride the revision under content.update/publish), `cms.page.delete` (hard delete
-does not exist), menu separate set unless HD-02 (then `content.menu.view`/`content.menu.update`
-reusing content.publish for menu publication pointer). Four planes kept distinct:
+does not exist), editorial-review, menu/theme and language/translation permissions.
+Four planes kept distinct:
 read / edit / publish / destructive.
 
 ## 24. Search, API, frontend contracts (boundaries)
@@ -855,7 +970,7 @@ read / edit / publish / destructive.
 ```
 SEARCH (IMP-026 owns the framework):
   IMP-005 declares the searchable-content contract ONLY:
-    entities: page(title, body, meta_description), article(title, excerpt, body, category names)
+    entities: page(title, body, meta_description), article(title, excerpt, body, article_type)
     predicate: CURRENTLY PUBLISHED revisions only
     no index building, no queue infrastructure, no search UI, no Elasticsearch (LOCKED hosting).
     A later stage may add FULLTEXT on revision columns behind a compatibility migration.
@@ -866,67 +981,36 @@ API (IMP-025 owns REST):
   The section 18 service layer IS the future REST surface's boundary — controllers stay thin so
   IMP-025 can bind to the same services without new business logic.
 FRONTEND (public website): IMP-005 defines the content payload contract for rendering
-  (PublishedContent: title, sanitized body with unresolved media tokens, meta set, canonical path)
+  (PublishedContent: stable ULID/kind, title, sanitized body with unresolved media tokens, meta set,
+  canonical path, Article article_type); single-locale, no translated payload or locale parameter
   and NOTHING about templates/themes (IMP-006). Mobile-first rules belong to the website/theme
   stages. No page-builder UI (unauthorized).
 ```
 
-## 25. HUMAN DECISIONS (genuine; answers withheld deliberately)
+## 25. HUMAN DECISIONS - FINAL / LOCKED
 
-Each has: question, why architecture cannot resolve it, options, impact, recommended default.
-**No answer in this section is locked. Implementation must not proceed past any unanswered item.**
+Provenance: the Human supplied all five final decisions directly in the task
+"IMP-005 CMS - HUMAN DECISION MATERIALIZATION PATCH". These are Human decisions, not engineering
+choices. Q29-Q33 materialize them in the Level 1 Human Decision Register. Earlier options are
+superseded and define no conditional implementation scope.
+
+| Decision | Status | Final baseline | Register |
+|---|---|---|---|
+| HD-IMP005-01 | FINAL / LOCKED | No dedicated editorial approval workflow; author/edit separate from publish | Q29 |
+| HD-IMP005-02 | FINAL / LOCKED | Menu/navigation presentation deferred to IMP-006 | Q30 |
+| HD-IMP005-03 | FINAL / LOCKED | SINGLE-LOCALE CONTENT BASELINE; no speculative multilingual infrastructure | Q31 |
+| HD-IMP005-04 | FINAL / LOCKED | Minimal scheduled publish/unpublish through Laravel Scheduler + Cron | Q32 |
+| HD-IMP005-05 | FINAL / LOCKED | Article canonical; News classification; no duplicated mechanisms | Q33 |
 
 ```
-HD-IMP005-01 — Editorial approval workflow for publishing?
-  Why unresolved: no Level 1-4 source defines a content review/approval requirement; the Approval
-  module owns mechanics but no authority/threshold for content exists; inventing a workflow would
-  create an unauthorized business rule.
-  Options: (a) none — rely on permission separation (update vs publish); (b) required review step
-  for specific content classes; (c) configurable matrix (Q13-style) deferred to a later stage.
-  Impact: lifecycle states, tables?, audit events, permission count, org workflow reality.
-  Recommended default: (a) for v1.
-
-HD-IMP005-02 — Is menu/navigation management part of the approved product, or deferred?
-  Why unresolved: navigation is not in the materialized ownership list; public sites need
-  navigation data, but whether admins manage it (vs theme-side static config in IMP-006) is a
-  product decision.
-  Options: (a) minimal menus in IMP-005 (sketch exists); (b) navigation config deferred to
-  IMP-006's presentation-config ownership; (c) hardcoded nav until demanded.
-  Impact: 2 tables + 3-4 events + 2 permissions, or their absence.
-  Recommended default: (b) — keep IMP-005 lean and let the Theme Engine stage own presentation
-  configuration, since Content Experience's "Theme presentation configuration" line plausibly
-  covers menus.
-
-HD-IMP005-03 — Is multilingual CMS content required in v1?
-  Why unresolved: baseline silent (Indonesia-market signals exist but no approved requirement).
-  Options: (a) single locale now, additive translation path reserved; (b) v1 translations with
-  per-locale publication + localized slugs (materially larger spec).
-  Impact: schema (locale column + pointers), slug uniqueness scope, resolver, admin UX, tests.
-  Recommended default: (a).
-
-HD-IMP005-04 — Scheduled publish/unpublish in v1?
-  Why unresolved: task lifecycle analysis names SCHEDULED but no Level 1-4 requirement exists;
-  it is cheap and cron-compatible yet is a product capability.
-  Options: (a) yes, minimal (timestamp columns + scheduler poll); (b) no — manual publish only.
-  Impact: 2 nullable columns, scheduler entry, 1 guard set; zero if (b).
-  Recommended default: (a).
-
-HD-IMP005-05 — Is "News" a distinct content entity or a classification of Article?
-  Why unresolved: MODULE-OWNERSHIP lists Article and News as separate ownership bullets but no
-  supplied source defines differing rules/fields; merging without confirmation reinterprets the
-  list; splitting risks two near-identical tables with no basis.
-  Options: (a) one Article entity + category taxonomy covers News; (b) dedicated News type/flag on
-  Article; (c) separate table (requires a requirement source).
-  Impact: entity count, slug namespaces, admin screens, event naming (content.news.* appears only
-  if News is its own identity).
-  Recommended default: (a).
+Human Decisions Required: 0
+OPEN HUMAN DECISIONS: 0
+Specification: READY FOR INDEPENDENT SPECIFICATION REVIEW
+Implementation: NOT AUTHORIZED
 ```
 
-Explicitly NOT raised (architecture resolves them — do not pollute the decision register):
-Partner/Fundraiser-owned content (section 16, locked), SEO field set (supporting metadata),
-media limits (config bounds), sanitizer mechanism criteria (dependency governance), storage disk
-choice (framework), homepage assignment mechanism, event criticality (classification table with
-justifications), private-file handling (out of domain by construction).
+Timestamp/state and classification representation are engineering details under these Human
+choices. Implementation, merge, push and IMP-006 work require separate authorization.
 
 ## 26. Concurrency & transaction boundaries
 
@@ -945,7 +1029,8 @@ Named transactional flows:
     id-ascending order — deadlock-safe sequencing mirrors IMP-004 "Transaction Placement") ->
     audit -> commit.
   homepage assign: lock both rows (old + new) in id order -> flip flags -> commit.
-  menu reorder (HD-02): single transaction updating sort_order set + menu pointer -> audit.
+  schedule configuration/execution: lock identity -> version/revision + authorization guards ->
+    source/deadlines or due transition/consumption -> canonical audit -> commit (section 10).
   upload: media row insert + audit -> commit (file written to disk BEFORE the row; a failed
     transaction leaves an orphan file which the cleanup scheduler reclaims — documented, bounded).
 Concurrency conflicts (two tabs publish same page): last-writer rejected on revision-state
@@ -990,16 +1075,16 @@ SSRF via remote media/import
                            no remote-URL import feature exists in v1 (capability deleted at design
                            time — strongest mitigation)
 open redirect              redirect targets are system-written internal paths only (sections 14,
-                           21); external menu links https + rel="noopener noreferrer"
+                           21); no CMS menu configuration
 privilege escalation through publish
-                           publish is its own permission + CRITICAL audit + resource-state guards;
+                           publish is its own permission + canonical audit + resource-state guards;
                            publishing grants no other domain authority (section 7 structural rule)
 IDOR                      ULID public ids; policy checks before any BIGINT-keyed lookup; enumeration
                            tests (section 29 security set)
 CSRF                      existing session/Inertia CSRF posture (IMP-001/002 middleware) on all
                            admin mutations; no GET state-change endpoints
 content spoofing (unauthorized public change)
-                           section 12 CRITICAL publish/unpublish fail-closed audit + attribution
+                           server authorization + revision binding + section 12 canonical audit attribution
                            (actor principal id always)
 unsafe SVG                 rejected upload (section 19)
 excessive file upload      size ceilings + throttle per principal + cleanup scheduler bounds
@@ -1021,32 +1106,44 @@ UNIT
   immutability guards; homepage singleton rule; ULID generation.
 FEATURE
   page CRUD happy/denied; publish/unpublish/republish/archive; scheduled publish executor
-  (HD-04); rollback-by-copy; slug change writes history + 301 resolution; 404 for retired;
-  article/category flows; upload intake (valid png/jpg/pdf + rejected .php, .svg, mismatched
-  mime, oversized, dimensions); media delete blocked-while-referenced then allowed; menu reorder
-  (HD-02); admin listing pagination/filters; media token resolution in public render payload.
+  (Q32); rollback-by-copy; slug change writes history + 301 resolution; 404 for retired;
+  Article/NEWS classification flows; upload intake (valid png/jpg/pdf + rejected .php, .svg, mismatched
+  mime, oversized, dimensions); media delete blocked-while-referenced then allowed; admin listing pagination/filters; media token resolution in public render payload.
 AUTHORIZATION (mandatory matrix per DEFINITION-OF-DONE "Mandatory RBAC Tests", applied to each
   content.* capability): authorized->ALLOW; unauthenticated->DENY; wrong permission->DENY;
   correct permission wrong scope->DENY; wrong resource state->DENY; missing identity.active->DENY;
-  cross-context (another principal's draft) ->DENY; SUPER ADMIN WITHOUT explicit content.publish
+  unrelated Partner/Fundraiser context ->DENY; SUPER ADMIN WITHOUT explicit content.publish
   grant attempt publish -> DENY (proves no evaluator bypass).
 SECURITY
   stored-XSS payloads (event handlers, javascript: hrefs, svg/script/iframe bodies, polyglot
   files); protected-route collision create (slug 'admin', 'api/v1', 'campaign/x', 'login'...) ->
   422; attempt direct storage URL of archived media; IDOR (ULID enumeration, foreign draft ids);
   publish without permission via forged request payloads (pointer/status fields stripped);
-  CSRF absence -> 419; audit CRITICAL forced-failure -> business rollback (IMP-004 test shape,
-  reused); NON_CRITICAL audit forced-failure -> business SURVIVES + error logged.
+  CSRF absence -> 419; CRITICAL security denial forced-failure -> DENY remains DENY + error
+  reported; every NON_CRITICAL content event forced-failure -> business SURVIVES + error logged.
 AUDIT INTEGRATION (task §35)
   every authorized mutation -> exact registry event (event_type+version+criticality+metadata
   allow-list compliance) via canonical sink; every unauthorized attempt -> NO business mutation
   (+ security.authorization.denied where the IMP-004 denial path applies); criticality behaves
   per registry (no caller override); unregistered CMS event attempt -> hard error.
+HUMAN DECISION COVERAGE
+  editor with create/update but no publish cannot publish/schedule/reschedule/cancel; publisher
+  within scope succeeds without reviewer queue/approval. Wrong scope is denied.
+  Future publish stays invisible until successful due execution; due unpublish withdraws;
+  overlapping/repeated cron is idempotent; next cron catches missed work; both-deadlines-missed
+  never briefly exposes expired content. Archived/superseded/canceled/stale/manual-conflicting
+  intent cannot force a transition. Bound draft edits are rejected; inactive System/source Human
+  and missing grants block execution. Check UTC conversion, offset input, canonical System FK,
+  source metadata, rollback recovery and no replay after NON_CRITICAL audit failure.
+  NEWS filtering uses published Article classification, rejects invalid values, shares all Article
+  policies/lifecycle/revision/audit/SEO/scheduling. No News-specific authority or lifecycle path.
+  CMS cannot configure theme navigation; no menu/theme tables/services/permissions. No localization
+  endpoints/tables/columns/workflows. Navigation never substitutes backend authorization.
 DATABASE MATRIX
   the whole suite on SQLite (default) AND MySQL 8.x (disposable test DB per house convention);
   MySQL-specific emphasis: CHECK constraint enforcement, generated-column unique tricks,
   concurrent publish (two connections -> one 409), utf8mb4 slug transliteration edges,
-  row-lock deadlock-free reorder test; no test may rely on SQLite-only semantics for any §13
+  row-lock concurrent schedule/manual-publication tests; no test may rely on SQLite-only semantics for any §13
   constraint.
 REGRESSION
   permission seeder idempotency; audit registry counts (new entries additive-only, versions
@@ -1078,9 +1175,10 @@ the catch-all web route (same app) and storage symlink serving (standard Laravel
 
 ```
 AC-01  All §13 tables exist via migrations with the stated constraints on BOTH engines; no
-       migration touches any non-cms_* table except registry/permission seed additions.
+       schema migration touches non-cms_* tables; registry/permission and linked scheduler
+       principal/grant reference data use established seed mechanisms only.
 AC-02  Lifecycle transitions behave exactly per §10 including rejection of illegal edges;
-       HD-gated features present iff their HD was answered YES (reviewer checks HD linkage).
+       scheduling and missed-window recovery are included; no reviewer workflow/SCHEDULED status.
 AC-03  Every §12 event is registered (correct axes) and emitted ONLY via canonical sink; no
        caller-side criticality/visibility/strategy supply exists in code.
 AC-04  content.* permissions registered per §23; policies per §22; zero role-name predicates
@@ -1091,7 +1189,8 @@ AC-06  Sanitizer blocks every §28 XSS vector sample; stored bodies are always p
 AC-07  Media pipeline rejects executables/SVG/mismatched-mime/oversized per §19; only generated
        filenames reach disk; referenced-media delete blocked; cleanup scheduler reclaims orphans.
 AC-08  No FK from any cms_* table to financial/business-domain tables; no CMS code path reads or
-       writes ledger/payment/donation/rbac state (structure test/grep gate).
+       writes ledger/payment/donation state or mutates RBAC runtime authority (structure test/grep
+       gate); consuming the canonical RBAC evaluator and explicit deploy-time seeding is required.
 AC-09  Theme boundary: zero files under any theme/template-render path are created; the public
        payload is presentation-neutral (§24 contract).
 AC-10  Full §29 suite passes on SQLite + MySQL 8.x; Pint + type-check + build + composer audit
@@ -1099,14 +1198,24 @@ AC-10  Full §29 suite passes on SQLite + MySQL 8.x; Pint + type-check + build +
 AC-11  Admin screens function inside the fixed backoffice with no theme hooks (visual review +
        absence of theme API usage).
 AC-12  IMP-004 invariants preserved: Transaction Ownership check present in every write service.
+AC-13  Q29 permission separation holds; no reviewer queue, workflow engine or approval matrix.
+AC-14  Q30/Q31 exclusions hold in schema/services/permissions/payloads: no CMS navigation/theme
+       configuration or speculative localization; stable neutral destinations are exposed.
+AC-15  Q32 version/source/revision binding, System authorization, UTC due evaluation, concurrency,
+       idempotency and missed-cron recovery pass the section 29 negative-path tests.
+AC-16  Q33 ARTICLE/NEWS validation/filtering uses the single Article revision/lifecycle path;
+       no taxonomy/News entity; canonical business-domain data remains outside CMS.
+AC-17  Every content event has section 12 classification/failure coverage; ordinary content commits
+       survive reported NON_CRITICAL audit failures; security denial semantics stay unchanged.
+AC-18  HD-IMP005-01..05 remain FINAL / LOCKED; Human Decisions Required: 0;
+       OPEN HUMAN DECISIONS: 0. Review and Human implementation authorization are separate gates.
 ```
 
 ## 33. Definition of Done (IMP-005)
 
 ```
 Standard DoD (docs/00-governance/DEFINITION-OF-DONE.md) plus:
-[ ] All five HD-IMP005-01..05 resolved by Human, answers reflected in a spec patch before the
-    affected code was allowed to exist
+[x] All five HD-IMP005-01..05 FINAL / LOCKED by Human and materialized; open decisions: 0
 [ ] §32 acceptance criteria all green; negative-path authorization + audit tests included
 [ ] Domain docs materialized: docs/06-domains/cms/CMS.md — a Level-5-adjacent document derived
     from this specification; it does NOT create a Level 3 baseline and claims none
@@ -1131,11 +1240,10 @@ business rules, rates, approval limits, accounting entries, or legal retention d
 ```
 To: Qwen 3.8 Flash (qwen/qwen3.8-flash) in Command Code GOAT — AFTER all of:
   1. Independent review of THIS specification (Codex, CODING: NO) completes clean;
-  2. Human answers HD-IMP005-01..05 (section 25) — no partial starts on gated features;
+  2. HD-IMP005-01..05 are FINAL / LOCKED and materialized (section 25; completed);
   3. Human grants IMP-005 implementation authorization (explicit act; this document's existence
      is NOT authorization);
-  4. Spec patched with the HD answers (targeted revision, re-reviewed only if answers change §10-§23
-     contracts materially).
+  4. Subsequent material specification changes receive appropriate change control/review.
 Branch at implementation: impl/005-cms (BRANCHING-POLICY naming). Commit discipline: conventional,
 coherent slices (migrations+models -> services+policies -> audit registry -> admin UI -> public
 resolver -> tests). Reviewer focus list: sanitizer corpus, reserved-route tests, audit criticality
@@ -1149,6 +1257,6 @@ anything requiring a Level 1-4 change -> ACR, never silent drift; do not begin I
 ```
 Document:  docs/implementation/IMP-005-cms.md
 Task:      IMP-005 READINESS + IMPLEMENTATION SPECIFICATION (no code, no migrations, no tests)
-Spec state: DRAFT — READY FOR INDEPENDENT REVIEW
+Spec state: READY FOR INDEPENDENT SPECIFICATION REVIEW
 IMP-005 implementation: NOT AUTHORIZED
 ```

@@ -31,6 +31,23 @@ implementation process — they carry the same Level 1 authority per
 [docs/00-governance/DOCUMENT-AUTHORITY.md](../00-governance/DOCUMENT-AUTHORITY.md) ("Human Decision
 Register — explicit approved Human changes").
 
+Q29-Q33 materialize the explicit Human final decisions supplied in the task
+"IMP-005 CMS - HUMAN DECISION MATERIALIZATION PATCH", resolving HD-IMP005-01 through
+HD-IMP005-05. These are FINAL / LOCKED Human decisions with Level 1 authority, not engineering
+choices or AI approvals. The Human authorized continuing from the existing local documentation
+patch in this session. Earlier option references are superseded by the final baseline below.
+These decisions grant no implementation, merge, push or IMP-006 authorization.
+
+```
+HD-IMP005-01 - FINAL / LOCKED (Q29)
+HD-IMP005-02 - FINAL / LOCKED (Q30)
+HD-IMP005-03 - FINAL / LOCKED (Q31)
+HD-IMP005-04 - FINAL / LOCKED (Q32)
+HD-IMP005-05 - FINAL / LOCKED (Q33)
+Human Decisions Required: 0 (IMP-005)
+OPEN HUMAN DECISIONS: 0 (IMP-005)
+```
+
 Per [docs/00-governance/DOCUMENT-AUTHORITY.md](../00-governance/DOCUMENT-AUTHORITY.md), this
 register is Level 1 — the highest authority in this repository. No Master Requirement,
 architecture document, ADR, implementation specification, governance document, or code may
@@ -67,12 +84,17 @@ Q25 — A  Controlled One-Time CLI Bootstrap for First Super Admin
 Q26 — A  Per-Category Audit Write Failure Semantics (Critical Fail-Closed, Default Fail-Closed)
 Q27 — A  Explicit Permission + Domain-Aware Scope for Audit Read (No Automatic Super Admin Access)
 Q28 — A  Append-Only Audit Operational Model + Governed Retention Purge
+Q29 - FINAL / LOCKED  No Editorial Approval Workflow in CMS v1 (Authoring/Publishing Permission Separation)
+Q30 - FINAL / LOCKED  CMS Menu/Navigation Presentation Configuration Deferred to IMP-006 Theme Engine
+Q31 - FINAL / LOCKED  CMS v1 Single-Locale Content Baseline (Additive-Ready, No Translation Engine)
+Q32 - FINAL / LOCKED  Minimal Scheduled Publish/Unpublish Supported in CMS v1 (Scheduler + Cron Only)
+Q33 - FINAL / LOCKED  News Is a Classification of Article, Not an Independent CMS Entity
 ```
 
-Q21-Q28 are detailed in "Extended Decisions — Detailed Rules (Q21-Q28)" below; Q1-Q20 above
+Q21-Q33 are detailed in "Extended Decisions — Detailed Rules (Q21-Q33)" below; Q1-Q20 above
 retain their original one-line form as supplied during IMP-001 Readiness Remediation Pass 1.
 
-## Extended Decisions — Detailed Rules (Q21-Q28)
+## Extended Decisions — Detailed Rules (Q21-Q33)
 
 ### Q21 — Email as Canonical Login Identifier
 
@@ -227,6 +249,80 @@ IMP-004 provides structural compatibility/foundation only — it does not build 
 ```
 
 Resolves readiness finding HD-IMP004-03.
+
+### Q29 — No Editorial Approval Workflow in CMS v1
+
+```
+No dedicated editorial approval workflow exists in CMS v1.
+Authoring/editing authority and publishing authority are separated by distinct permissions;
+  a principal allowed to create or edit content does NOT automatically hold publish rights.
+No reviewer queue, no multi-step editorial approval, no editorial approval matrix on the IMP-005
+  baseline; no workflow engine is introduced by IMP-005.
+Any future editorial approval workflow requires a new Human Decision / change control before it
+  may be specified or implemented.
+```
+
+Resolves HD-IMP005-01 - FINAL / LOCKED (Human decision).
+
+### Q30 — CMS Menu/Navigation Presentation Configuration Deferred to IMP-006
+
+```
+Menu/navigation presentation configuration is deferred to IMP-006 Theme Engine.
+IMP-005 provides only canonical CMS content plus the link/content destination contract that
+  navigation needs as its target (published content paths / public identifiers).
+IMP-005 builds no menu builder, navigation composition engine, theme navigation configuration
+  or presentation-specific menu layout.
+Preserved (unchanged, applies to every stage): navigation visibility NEVER replaces backend
+  authorization.
+```
+
+Resolves HD-IMP005-02 - FINAL / LOCKED (Human decision).
+
+### Q31 — CMS v1 Single-Locale Content Baseline
+
+```
+CMS v1 uses a single-locale content baseline.
+Multilingual CMS content is NOT implemented in IMP-005: no translation tables, no locale-specific
+  publication workflow/status, localized revision tables, localized-slug framework, fallback engine
+  or language-switching business logic.
+Additive-ready means stable content IDs, explicit text-field ownership and non-language-specific
+  internal IDs; no speculative locale columns, translation joins, locale indexes or fallback trees.
+Any future change to multilingual content requires an appropriate stage / change control with its
+  own Human Decision.
+```
+
+Resolves HD-IMP005-03 - FINAL / LOCKED (Human decision).
+
+### Q32 — Minimal Scheduled Publish/Unpublish in CMS v1
+
+```
+Scheduled publishing and unpublishing ARE supported in CMS v1 in minimal form.
+Baseline uses timestamp-based scheduling (publish_at and/or unpublish_at per the final IMP-005
+  specification design); scheduling is not an independent mutable queue.
+Execution uses Laravel Scheduler + Cron and must remain shared-hosting compatible.
+It MUST NOT require Redis server, Supervisor, PM2, WebSocket, Node production runtime, or any
+  additional infrastructure service.
+Scheduled transitions remain fully subject to the applicable authorization, lifecycle, transaction,
+  and canonical audit semantics — the scheduler executes through the ordinary guarded service
+  paths, never a bypass.
+```
+
+Resolves HD-IMP005-04 - FINAL / LOCKED (Human decision).
+
+### Q33 — News Is a Classification of Article, Not an Independent Entity
+
+```
+News does NOT become an independent CMS entity on the IMP-005 baseline.
+Article is the canonical editorial content entity; News is represented through the
+  classification/type/category mechanism of the final IMP-005 specification design.
+Revision, publication, authorization, audit, slug, scheduling, SEO and content lifecycle must NOT be duplicated
+  merely for News.
+This unification applies only to generic editorial CMS content. Campaign, Partner, Fundraiser,
+Beneficiary, Distribution, Impact, Donation and financial domains keep canonical data in
+  their own domains; business-domain content is not moved into Article/CMS.
+```
+
+Resolves HD-IMP005-05 - FINAL / LOCKED (Human decision).
 
 ## Superseded Decisions
 
