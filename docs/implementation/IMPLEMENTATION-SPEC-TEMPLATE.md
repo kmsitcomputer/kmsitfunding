@@ -4,6 +4,23 @@
 
 READY / IN PROGRESS / REVIEW / BLOCKED / PASS
 
+## Implementation Ownership
+
+Per [docs/00-governance/MULTI-MODEL-OWNERSHIP.md](../00-governance/MULTI-MODEL-OWNERSHIP.md) —
+no implicit/default model substitution is permitted; if the assigned model/owner is unavailable,
+stop and report rather than substituting silently.
+
+```
+Primary Implementation Owner:
+Primary Model:
+Exact Model ID:
+Execution Environment:
+Specialist Reviewer(s):
+Independent Formal Reviewer:   Codex (default, unless an explicitly approved exception exists)
+Human Approval Authority:      Human
+Concurrent Editing:            PROHIBITED
+```
+
 ## Objective
 
 What must be achieved.
