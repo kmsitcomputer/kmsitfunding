@@ -215,6 +215,41 @@ events), no uniqueness constraint applies at all — the composite unique index 
 NULL values do not collide with each other (standard SQL NULL-distinct unique-index semantics,
 already relied upon nowhere else problematically in this schema).
 
+### Conditional `source_domain` Requirement (IMP004-REAUDIT-m01)
+
+The composite unique index above enforces *uniqueness* but does not, by itself, enforce that the
+pair is supplied *together* — MySQL's `UNIQUE(source_domain, source_event_id, event_type)` alone
+would silently permit `source_event_id` populated with `source_domain` left NULL, which defeats
+the whole point of the composite scope (a `source_event_id` with no producer namespace to
+disambiguate it is exactly the "collide across unrelated producers" risk this section exists to
+prevent). This specification therefore requires an explicit **application-level** (not
+DB-composite-uniqueness-alone) conditional validation, enforced by `AuditWriter` **before** any
+insert is attempted:
+
+```
+IF source_event_id IS NOT NULL
+THEN source_domain MUST NOT BE NULL
+```
+
+The inverse partial pair — `source_domain` supplied without any `source_event_id` — is not
+itself an idempotency identity (there is nothing to deduplicate on), so `AuditWriter` accepts it
+if the emitting event's own registry contract calls for `source_domain` as informational
+provenance without idempotency; otherwise it is simply unused. The specific invalid case this
+rule targets and rejects — `source_event_id != NULL AND source_domain == NULL` — is rejected
+BEFORE the insert is attempted (a validation failure, not a database constraint violation),
+consistent with `event_type`/`metadata` allow-list validation happening at the same pre-insert
+stage elsewhere in this specification.
+
+`source_domain` itself is never arbitrary caller/HTTP-client-supplied input — like
+`event_type`, it is resolved from a small, registry-known, trusted-producer context (the emitting
+service itself, e.g. `identity`, `rbac`, or a future `payment_provider:<name>`), bounded in format
+(a short, fixed-charset string), and validated by the writer against that closed set — untrusted
+request input can never assign an arbitrary `source_domain` value.
+
+When both `source_domain` and `source_event_id` are null (the ordinary case for all 28 already-
+migrated events, which have no idempotency identity at all), neither field participates in any
+validation or uniqueness check — this is the default, unconstrained case.
+
 IMP-004 does not implement retry logic itself — it only ensures the schema/contract does not make
 reliable future retry-safe integration impossible (readiness §20).
 
@@ -250,9 +285,11 @@ AUTHORIZATION:   audit read enforces the full Q27 formula plus registry-derived 
                  (§Registry-Derived Visibility Class); Super Admin has no unearned automatic access
 DATA INTEGRITY:  no application code path can UPDATE or DELETE a persisted audit record absent an
                  authorized purge path; source_event_id idempotency behaves exactly per §Idempotency
-ROLLBACK:        every CRITICAL event (including email_verified) proves forced-audit-failure
-                 rollback; the denial event proves DENY always propagates regardless of its own
-                 audit-persistence outcome, via an independent, transaction-surviving boundary
+ROLLBACK:        every CRITICAL/MUTATION_ATOMIC event (including email_verified) proves
+                 forced-audit-failure rollback; the CRITICAL/DENIAL_DURABLE denial event proves
+                 DENY always propagates regardless of its own audit-persistence outcome, with the
+                 denial write sequenced safely after the enclosing transaction's rollback and no
+                 MySQL deadlock/lock-wait timeout at the real self-escalation call site
 ACTOR INTEGRITY: pre-Principal cases (unauthenticated, pre_principal_system) never fabricate a
                  human actor and are unreachable for any event whose registry entry forbids them
 REDACTION:       allow-list mechanism verified against a comprehensive negative-data test set
@@ -262,8 +299,8 @@ DATABASE:        migrations apply cleanly on MySQL 8.x (disposable instance) wit
 MYSQL:           fresh migration, constraint (including the composite source_event_id uniqueness),
                  and concurrency behavior independently verified on a disposable MySQL 8.x database
 GOVERNANCE:      Codex independent re-audit passes with 0 BLOCKER/MAJOR before Human Stage Gate
-SHARED HOSTING:  no new mandatory infrastructure dependency (the denial-event independent
-                 connection is a second connection to the same database, not new infrastructure)
+SHARED HOSTING:  no new mandatory infrastructure dependency (the denial event's safety property
+                 comes from write sequencing, not a mandatory second DB connection)
 ```
 
 ## Forbidden Changes
@@ -417,6 +454,31 @@ Rules:
 - IMP-004 does not invent events for domains that do not exist yet.
 ```
 
+### Registry Contract Consistency
+
+Consolidating what is specified in full elsewhere in this document: the canonical registry, keyed
+by `(event_type, event_version)`, is the exclusive owner of every one of the following —
+`AuditWriter` resolves each from the registry at write/read time, and no runtime caller may
+choose, override, or supply any of them directly:
+
+```
+event_type              (§Event Taxonomy)
+event_version           (§Event Taxonomy)
+criticality             (§Criticality Classification)
+persistence_strategy    (§Criticality Classification — MUTATION_ATOMIC / DENIAL_DURABLE)
+metadata contract       (§Redaction / Safe Serialization — the allow-list itself)
+visibility_class        (§Registry-Derived Visibility Class)
+actor constraints       (§Canonical Actor — which actor_principal_kind values, including
+                         unauthenticated/pre_principal_system, a given event may legitimately use)
+source-domain/idempotency policy (§Idempotency — whether/how source_domain+source_event_id apply)
+```
+
+Runtime callers select a canonical `event_type` and supply the data specific to that occurrence
+(actor context resolved by the container, subject IDs, allow-listed metadata values) — they never
+supply `NON_CRITICAL`, `DENIAL_DURABLE`, an arbitrary `source_domain`/namespace, a
+`visibility_class`, or an `actor_kind` as free parameters. See "Security Negative Tests" for the
+corresponding negative coverage of every one of these.
+
 ## Existing Event Migration
 
 **Verified repository inventory (IMP004-SPEC-M01)** — counted directly from every
@@ -534,11 +596,11 @@ authorization_denied_security_critical:
     RolePermissionService's self-escalation throw site) as part of the migration in this stage —
     this does not reopen or alter IMP-003's authorization LOGIC (the DENY decision itself, its
     exception type, and its message are all UNCHANGED), it only adds an audit emission call
-    alongside an existing throw, consistent with "PATCH, DO NOT REWRITE". Its exact persistence
-    and failure-precedence semantics (IMP004-SPEC-M04) are specified separately in "Denial Event
-    Persistence Semantics" below — a denial has no authorized mutation to roll back, so it is
-    explicitly NOT described as "critical/fail-closed" in the same sense as a mutation event; see
-    that section for the deterministic model.
+    alongside an existing throw, consistent with "PATCH, DO NOT REWRITE". Its registry
+    classification is `criticality: CRITICAL` with `persistence_strategy: DENIAL_DURABLE` (a
+    security-critical event with no authorized mutation to be atomic WITH — see "Criticality
+    Classification" and "Denial Event Persistence Semantics" below for the exact, deadlock-safe
+    deterministic model; IMP004-REAUDIT-M01/M02).
 ```
 
 ### F-02 Disposition — Redaction Strategy
@@ -571,8 +633,25 @@ Class"). An unregistered `event_type` is rejected outright (see "Event Taxonomy"
 event with no explicit criticality declaration defaults to `CRITICAL`/fail-closed, per Q26 —
 there is no code path by which a caller can downgrade an event's criticality at the call site.
 
-CRITICAL mutation pattern (already proven correct by IMP-003; required for every CRITICAL event
-in the migration tables above):
+### Persistence Strategy (Second, Orthogonal Registry Axis) — IMP004-REAUDIT-M02
+
+`CRITICAL` means "this event is security-critical evidence" — it does **not** by itself imply
+"there is a business mutation to be atomic with and roll back." Not every CRITICAL event has one
+(a denial has none, by definition). The registry therefore also declares, per event, exactly one
+`persistence_strategy` — never a third criticality value, never caller-selectable:
+
+```
+persistence_strategy: MUTATION_ATOMIC   (every CRITICAL mutation event — the existing/default
+                                          case for all 28 migrated events plus email_verified)
+persistence_strategy: DENIAL_DURABLE    (security.authorization.denied only, for now — see
+                                          "Denial Event Persistence Semantics" below)
+```
+
+`NON_CRITICAL` events implicitly use neither strategy — they follow "Non-Critical Events" below
+regardless.
+
+### Pattern A — CRITICAL / MUTATION_ATOMIC (already proven correct by IMP-003; required for every
+CRITICAL/MUTATION_ATOMIC event in the migration tables above)
 
 ```
 BEGIN TRANSACTION
@@ -582,9 +661,17 @@ COMMIT
 -- on AuditWriter failure: exception propagates, enclosing transaction rolls back --
 ```
 
-No asynchronous/queued persistence is permitted for a CRITICAL event — this would silently weaken
-the Q26 guarantee. `AuditWriter` for a CRITICAL event is a synchronous, in-request/in-job DB write
-in the same connection/transaction as the mutation it accompanies.
+No asynchronous/queued persistence is permitted for a `MUTATION_ATOMIC` event — this would
+silently weaken the Q26 guarantee. `AuditWriter` for this strategy is a synchronous, in-request/
+in-job DB write in the same connection/transaction as the mutation it accompanies.
+
+### Pattern B — CRITICAL / DENIAL_DURABLE (`security.authorization.denied` only)
+
+There is no authorized mutation to be atomic with. The invariant is `DENY MUST REMAIN DENY`,
+unconditionally — see "Denial Event Persistence Semantics" below for the exact, deadlock-safe
+mechanism. Do not describe this pattern as `NON_CRITICAL` — it is fully `CRITICAL` (audit failure
+must never be silent, exactly like Pattern A), it simply does not use Pattern A's
+same-transaction-as-a-mutation mechanism because there is no mutation.
 
 ## Non-Critical Events
 
@@ -603,63 +690,94 @@ its own persistence failure internally and:
    reported risk, not a silent one).
 ```
 
-## Denial Event Persistence Semantics (IMP004-SPEC-M04)
+## Denial Event Persistence Semantics (IMP004-SPEC-M04, revised per IMP004-REAUDIT-M01/M02)
 
-`security.authorization.denied` is neither CRITICAL nor NON_CRITICAL in the mutation sense —
-there is **no authorized business mutation to roll back**, because the entire point of the event
-is that nothing was authorized to happen. Describing it with the CRITICAL mutation pattern
-("mutation + audit in one transaction, rollback on audit failure") would be meaningless (there is
-nothing to roll back) and describing it as NON_CRITICAL ("fail-open silently") would risk making
-exactly the highest-value security evidence the least reliable. This specification gives it its
-own, third, deterministic contract:
+`security.authorization.denied` is fully `CRITICAL` with `persistence_strategy: DENIAL_DURABLE`
+(see "Criticality Classification" / "Pattern B" above) — it is not a third criticality value and
+it is not exempt from "audit failure must never be silent." What differs from Pattern A
+(`MUTATION_ATOMIC`) is only the mechanism, because there is **no authorized business mutation to
+be atomic with**: the entire point of the event is that nothing was authorized to happen, so
+"roll back the mutation on audit failure" is meaningless here — there is nothing to roll back.
 
 ```
 1. The original authorization check determines DENY. This decision, its exception type, and its
    message are entirely owned by the calling service (e.g. RolePermissionService) and are NEVER
    altered by anything in this section.
 
-2. Before the denial exception is allowed to propagate to the caller, the emitting code attempts
-   to persist `security.authorization.denied` through the canonical AuditWriter, using an
-   INDEPENDENT persistence boundary — a separate DB connection/transaction scope from whatever
-   enclosing transaction the denying service may currently be inside (see "Transaction Placement"
-   below). This is a deliberate, named exception to the "same transaction as the mutation" rule:
-   there IS no mutation transaction to join for a denial (or, if there is an enclosing
-   transaction from a caller that is ABOUT to roll back specifically because this denial is being
-   thrown, joining it would guarantee the audit row never survives — the opposite of what a
-   denial record exists for).
+2. Access result = DENY, ALWAYS, unconditionally, regardless of anything below. Nothing in this
+   section can ever convert a denial into an allow.
 
-3. access result = DENY, ALWAYS, unconditionally, regardless of step 2's outcome:
-   - If the audit persistence in step 2 SUCCEEDS: the original authorization denial (exception/
-     domain-equivalent result) propagates to the caller UNCHANGED.
-   - If the audit persistence in step 2 FAILS: the original authorization denial STILL propagates
-     to the caller UNCHANGED. Access NEVER becomes allowed because the audit write failed — a
-     failure of the evidence-recording step must never be interpreted as, or converted into, a
-     more permissive outcome.
+3. Denial-audit persistence happens at a TRANSACTION-SAFE POINT that never runs while the
+   denying call stack still holds the locks that produced the denial — see "Transaction
+   Placement" below for the exact, deadlock-free sequencing. A second synchronous DB connection
+   held open concurrently with the still-active locking transaction is explicitly NOT a
+   requirement of this specification (superseding the prior draft, which unsafely implied one) —
+   the safety property comes from WHEN the write happens, not from WHICH connection performs it.
 
-4. If step 2 fails, that failure is NOT silent: it is reported through an approved operational/
-   security failure path (e.g. a dedicated `security_audit_failures` log channel, or the ordinary
-   application error log tagged distinctly, mirroring "Non-Critical Events" §2's reporting
-   discipline) — visible to operations/monitoring, and available for a test assertion to observe
-   — but this reporting happens ALONGSIDE the unchanged denial propagation in step 3, never
-   INSTEAD of it, and never by raising a second, different exception that could replace or mask
-   the original denial in the caller's own exception-handling logic.
+4. If that persistence fails, the failure is NOT silent: it is reported through an approved
+   operational/security failure path (e.g. a dedicated `security_audit_failures` log channel, or
+   the ordinary application error log tagged distinctly, mirroring "Non-Critical Events" §2's
+   reporting discipline) — visible to operations/monitoring, and available for a test assertion
+   to observe. This reporting NEVER raises a second, different exception that could replace or
+   mask the original denial in the caller's own exception-handling logic, and the reporting path
+   itself never recursively depends on the same canonical audit persistence that just failed (no
+   audit-failure-reporting-via-audit-write loop).
 ```
 
-### Transaction Placement
+### Transaction Placement (Deadlock-Safe Sequencing)
 
-If the code path that produces the denial is itself running inside an enclosing DB transaction
-(e.g. `RolePermissionService::grant()`'s self-escalation check fires partway through that
-method's `DB::transaction()` closure), the denial-audit write in step 2 above uses a **separate,
-independently-committing connection scope** (a second named Laravel database connection to the
-same physical database — a standard, shared-hosting-compatible Laravel feature, not new
-infrastructure) rather than a nested transaction/savepoint on the SAME connection. This matters
-because a savepoint-based "nested transaction" on the same connection is still rolled back if the
-outer transaction rolls back — and the outer transaction WILL roll back here, specifically
-because the thrown denial exception unwinds it. Using an independent connection means the denial
-record commits immediately and durably, regardless of what the enclosing (about-to-be-rolled-
-back) transaction ultimately does. No distributed transaction, message queue, or other new
-infrastructure is introduced — this is a single additional same-database connection, resolved by
-`AuditWriter` internally for this one event category only.
+The actual `RolePermissionService::grant()` self-escalation check (the concrete call site this
+specification must remain implementable against) throws its denial exception **while still
+inside** its `DB::transaction()` closure, with `lockedActor`/`lockedRole`/`lockedPermission` held
+via `lockForUpdate()`. Attempting to write the denial event to ANY connection — the same one or a
+second one — WHILE those locks are still held risks exactly the lock-inversion/contention
+IMP004-REAUDIT-M01 identified: a second connection's FK-reference read against a row the first
+connection holds `FOR UPDATE` must wait for the first connection to finish, but the first
+connection's own code (same PHP call stack) is simultaneously waiting for the second connection's
+write to return before it can continue and let the transaction close — a self-inflicted lock-wait
+timeout under MySQL, not a theoretical risk.
+
+**Required sequencing** — the denial audit write happens strictly AFTER the enclosing mutation
+transaction has already unwound (rolled back) and its locks are already released, never
+concurrently with them:
+
+```
+1. Inside DB::transaction(...): the self-escalation check throws its (unchanged) RuntimeException
+   exactly as today. Laravel's DB::transaction() wrapper catches this, calls ROLLBACK (releasing
+   every lockForUpdate() row lock this closure held), and re-throws the SAME exception object —
+   this is existing, unmodified Laravel/IMP-003 behavior, not a new mechanism this spec invents.
+
+2. The calling method (e.g. grant()) wraps its OWN call to DB::transaction(...) in a try/catch.
+   By the time this catch block runs, step 1's rollback has already completed and every lock is
+   already released — there is no lock contention risk at this point, on the same connection or
+   a different one, because the original transaction no longer exists.
+
+3. Inside that catch block, if the caught exception is a recognized denial (per the registry's
+   DENIAL_DURABLE classification for the applicable event), the calling method persists
+   `security.authorization.denied` — a single plain insert, needing no explicit transaction of
+   its own since it is one row — using the ordinary default connection. A second, separate DB
+   connection is PERMITTED as an implementation choice for additional isolation, but is never
+   REQUIRED — either is safe now, because the unsafe window (locks still held) has already
+   closed.
+
+4. The calling method then re-throws the ORIGINAL exception object unchanged (not a new one) —
+   access remains denied exactly as it always was; step 3 only ran an insert in between.
+```
+
+This sequencing satisfies every constraint required of it: it never persists while locks from the
+same call stack are held; it never performs FK validation against a row exclusively locked by the
+same synchronous chain (the lock is gone by step 3); it never changes the DENY result; the
+resulting audit-failure reporting path (§4 above) has no recursive dependency on this same
+persistence step; and it introduces no new infrastructure (no Redis/Kafka/message broker) —
+`DB::transaction()`'s own catch/rollback/rethrow behavior is what Laravel already does today.
+
+Implementation must validate this exact sequencing against both MySQL 8.x (proving no deadlock or
+lock-wait timeout at the real self-escalation call site under InnoDB) and SQLite (the default
+regression suite) — see "Required Test Plan" §DENIAL EVENT and §MYSQL LOCK BEHAVIOR below. SQLite
+does not need to simulate a genuine second concurrent connection to validate this sequencing,
+since the safety property this section specifies does not depend on connection count — it depends
+on the mutation transaction having already closed before the denial write runs, which is
+observable and testable identically under either database.
 
 ## Audit Record Schema (Proposed — No Migration Created)
 
@@ -1023,15 +1141,32 @@ ATOMICITY (CRITICAL mutation events):
     every Identity CRITICAL event per F-03's disposition)
   - no partial critical mutation ever observable after a forced failure
 
-DENIAL EVENT (IMP004-SPEC-M04):
-  - a self-escalation denial remains denied (unchanged exception/message) and produces no
-    business mutation, with security.authorization.denied persisted successfully
+DENIAL EVENT (IMP004-SPEC-M04, sequencing per IMP004-REAUDIT-M01/M02):
+  - a self-escalation denial remains denied (unchanged exception/message/type) and produces no
+    business mutation, with security.authorization.denied persisted successfully after the
+    enclosing transaction has rolled back
+  - the denial-audit insert observably happens AFTER the mutation transaction's rollback has
+    completed and its row locks are released — not concurrently with them
   - forced security.authorization.denied persistence failure still results in DENY — access
     never becomes allowed
   - the forced persistence failure is reported through the operational/security failure path,
-    not silently dropped
-  - the denial audit record survives even though the enclosing transaction (if any) rolls back
-    due to the thrown denial exception (proves the independent persistence boundary)
+    not silently dropped, and that reporting path does not itself depend on a successful audit
+    write (no recursive audit-of-audit-failure loop)
+  - the denial audit record survives even though the enclosing transaction rolled back specifically
+    because of the thrown denial exception (proves correct sequencing, not a specific connection
+    topology — a single-connection sequential implementation is sufficient and is what this
+    specification requires be validated)
+
+MYSQL LOCK BEHAVIOR (IMP004-REAUDIT-M01):
+  - the actual RolePermissionService::grant() self-escalation path, exercised against a disposable
+    MySQL 8.x instance under InnoDB, completes the denial + audit write with no deadlock and no
+    lock-wait timeout
+  - repeating the same self-escalation attempt concurrently from two separate requests does not
+    produce a circular wait between the mutation transaction's FOR UPDATE locks and the denial
+    audit insert
+  - the SQLite regression suite validates the same sequencing (transaction closed before denial
+    write) without needing to simulate two genuinely concurrent connections to the same in-memory
+    database — the property under test is ordering, not connection count
 
 IMMUTABILITY:
   - unauthorized update attempt is rejected/has no effect
@@ -1076,14 +1211,22 @@ TRANSACTION ROLLBACK:
   - an audit row inserted inside a transaction that is later rolled back for an unrelated reason
     does not survive (standard DB transaction behavior, explicitly tested rather than assumed)
 
-SOURCE_EVENT_ID (IMP004-SPEC-M06):
-  - a legitimate retry (same source_domain + source_event_id + event_type) returns/references the
-    existing canonical audit record, no duplicate row created
-  - the same source_event_id in a DIFFERENT valid producer scope (different source_domain or
-    different event_type) does not collide with an unrelated record
-  - a conflicting reuse (same scoped key, incompatible core attribution) is rejected as an
-    idempotency conflict, not silently accepted or silently overwritten
-  - a NULL source_event_id never participates in the uniqueness constraint
+SOURCE_EVENT_ID (IMP004-SPEC-M06, conditional validation per IMP004-REAUDIT-m01):
+  - a valid pair (source_domain = e.g. "identity", source_event_id = e.g. "abc123") is accepted
+  - an invalid partial pair (source_domain = NULL, source_event_id = "abc123") is REJECTED before
+    any insert is attempted (a validation failure, not merely relying on a DB constraint)
+  - no idempotency identity at all (source_domain = NULL, source_event_id = NULL) is allowed
+    wherever the event's own contract permits it — the ordinary case for all 28 migrated events
+  - a legitimate retry (same source_domain + source_event_id + event_type, same immutable
+    payload) returns/references the existing canonical audit record, no duplicate row created
+  - the same source_event_id in a DIFFERENT valid producer scope (different source_domain) is
+    independent and does not collide with an unrelated record
+  - a conflicting reuse (same valid scoped key, incompatible immutable payload/core attribution)
+    is rejected as an idempotency conflict, not silently accepted or silently overwritten
+  - a NULL source_event_id (with source_domain also NULL, per the conditional rule) never
+    participates in the uniqueness constraint
+  - source_domain cannot be set to an arbitrary, unregistered value from untrusted/HTTP-client
+    input (see "Security Negative Tests")
 
 CONCURRENCY:
   - two concurrent CRITICAL mutations for different subjects both persist correctly with no
@@ -1109,9 +1252,13 @@ MYSQL:
   execution_context string, or to claim `unauthenticated`/`pre_principal_system` for an event
   whose registry entry does not permit that actor kind, is rejected — see "Canonical Actor
   (Pre-Principal Cases)")
-- criticality/visibility override attempt (a caller attempting to pass an explicit criticality or
-  visibility_class value is rejected/ignored — both are registry-derived only, see "Criticality
-  Classification" and "Registry-Derived Visibility Class")
+- criticality/visibility/persistence_strategy override attempt (a caller attempting to pass an
+  explicit criticality, visibility_class, or persistence_strategy value is rejected/ignored — all
+  three are registry-derived only, see "Criticality Classification" and "Registry-Derived
+  Visibility Class")
+- source_domain spoofing (a caller supplying an arbitrary, unregistered source_domain value from
+  untrusted/HTTP-client input is rejected — only the emitting service's own trusted-producer
+  context may set it, see "Conditional source_domain Requirement")
 - subject spoofing where relevant (a caller cannot attribute an event to a subject_id it has no
   relationship to, where the emitting service itself is responsible for supplying the correct ID)
 - unregistered event_type rejected
@@ -1171,8 +1318,10 @@ checklist:
 [ ] email_verified reclassified CRITICAL, with atomic state+audit persistence and forced-failure
     rollback coverage (M03)
 [ ] Denial-event persistence semantics implemented and tested: DENY always propagates unchanged,
-    audit failure never permits access, failure is reported not silent, independent persistence
-    boundary survives the enclosing transaction's rollback (M04)
+    audit failure never permits access, failure is reported not silent, denial-audit write is
+    sequenced strictly after the enclosing mutation transaction's rollback with no MySQL deadlock/
+    lock-wait timeout at the actual self-escalation call site, criticality is representable as
+    CRITICAL/DENIAL_DURABLE (M04, IMP004-REAUDIT-M01/M02)
 [ ] Registry-derived visibility class implemented: criticality and visibility are never
     caller-supplied; financial-reference visibility applies uniformly wherever a financial
     reference appears (primary subject, secondary subject, or metadata); audit.read.financial_
@@ -1182,8 +1331,9 @@ checklist:
     reuse is rejected, NULL never collides (M06)
 [ ] Terminal purge-evidence rule implemented: governance.audit.purged records excluded from their
     own producing purge batch's eligibility set (m01)
-[ ] Critical atomicity demonstrated for every CRITICAL event (new Identity-side + email_verified +
-    unchanged RBAC coverage)
+[ ] Critical atomicity demonstrated for every CRITICAL/MUTATION_ATOMIC event (new Identity-side +
+    email_verified + unchanged RBAC coverage); denial-durable sequencing demonstrated separately
+    for the CRITICAL/DENIAL_DURABLE security.authorization.denied event
 [ ] Allow-list redaction demonstrated (F-02 resolved in code, not only in this specification)
 [ ] Audit-read authorization demonstrated (Q27; default DENY; no automatic Super Admin access)
 [ ] Immutability demonstrated (no update/delete surface)
@@ -1196,56 +1346,85 @@ checklist:
 [ ] Ledger/Payment/Commission/Approval/Search-Reporting/API remain unimplemented by this stage
 ```
 
-## Finding Disposition (Specification Remediation Pass 1)
+## Finding Disposition (Specification Remediation Pass 1 + Targeted Re-Audit Pass 2)
 
-Resolution status for the Codex specification-audit findings addressed by this remediation pass.
-None of these should be read as Codex having already accepted the resolution — each is
-**PATCHED — PENDING INDEPENDENT RE-AUDIT** until Codex's own re-audit confirms it.
+Resolution status for every Codex specification-audit finding addressed across both remediation
+passes. Codex's own targeted re-audit confirmed IMP004-SPEC-M01/M02/M03/M05/m01 as **RESOLVED**;
+IMP004-SPEC-M04 and IMP004-SPEC-M06 were found NOT RESOLVED and are patched again below as
+IMP004-REAUDIT-M01/M02/m01 — those three remain **PATCHED — PENDING INDEPENDENT RE-AUDIT**
+(this pass does not claim Codex has accepted them; only Codex's own next re-audit can confirm
+that).
 
 ```
-IMP004-SPEC-M01  PATCHED — PENDING INDEPENDENT RE-AUDIT
+IMP004-SPEC-M01  RESOLVED (confirmed by Codex targeted re-audit)
   Section(s): "Existing Event Migration" (verified inventory block: 19 Identity + 9 RBAC = 28
   existing, +1 new denial event = 29 canonical active/target, +5 reserved = 34 total registry
   entries), "Identity (19 events, IMP-002)" table heading, "Authentication Integration"
   (19-event reference), "Required Test Plan" EVENT INVENTORY group, "Definition of Done
-  (IMP-004-Specific)". Counts verified directly against every `->record(...)` call site in
-  app/Services/Identity/, app/Http/Controllers/Auth/, app/Console/Commands/
-  BootstrapSuperAdmin.php, app/Services/Rbac/, and app/Console/Commands/
-  BridgeFirstSuperAdmin.php — matches Codex's reported counts exactly; no repository-evidence
-  discrepancy was found.
+  (IMP-004-Specific)".
 
-IMP004-SPEC-M02  PATCHED — PENDING INDEPENDENT RE-AUDIT
+IMP004-SPEC-M02  RESOLVED (confirmed by Codex targeted re-audit)
   Section(s): "Canonical Actor" (rewritten), "Canonical Actor (Pre-Principal Cases)" (new),
-  "Audit Record Schema" (actor_principal_id now nullable, actor_principal_kind extended,
+  "Audit Record Schema" (actor_principal_id nullable, actor_principal_kind extended,
   execution_context column added), Identity migration table footnotes † and ‡, "Required Test
   Plan" PRE-PRINCIPAL ACTOR group, "Security Negative Tests" (execution_context spoofing).
 
-IMP004-SPEC-M03  PATCHED — PENDING INDEPENDENT RE-AUDIT
+IMP004-SPEC-M03  RESOLVED (confirmed by Codex targeted re-audit)
   Section(s): Identity migration table (`email_verified` row), "Authentication Integration",
   "Required Test Plan" EMAIL VERIFICATION group, "Definition of Done (IMP-004-Specific)".
 
-IMP004-SPEC-M04  PATCHED — PENDING INDEPENDENT RE-AUDIT
-  Section(s): "F-01 Disposition" (`authorization_denied_security_critical` entry rewritten),
-  "Denial Event Persistence Semantics" (new, including "Transaction Placement"), "Required Test
-  Plan" DENIAL EVENT group, "Definition of Done (IMP-004-Specific)".
+IMP004-SPEC-M04  NOT RESOLVED (Pass 1) — see IMP004-REAUDIT-M01/M02 below (Pass 2)
 
-IMP004-SPEC-M05  PATCHED — PENDING INDEPENDENT RE-AUDIT
+IMP004-SPEC-M05  RESOLVED (confirmed by Codex targeted re-audit)
   Section(s): "Audit Read Authorization" (rewritten with "Registry-Derived Visibility Class" and
   "Historical Reproducibility of Visibility"), "Audit Record Schema" (source_domain/visibility
   notes), "Required Test Plan" VISIBILITY / AUTHORIZATION group, "Definition of Done
   (IMP-004-Specific)".
 
-IMP004-SPEC-M06  PATCHED — PENDING INDEPENDENT RE-AUDIT
-  Section(s): "Idempotency" (rewritten with exact composite-uniqueness/retry/conflict/null
-  semantics), "Audit Record Schema" (`source_domain` column added, `source_event_id` uniqueness
-  corrected to composite), "Required Test Plan" SOURCE_EVENT_ID group, "Definition of Done
-  (IMP-004-Specific)".
+IMP004-SPEC-M06  NOT RESOLVED (Pass 1) — see IMP004-REAUDIT-m01 below (Pass 2)
 
-IMP004-SPEC-m01  PATCHED — PENDING INDEPENDENT RE-AUDIT
-  Section(s): "Retention Compatibility (Structural Only)" → "Terminal Purge-Evidence Rule" (new),
+IMP004-SPEC-m01  RESOLVED (confirmed by Codex targeted re-audit)
+  Section(s): "Retention Compatibility (Structural Only)" -> "Terminal Purge-Evidence Rule" (new),
   "Required Test Plan" PURGE EVIDENCE group, "Definition of Done (IMP-004-Specific)".
+
+IMP004-REAUDIT-M01  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Finding: unsafe/contradictory mandated independent second DB connection for
+  security.authorization.denied, risking lock inversion against the actual
+  RolePermissionService::grant() self-escalation call site's lockForUpdate() locks.
+  Section(s): "Denial Event Persistence Semantics" (rewritten — the mandatory second-connection
+  requirement is removed; safety now comes from sequencing the denial-audit write strictly after
+  the enclosing mutation transaction's own rollback/lock-release, using DB::transaction()'s
+  existing catch/rollback/rethrow behavior — a second connection becomes an optional
+  implementation choice, never a requirement), "Transaction Placement (Deadlock-Safe Sequencing)"
+  (rewritten with the exact call-stack-grounded mechanism), "Required Test Plan" DENIAL EVENT and
+  new MYSQL LOCK BEHAVIOR groups, "Acceptance Criteria" (SHARED HOSTING/ROLLBACK lines corrected),
+  "Definition of Done (IMP-004-Specific)".
+
+IMP004-REAUDIT-M02  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Finding: security.authorization.denied's criticality was not representable in the two-value
+  CRITICAL/NON_CRITICAL model, and prior text described it as "neither" — an unrepresentable/
+  contradictory registry state.
+  Section(s): "Criticality Classification" (new, orthogonal `persistence_strategy` registry axis:
+  MUTATION_ATOMIC for every existing CRITICAL mutation event, DENIAL_DURABLE for
+  security.authorization.denied only — no third criticality value invented; criticality remains
+  exactly CRITICAL for the denial event), "F-01 Disposition" (`authorization_denied_security_
+  critical` entry corrected to state `criticality: CRITICAL, persistence_strategy:
+  DENIAL_DURABLE` instead of the prior "neither critical nor non-critical" wording), "Registry
+  Contract Consistency" (new, consolidating that persistence_strategy — like criticality — is
+  registry-owned and never caller-selectable).
+
+IMP004-REAUDIT-m01  PATCHED — PENDING INDEPENDENT RE-AUDIT
+  Finding: the `source_domain` conditional requirement (required whenever `source_event_id` is
+  present) was implicit, relying only on DB composite-uniqueness behavior which does not enforce
+  "supplied together."
+  Section(s): "Idempotency" -> "Conditional source_domain Requirement" (new — explicit
+  application-level pre-insert validation: `source_event_id IS NOT NULL` requires `source_domain
+  IS NOT NULL`, rejected before insert, never relying on the composite UNIQUE index alone;
+  source_domain itself confirmed registry/trusted-producer-derived, never arbitrary caller
+  input), "Required Test Plan" SOURCE_EVENT_ID group (invalid-partial-pair and no-idempotency-
+  identity cases added), "Security Negative Tests" (source_domain spoofing).
 ```
 
-No new Human Decision was introduced by this remediation pass — all seven findings were
-remediable within the existing Q26/Q27/Q28 authority and the pre-existing Level 1-4 baseline,
-consistent with Codex's own `HUMAN DECISION REQUIRED = 0` in the original audit.
+No new Human Decision was introduced by either remediation pass — all findings across both passes
+were remediable within the existing Q26/Q27/Q28 authority and the pre-existing Level 1-4
+baseline, consistent with Codex's own `HUMAN DECISION REQUIRED = 0` in both audits.
