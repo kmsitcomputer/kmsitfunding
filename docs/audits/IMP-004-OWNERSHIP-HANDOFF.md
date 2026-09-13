@@ -16,11 +16,23 @@ it.
 ```
 IMP:                    IMP-004 — Audit + Governance Foundation
 
-Old prospective owner:  Kimi K3 (moonshotai/Kimi-K3) — Amendment V1, superseded
-New owner:               DeepSeek V4.1 Flash (deepseek/deepseek-v4.1-flash) — Amendment V2,
-                         PROPOSED
+Original prospective implementation owner:
+                         Kimi K3 (moonshotai/Kimi-K3) — Amendment V1, superseded
 
-Existing work status:   UNCOMMITTED / PRE-AMENDMENT-V2
+V2 proposed replacement:
+                         DeepSeek V4.1 Flash (deepseek/deepseek-v4.1-flash) — Amendment V2,
+                         PROPOSED; remains the standing assignment for every purpose the
+                         Temporary Completion Owner exception below does not name, and resumes
+                         automatically for IMP-004 once that exception expires
+
+Human-authorized Temporary Completion Owner (current, IMP-004 ONLY):
+                         Claude Code (claude-sonnet-5, Claude Code 2.1.269) — GOV-MM-004,
+                         "Saya setuju. Claude Code ditetapkan sebagai Temporary Completion Owner
+                         untuk IMP-004 saja. Setelah IMP-004 FINAL/LOCKED, ownership kembali
+                         mengikuti Multi-Model Governance V2 mulai IMP-005." Expires
+                         automatically at IMP-004 FINAL/LOCKED; does not affect IMP-005 onward.
+
+Existing work status:   UNCOMMITTED / PRE-TRANSITION (predates all three owners above)
 Provenance:              PARTIALLY KNOWN / UNKNOWN — observed on branch
                          impl/004-audit-governance-foundation; creation period and authoring
                          model/tool not independently provable from the working tree alone; not
@@ -44,14 +56,17 @@ Allowed outcomes (per artifact, once reviewed):
   REMEDIATE   — new owner accepts the artifact after applying corrections
   REPLACE     — new owner discards the artifact and implements the equivalent capability itself
 
-Authorship policy:      No retroactive re-attribution. Adopting an artifact does not imply
-                         DeepSeek V4.1 Flash authored it originally. It also does not imply Kimi
-                         K3 (or any other specific model/tool) completed IMP-004 — no such claim
-                         is made anywhere in this record.
+Authorship policy:      No retroactive re-attribution in any direction. Adopting an artifact does
+                         not imply Claude Code, DeepSeek V4.1 Flash, or Kimi K3 (or any other
+                         specific model/tool) authored it originally or completed IMP-004 — no
+                         such claim is made anywhere in this record.
 
 Execution status:       HOLD — see docs/00-governance/MULTI-MODEL-OWNERSHIP.md "IMP-004
-                         Transition" for the full, current release-condition list. This handoff
-                         record's completion (steps 1-2 below, done; steps 3-6, pending) is one of
+                         Transition" and "GOV-MM-004 — IMP-004 Temporary Completion Ownership
+                         Exception" for the full, current release-condition list (Amendment V2 —
+                         including GOV-MM-004 — reaching FINAL/LOCKED; Claude's Per-IMP Model
+                         Binding reaching BOUND; and this handoff's steps 3-4 below). This
+                         record's completion (steps 1-2, done; steps 3-6, pending) is one of
                          those conditions, not a standalone authorization.
 ```
 
@@ -61,13 +76,14 @@ Execution status:       HOLD — see docs/00-governance/MULTI-MODEL-OWNERSHIP.md
 1. Inventory existing uncommitted IMP-004 artifacts.                          DONE (this record)
 2. Record known provenance (branch, creation period, prior owner if known,
    "unknown" where not provable).                                             DONE (this record)
-3. New Primary Owner (DeepSeek V4.1 Flash) performs a READ/REVIEW of the
+3. Current Owner (Claude Code, per GOV-MM-004) performs a READ/REVIEW of the
    existing implementation.                                                   PENDING
-4. New Primary Owner explicitly chooses, per artifact: ADOPT / REMEDIATE /
+4. Current Owner explicitly chooses, per artifact: ADOPT / REMEDIATE /
    REPLACE.                                                                   PENDING
 5. Adoption does not retroactively reattribute prior authorship.              (policy, standing)
-6. From handoff acceptance onward, DeepSeek V4.1 Flash is the sole active
-   implementation owner for IMP-004 — one-owner invariant applies.            PENDING
+6. From handoff acceptance onward, Claude Code is the sole active
+   implementation owner for IMP-004 for the duration of the GOV-MM-004
+   exception — one-owner invariant applies.                                   PENDING
 ```
 
 Steps 3-6 are implementation activity and are explicitly **not performed** by this governance
@@ -77,13 +93,15 @@ remediation pass — this record exists only to materialize the requirement and 
 
 Per governance instruction, this record does not require deletion of the pre-existing artifacts,
 and does not accept them into the canonical implementation. Their disposition is deferred to the
-review sequence above, to be carried out by the confirmed Primary Implementation Owner once
-Amendment V2 is `FINAL / LOCKED`.
+review sequence above, to be carried out by the confirmed current owner (Claude Code, per
+GOV-MM-004) once Amendment V2 — including GOV-MM-004 — is `FINAL / LOCKED` and Claude's Model
+Binding for IMP-004 reaches `BOUND`.
 
 ## Related Records
 
 - [docs/00-governance/MULTI-MODEL-OWNERSHIP.md](../00-governance/MULTI-MODEL-OWNERSHIP.md) —
-  "Amendment V2 — Command Code Model Generation Replacement", "IMP-004 Transition"
+  "Amendment V2 — Command Code Model Generation Replacement", "IMP-004 Transition", "GOV-MM-004 —
+  IMP-004 Temporary Completion Ownership Exception"
 - [docs/implementation/IMP-004-audit-governance-foundation.md](../implementation/IMP-004-audit-governance-foundation.md) —
-  "Implementation Ownership", "Owner Transition Record", "Pre-Existing Implementation Artifacts /
-  Ownership-Provenance Review"
+  "Implementation Ownership", "Claude Model Binding", "Owner Transition Record", "Pre-Existing
+  Implementation Artifacts / Ownership-Provenance Review"

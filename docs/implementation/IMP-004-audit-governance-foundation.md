@@ -12,31 +12,58 @@ Artifacts / Ownership-Provenance Review" below for the exact release conditions)
 Per [docs/00-governance/MULTI-MODEL-OWNERSHIP.md](../00-governance/MULTI-MODEL-OWNERSHIP.md) —
 no implicit/default model substitution is permitted; if the assigned model/owner is unavailable,
 stop and report rather than substituting silently. This section reflects Governance Amendment V2
-(`PROPOSED`, not yet `FINAL / LOCKED` — see that document's "Amendment V2 — Command Code Model
-Generation Replacement"); it is synchronized here at Level 5 to match Level 6 rather than left to
-silently diverge, per the canonical source-of-truth hierarchy (a Level 6 governance patch does not
-override Level 5 specification metadata — this update explicitly reconciles the two).
+(`PROPOSED`, not yet `FINAL / LOCKED`) **and its GOV-MM-004 Temporary Completion Ownership
+Exception** — see that document's "Amendment V2 — Command Code Model Generation Replacement" and
+"GOV-MM-004 — IMP-004 Temporary Completion Ownership Exception"; it is synchronized here at Level
+5 to match Level 6 rather than left to silently diverge, per the canonical source-of-truth
+hierarchy (a Level 6 governance patch does not override Level 5 specification metadata — this
+update explicitly reconciles the two).
 
 ```
 Stage Type:   NORMAL IMPLEMENTATION STAGE
 ```
 
 ```
-Primary Implementation Owner:  DeepSeek V4.1 Flash
-Primary Model:                 DeepSeek V4.1 Flash
-Exact Model ID:                deepseek/deepseek-v4.1-flash
-Execution Environment:         Command Code
-Specialist Reviewer(s):        NONE by default (Amendment V2) — an optional specialist may be
-                                added later only if technically justified, and must be READ ONLY
-                                when used; primary ownership remains with DeepSeek V4.1 Flash
-Independent Formal Reviewer:   Codex (CODING: NO) — does not implement IMP-004, does not become
-                                co-owner
-Human Approval Authority:      Human
-Concurrent Editing:            PROHIBITED
+Primary/Temporary Completion Owner: Claude Code (GOV-MM-004; IMP-004 ONLY — expires automatically
+                                     at IMP-004 FINAL/LOCKED)
+Scope:                               IMP-004 only
+Model Binding:                       PENDING HUMAN APPROVAL — exact model resolved
+                                     (claude-sonnet-5, Claude Code 2.1.269) but not yet
+                                     Human-approved for IMP-004; see "Claude Model Binding" below
+Specialist:                          NONE by default (Amendment V2) — an optional specialist may
+                                     be added later only if technically justified, and must be
+                                     READ ONLY when used
+Independent Formal Reviewer:        Codex (CODING: NO) — does not implement IMP-004, does not
+                                     become co-owner, is not replaced by Claude
+Human Approval Authority:            Human
+Concurrent Editing:                  PROHIBITED
 ```
 
-IMP-004 is not one of the Mission-Critical Claude Stages (IMP-009/010/011/014/015/016/027) — the
-GOV-MM-002 Claude Per-IMP Model Binding block does not apply to this stage.
+IMP-004 is not one of the Mission-Critical Claude Stages (IMP-009/010/011/014/015/016/027) —
+GOV-MM-002's Per-IMP Model Binding *mechanism* (the same UNBOUND -> MODEL RESOLVED -> AWAITING
+HUMAN MODEL APPROVAL -> BOUND state machine) is reused for this temporary exception under
+GOV-MM-004, without IMP-004 becoming a standing Mission-Critical Stage — the mechanism is borrowed
+because Claude Code is the temporary owner here, not because this stage is newly classified
+mission-critical.
+
+### Claude Model Binding (GOV-MM-004, Temporary — IMP-004 Only)
+
+```
+Execution Environment:        Claude Code (VS Code extension; entrypoint claude-vscode)
+Actual Claude Model Name:     Claude Sonnet 5
+Exact Model Identifier:       claude-sonnet-5
+Claude Code Version:          2.1.269
+Resolution/Verification Date: 2026-09-13
+Resolution Evidence:          this session's own runtime/configuration context — not guessed, not
+                               inferred from a generic `claude` invocation
+Human Model Binding Approval: NOT YET GIVEN
+Binding Status:                MODEL RESOLVED — AWAITING HUMAN MODEL APPROVAL (not BOUND)
+Model Change Requests against this binding: none
+```
+
+**`IMP-004 IMPLEMENTATION EXECUTION DOES NOT PROCEED WHILE BINDING STATUS IS BELOW `BOUND`.`**
+Owner approval (Claude Code as Temporary Completion Owner) and exact model binding approval
+(`claude-sonnet-5` for IMP-004) are separate controls — the former does not imply the latter.
 
 ### Owner Transition Record
 
@@ -45,32 +72,49 @@ Previous prospective Primary Owner (Amendment V1, superseded):
   Kimi K3 / moonshotai/Kimi-K3
   Specialist: DeepSeek V4 Pro (deepseek/deepseek-v4-pro) — READ ONLY
 
-Current prospective Primary Owner (Amendment V2, PROPOSED):
+Standing prospective Primary Owner (Amendment V2, PROPOSED — applies to every OTHER purpose this
+  specification and the governance document define, and resumes automatically for IMP-004 itself
+  once this temporary exception expires):
   DeepSeek V4.1 Flash / deepseek/deepseek-v4.1-flash
   Specialist: NONE by default
+
+Human-authorized Temporary Completion Owner (GOV-MM-004, IMP-004 ONLY):
+  Claude Code (claude-sonnet-5, Claude Code 2.1.269)
+  Specialist: NONE by default
+  Expiration: automatic, at IMP-004 FINAL/LOCKED
 ```
 
-This is an ownership **transition**, not a historical rewrite: Kimi K3 never implemented any part
-of IMP-004 under this governance (IMP-004 implementation has never been authorized to execute —
-see "Status" above and "Pre-Existing Implementation Artifacts" below), so there is no completed
-Kimi K3 work being reattributed. Conversely, DeepSeek V4.1 Flash has not authored any existing
-artifact either — see "Pre-Existing Implementation Artifacts / Ownership-Provenance Review" below
-for the required review before any such artifact may be treated as DeepSeek's own work.
+This is an ownership **transition chain**, not a historical rewrite: Kimi K3 never implemented any
+part of IMP-004 under this governance (IMP-004 implementation has never been authorized to
+execute — see "Status" above and "Pre-Existing Implementation Artifacts" below), so there is no
+completed Kimi K3 work being reattributed. DeepSeek V4.1 Flash has likewise not authored any
+existing artifact. Claude Code, as Temporary Completion Owner, has not authored any existing
+artifact either as of this patch — see "Pre-Existing Implementation Artifacts /
+Ownership-Provenance Review" below for the required review before any such artifact may be
+treated as adopted work under any owner, current or prior.
 
 **`IMP-004 IMPLEMENTATION EXECUTION IS ON HOLD.`** Human Implementation Authorization is GRANTED
 in principle ("Saya setuju. IMP-004 Implementation Authorized.") and is model-neutral — it
-authorized implementing IMP-004, not a specific owner — so changing the Primary Implementation
-Owner from Kimi K3 to DeepSeek V4.1 Flash does not, by itself, require re-obtaining that
-authorization. However, actual execution remains on HOLD until ALL of the following are true:
+authorized implementing IMP-004, not a specific owner — so the ownership changes recorded above
+(Kimi K3 -> DeepSeek V4.1 Flash -> Claude Code, Temporary Completion Owner) do not, by themselves,
+require re-obtaining that authorization. Separately, Human has explicitly designated Claude Code
+as Temporary Completion Owner ("Saya setuju. Claude Code ditetapkan sebagai Temporary Completion
+Owner untuk IMP-004 saja..." — see GOV-MM-004). Neither statement is itself approval of the exact
+Claude model identifier — that is the separate, still-outstanding "Claude Model Binding" control
+above. Actual execution remains on HOLD until ALL of the following are true:
 
 ```
-1. Governance Amendment V2 passes Codex re-audit.
-2. Human gives Final Approval to Amendment V2.
-3. Amendment V2 is materialized as FINAL / LOCKED.
-4. This specification's owner metadata is synchronized with Amendment V2 (this patch).
-5. The ownership-provenance review of pre-existing uncommitted IMP-004 artifacts (see below) is
-   completed and recorded.
-6. DeepSeek V4.1 Flash explicitly accepts ownership of the continuing implementation.
+1. Governance Amendment V2 — including GOV-MM-004, which is recorded as part of Amendment V2's
+   still-`PROPOSED` state, not a separately-locked clause — passes Codex re-audit and reaches
+   `FINAL / LOCKED` (see "GOV-MM-004 — IMP-004 Temporary Completion Ownership Exception" in the
+   governance document; its own Status line is explicit about this) — NOT YET DONE.
+2. The exact Claude model identifier (claude-sonnet-5) is explicitly Human-approved for IMP-004,
+   reaching Binding Status BOUND (see "Claude Model Binding" above) — NOT YET DONE.
+3. The ownership-provenance review of pre-existing uncommitted IMP-004 artifacts (see below) is
+   completed and recorded, with Claude Code (as the now-confirmed reviewing owner) making an
+   explicit ADOPT/REMEDIATE/REPLACE decision per artifact — NOT YET DONE.
+4. Codex remains available and unreplaced as Independent Formal Reviewer for this stage
+   (unchanged — no action required unless this ever becomes false).
 ```
 
 Approval of HD-IMP004-01/02/03 (Q26-Q28) must not be read as execution authorization — those
@@ -86,32 +130,41 @@ does **not** inspect or modify that code's content — it only records the requi
 disposition:
 
 ```
-Existing work status:     UNCOMMITTED / PRE-AMENDMENT-V2
+Existing work status:     UNCOMMITTED / PRE-TRANSITION (predates both the DeepSeek V4.1 Flash
+                            Amendment V2 assignment and the Claude Code GOV-MM-004 temporary
+                            exception)
 Provenance:                PARTIALLY KNOWN / UNKNOWN where not independently provable — this
                             specification does not assert who or what produced it
 Disposition:                QUARANTINED FROM ACCEPTANCE UNTIL REVIEWED — neither adopted nor
                             required to be discarded by default
 Authorship policy:          No retroactive re-attribution — adopting an artifact later does not
-                            imply DeepSeek V4.1 Flash authored it originally, and does not imply
-                            Kimi K3 (or any other model) completed IMP-004
+                            imply Claude Code, DeepSeek V4.1 Flash, or Kimi K3 (or any other
+                            model) authored it originally or completed IMP-004
 ```
 
-Before DeepSeek V4.1 Flash may resume/continue IMP-004 implementation using or replacing any of
-this pre-existing material, the following handoff sequence is required (see
-`docs/audits/IMP-004-OWNERSHIP-HANDOFF.md` for the recorded governance/provenance metadata this
-produces — that record is provenance tracking, not implementation acceptance):
+Before Claude Code (the current Temporary Completion Owner under GOV-MM-004) may resume/continue
+IMP-004 implementation using or replacing any of this pre-existing material, the following handoff
+sequence is required (see `docs/audits/IMP-004-OWNERSHIP-HANDOFF.md` for the recorded
+governance/provenance metadata this produces — that record is provenance tracking, not
+implementation acceptance) — this sequence itself is unaffected by which Command Code or Claude
+model happens to be the current owner:
 
 ```
 1. Inventory existing uncommitted IMP-004 artifacts.
 2. Record known provenance (branch, creation period, prior authorized owner/model if known,
    "unknown" where not provable).
-3. New Primary Owner (DeepSeek V4.1 Flash) performs a READ/REVIEW of the existing implementation.
-4. New Primary Owner explicitly chooses, per artifact: ADOPT / REMEDIATE / REPLACE.
+3. Current Owner (Claude Code, per GOV-MM-004) performs a READ/REVIEW of the existing
+   implementation.
+4. Current Owner explicitly chooses, per artifact: ADOPT / REMEDIATE / REPLACE.
 5. Adoption does not retroactively reattribute prior authorship.
-6. From handoff acceptance onward, DeepSeek V4.1 Flash is the sole active implementation owner
-   for IMP-004 — the one-owner invariant applies from that point forward exactly as it did before.
-7. Concurrent editing between whatever produced the pre-existing artifacts and the new owner is
-   prohibited at every step of this sequence, consistent with "ONE IMP / ONE PRIMARY
+6. From handoff acceptance onward, Claude Code is the sole active implementation owner for
+   IMP-004, for the duration of the GOV-MM-004 exception — the one-owner invariant applies from
+   that point forward exactly as it did before. If GOV-MM-004 expires (IMP-004 reaches
+   FINAL/LOCKED) before any further ownership change, Amendment V2's standing DeepSeek V4.1 Flash
+   assignment governs any SUBSEQUENT IMP-004-adjacent work (e.g. a later remediation pass), not
+   this same completed IMP-004 stage.
+7. Concurrent editing between whatever produced the pre-existing artifacts and the current owner
+   is prohibited at every step of this sequence, consistent with "ONE IMP / ONE PRIMARY
    IMPLEMENTATION OWNER".
 ```
 

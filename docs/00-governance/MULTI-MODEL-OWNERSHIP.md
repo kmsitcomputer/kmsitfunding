@@ -488,7 +488,89 @@ artifacts that already exist outside this governance's own acceptance process.
 
 IMP-004's Primary Implementation Owner, once the hold above is released: `DeepSeek V4.1 Flash`
 (`deepseek/deepseek-v4.1-flash`) — see "IMP-004 Boundary" below for the updated intended-ownership
-record.
+record. **This is superseded, for IMP-004 only, by GOV-MM-004 immediately below.**
+
+### GOV-MM-004 — IMP-004 Temporary Completion Ownership Exception
+
+**Status: `PROPOSED` (part of Amendment V2's still-`PROPOSED` state) — a Human-authorized one-time
+exception, not a change to the Amendment V2 prospective program itself.**
+
+> **Human, verbatim:**
+>
+> "Saya setuju. Claude Code ditetapkan sebagai Temporary Completion Owner untuk IMP-004 saja.
+> Setelah IMP-004 FINAL/LOCKED, ownership kembali mengikuti Multi-Model Governance V2 mulai
+> IMP-005."
+
+```
+Authority:                    Explicit Human Decision
+Previous prospective owner:   Kimi K3 (Amendment V1, superseded)
+Intermediate V2 proposed owner: DeepSeek V4.1 Flash (Amendment V2, still the standing prospective
+                               assignment for every OTHER purpose this document defines)
+Temporary Completion Owner:   Claude Code
+Scope:                        IMP-004 ONLY — no other IMP's ownership is affected by this clause
+Purpose:                      controlled review of the pre-existing, uncommitted IMP-004
+                               implementation work already found in the working tree (per
+                               docs/audits/IMP-004-OWNERSHIP-HANDOFF.md), and completion of
+                               IMP-004 under Claude's existing single-owner PATCH-DO-NOT-REWRITE
+                               discipline
+Expiration:                   AUTOMATIC, the moment IMP-004 reaches FINAL / LOCKED — no separate
+                               Human action is required to end this exception
+IMP-005 onward:                Amendment V2's prospective matrix applies exactly as already
+                               recorded in "Fixed IMP Ownership Matrix" below — UNCHANGED by this
+                               clause
+Independent Formal Reviewer:  Codex (unchanged — Claude does not become IMP-004's own reviewer)
+Human Stage Gate:              Required (unchanged)
+```
+
+This clause does not erase the DeepSeek V4.1 Flash transition history recorded above and in
+`docs/audits/IMP-004-OWNERSHIP-HANDOFF.md` — it records a THIRD link in that same chain (Kimi K3 ->
+DeepSeek V4.1 Flash -> Claude Code, IMP-004 only), not a replacement of the prior record. Once
+IMP-004 is FINAL/LOCKED, this exception expires automatically and does not carry forward to any
+other IMP — DeepSeek V4.1 Flash remains IMP-004's own historical prospective-transition record for
+traceability, and remains the Amendment V2 assignment for every IMP this clause does not name.
+
+#### GOV-MM-004 Model Binding (Per GOV-MM-002's Same Discipline)
+
+Claude Code remains subject to Per-IMP Model Binding (GOV-MM-002) even under this temporary
+exception — being named Temporary Completion Owner is not, by itself, approval of any specific
+Claude model generation for IMP-004. The two controls are separate:
+
+```
+UNBOUND
+   |
+   v
+MODEL RESOLVED               <- this task's evidence reaches this state, no further, below
+   |
+   v
+AWAITING HUMAN MODEL APPROVAL
+   |
+   v
+BOUND
+   |
+   v
+IMPLEMENTATION MAY PROCEED
+```
+
+Resolved (not guessed, not inferred from a generic `claude` invocation), from this session's own
+runtime/configuration evidence:
+
+```
+Provider:                 Anthropic
+Model Display Name:       Claude Sonnet 5
+Exact Model Identifier:   claude-sonnet-5
+Claude Code Version:      2.1.269
+Execution Environment:    Claude Code (VS Code extension; entrypoint claude-vscode)
+Resolution/Verification Date: 2026-09-13
+Binding Status:            MODEL RESOLVED — AWAITING HUMAN MODEL APPROVAL
+```
+
+No prior repository evidence records explicit Human approval of `claude-sonnet-5` specifically for
+IMP-004 — Human's approval of Claude Code as Temporary Completion Owner is a distinct control from
+approval of this exact model identifier, per GOV-MM-002's own "owner approval and exact model
+binding approval are separate controls" principle, restated here explicitly per this task's
+instruction. **IMP-004 implementation execution does not proceed on the strength of model
+resolution alone — `BOUND` requires a separate, explicit Human approval of `claude-sonnet-5` for
+IMP-004, not yet given.**
 
 ## Non-Concurrent Ownership Rule
 
@@ -546,7 +628,7 @@ above; a specific IMP's own specification may add a technically-justified, READ-
 | IMP | Domain | Primary Owner | Specialist |
 |---|---|---|---|
 | 003 | RBAC + Scope + Business Authority | Claude Code | — (Completed prior to this amendment) |
-| 004 | Audit + Governance Foundation | DeepSeek V4.1 Flash | none by default |
+| 004 | Audit + Governance Foundation | **Claude Code — Temporary Completion Owner** (GOV-MM-004; IMP-004 only, expires at FINAL/LOCKED; standing V2 assignment is DeepSeek V4.1 Flash) | none by default |
 | 005 | CMS | Qwen 3.8 Flash | none by default |
 | 006 | Theme Engine | Qwen 3.8 Flash | none by default |
 | 007 | Campaign + Program + Fund | Kimi K2.7 Code | none by default |
@@ -803,22 +885,34 @@ Implementation Owner/model/specialist/reviewer fields are recorded and approved.
 
 IMP-004 intended ownership once its own implementation gate is reached (updated by Amendment V2 —
 see "Amendment V2 — Command Code Model Generation Replacement" -> "IMP-004 Transition" above for
-the full, currently-in-effect HOLD condition; this block records the resulting assignment, not a
-separate authorization):
+the full, currently-in-effect HOLD condition, and "GOV-MM-004 — IMP-004 Temporary Completion
+Ownership Exception" for the current actual owner; this block records the resulting assignment,
+not a separate authorization):
 
 ```
-Primary:                    DeepSeek V4.1 Flash
-Exact ID:                   deepseek/deepseek-v4.1-flash
-Specialist:                 none by default (Amendment V2)
-Independent Formal Reviewer: Codex
-Human:                       Final Stage Gate authority
+Primary (current, GOV-MM-004,      Claude Code — Temporary Completion Owner (IMP-004 only)
+  IMP-004 only, expires at
+  FINAL/LOCKED):
+Exact Claude Model Identifier:      claude-sonnet-5 — MODEL RESOLVED, AWAITING HUMAN MODEL
+                                     APPROVAL (not yet BOUND — see GOV-MM-004 above)
+Standing Amendment V2 assignment
+  (resumes automatically at
+  FINAL/LOCKED, and applies to
+  IMP-005 onward unaffected):       DeepSeek V4.1 Flash (deepseek/deepseek-v4.1-flash)
+Specialist:                         none by default (Amendment V2)
+Independent Formal Reviewer:        Codex
+Human:                               Final Stage Gate authority
 ```
 
 IMP-004's specification has since passed independent Codex specification audit (0 BLOCKER/MAJOR/
 MINOR/EDITORIAL/HUMAN DECISION REQUIRED) and Human has separately stated IMP-004 implementation is
-authorized in principle — but execution remains on **HOLD** until Amendment V2 itself reaches
-`FINAL / LOCKED` (see "IMP-004 Transition" above); that Human statement authorized implementing
-IMP-004, not implementing it under an owner assignment this document had not yet finalized.
+authorized in principle, and separately still has designated Claude Code as IMP-004's Temporary
+Completion Owner (GOV-MM-004) — but execution remains on **HOLD**: Amendment V2 itself has not yet
+reached `FINAL / LOCKED`, and Claude's own Per-IMP Model Binding for IMP-004 is only
+`MODEL RESOLVED`, not yet `BOUND` (a separate, still-outstanding Human approval of the exact
+`claude-sonnet-5` identifier — see GOV-MM-004). Neither the "IMP-004 Implementation Authorized"
+statement nor the Temporary Completion Owner designation is itself approval of a specific model
+generation; those remain separate controls.
 
 ## Approval
 
@@ -937,6 +1031,34 @@ Final Human Lock Approval (Amendment V2):
   Human Approver:
   Approval Date:
   Approval Evidence:
+
+GOV-MM-004 Authorization (IMP-004 Temporary Completion Ownership Exception):
+  Authority:         Human
+  Statement:         "Saya setuju. Claude Code ditetapkan sebagai Temporary Completion Owner
+                     untuk IMP-004 saja. Setelah IMP-004 FINAL/LOCKED, ownership kembali
+                     mengikuti Multi-Model Governance V2 mulai IMP-005."
+  Scope:             Designates Claude Code as IMP-004's Temporary Completion Owner, for IMP-004
+                     only, automatically expiring at IMP-004 FINAL/LOCKED, with the Amendment V2
+                     prospective matrix (IMP-005 onward, and IMP-004's own standing DeepSeek
+                     V4.1 Flash assignment for every other purpose) explicitly unaffected. Does
+                     NOT approve any specific Claude model generation for IMP-004 — that remains
+                     a separate GOV-MM-002-style Per-IMP Model Binding control, itself still
+                     PENDING (see "Claude Model Binding" below). Does NOT authorize IMP-004
+                     implementation execution to begin (still gated on Amendment V2's own
+                     FINAL/LOCKED status and the model-binding approval below). Does NOT
+                     authorize application source/migration/test/dependency changes, adoption or
+                     modification of the pre-existing uncommitted IMP-004 artifacts, or git push.
+
+Claude Model Binding for IMP-004 (GOV-MM-004, distinct control from owner designation above):
+  Status:            MODEL RESOLVED — AWAITING HUMAN MODEL APPROVAL (not BOUND)
+  Exact Model Identifier: claude-sonnet-5
+  Model Display Name: Claude Sonnet 5
+  Claude Code Version: 2.1.269
+  Execution Environment: Claude Code (VS Code extension; entrypoint claude-vscode)
+  Resolution Evidence: this session's own runtime/configuration context; not guessed, not
+                     inferred from a generic invocation
+  Human Approver:
+  Approval Date:
 ```
 
 ## References
