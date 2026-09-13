@@ -2,11 +2,15 @@
 
 ## Status
 
-IN PROGRESS (Codex specification audit: 0 BLOCKER/MAJOR/MINOR/EDITORIAL/HUMAN DECISION REQUIRED;
-Human Implementation Authorization: GRANTED; Temporary Completion Owner: Claude Code, BOUND to
-claude-sonnet-5; Human has explicitly released execution — see "Implementation Ownership" below.
-Implementation is not yet complete and is not FINAL/LOCKED — that requires its own Codex
-implementation audit and Human Stage Gate)
+IMPLEMENTATION COMPLETE LOCALLY — READY FOR INDEPENDENT CODEX IMPLEMENTATION AUDIT (Codex
+specification audit: 0 BLOCKER/MAJOR/MINOR/EDITORIAL/HUMAN DECISION REQUIRED; Human Implementation
+Authorization: GRANTED; Temporary Completion Owner: Claude Code, BOUND to claude-sonnet-5; Human
+explicitly released execution — see "Implementation Ownership" below. Pre-existing uncommitted
+artifacts reviewed and ADOPTED (two targeted corrections applied) per
+`docs/audits/IMP-004-OWNERSHIP-HANDOFF.md`; missing test coverage authored fresh; full suite
+(258 tests, 838 assertions) PASS on both SQLite and disposable MySQL 8.4.11; Pint/TypeScript/
+build/composer audit PASS. NOT FINAL/LOCKED — that requires its own Codex implementation audit and
+Human Stage Gate, neither of which this owner can self-declare)
 
 ## Implementation Ownership
 
