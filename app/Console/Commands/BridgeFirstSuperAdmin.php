@@ -76,7 +76,7 @@ class BridgeFirstSuperAdmin extends Command
         }
 
         try {
-            $assignment = DB::transaction(function () use ($principals, $user, $superAdminRole) {
+            $assignment = DB::transaction(function () use ($principals, $user, $superAdminRole, $audit) {
                 $principal = $principals->forUser($user);
                 $lockedPrincipal = Principal::whereKey($principal->id)->lockForUpdate()->firstOrFail();
 
@@ -86,7 +86,7 @@ class BridgeFirstSuperAdmin extends Command
                     throw new \RuntimeException('super_admin already canonically assigned (concurrent bridge run).');
                 }
 
-                return PrincipalRoleAssignment::create([
+                $assignment = PrincipalRoleAssignment::create([
                     'principal_id' => $lockedPrincipal->id,
                     'role_id' => $superAdminRole->id,
                     'scope_type' => ScopeType::GlobalPlatform->value,
@@ -97,20 +97,26 @@ class BridgeFirstSuperAdmin extends Command
                     // Attribution" and "Super Admin Canonical Authorization").
                     'assigned_by_principal_id' => null,
                 ]);
+
+                // IMP-004: CRITICAL/MUTATION_ATOMIC — the canonical audit
+                // append joins the bridge transaction (Q26); its actor is
+                // PRE_PRINCIPAL_SYSTEM per the registry, matching the NULL
+                // assigned_by attribution above.
+                $audit->record('super_admin_canonically_authorized', [
+                    'principal_id' => $assignment->principal_id,
+                    'role' => 'super_admin',
+                    'scope_type' => 'GLOBAL_PLATFORM',
+                    'granted' => ['role: super_admin'],
+                    'not_granted' => ['financial_authority', 'business_authority', 'approval_authority'],
+                ]);
+
+                return $assignment;
             });
         } catch (\Throwable $e) {
             $this->error('Bridge failed: '.$e->getMessage());
 
             return self::FAILURE;
         }
-
-        $audit->record('super_admin_canonically_authorized', [
-            'principal_id' => $assignment->principal_id,
-            'role' => 'super_admin',
-            'scope_type' => 'GLOBAL_PLATFORM',
-            'granted' => ['role: super_admin'],
-            'not_granted' => ['financial_authority', 'business_authority', 'approval_authority'],
-        ]);
 
         $this->info('super_admin Role canonically granted to the bootstrapped identity (GLOBAL_PLATFORM scope only).');
         $this->line('No Business/Financial/Approval Authority was granted — that remains a separate, later Authority Assignment.');

@@ -52,7 +52,7 @@ class BootstrapSuperAdmin extends Command
         }
 
         try {
-            $user = DB::transaction(function () use ($email, $password) {
+            $user = DB::transaction(function () use ($email, $password, $audit) {
                 // The unique constraint on `lock_key` is the durable, race-safe
                 // guard: even under a concurrent double-invocation, only one
                 // transaction can successfully insert this row.
@@ -70,6 +70,11 @@ class BootstrapSuperAdmin extends Command
                 $bootstrap->user_id = $user->id;
                 $bootstrap->save();
 
+                // IMP-004: CRITICAL/MUTATION_ATOMIC — the canonical audit
+                // append joins the bootstrap transaction (Q26); its actor is
+                // PRE_PRINCIPAL_SYSTEM per the registry (IMP004-SPEC-M02 ‡).
+                $audit->record('first_super_admin_bootstrap_completed', $user);
+
                 return $user;
             });
         } catch (\Throwable $e) {
@@ -77,8 +82,6 @@ class BootstrapSuperAdmin extends Command
 
             return self::FAILURE;
         }
-
-        $audit->record('first_super_admin_bootstrap_completed', $user);
 
         $this->info('First Super Admin identity bootstrapped successfully.');
         $this->line('Canonical Super Admin authority (role/permission/scope) is granted separately by IMP-003.');

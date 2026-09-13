@@ -88,12 +88,13 @@ class EmailChangeService
                 'expires_at' => now()->addMinutes((int) config('identity.email_change_request_ttl_minutes')),
             ]);
 
+            // IMP-004: CRITICAL/MUTATION_ATOMIC — the audit append joins the
+            // request-creation transaction; a forced audit failure rolls the
+            // new request (and the supersession above) back (Q26).
+            $this->audit->record('email_change_requested', $user, ['generation' => $request->generation]);
+
             return ['status' => 'requested', 'request' => $request, 'plain_token' => $plainToken];
         });
-
-        if ($outcome['status'] === 'requested') {
-            $this->audit->record('email_change_requested', $user, ['generation' => $outcome['request']->generation]);
-        }
 
         return $outcome;
     }

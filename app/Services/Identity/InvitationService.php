@@ -38,19 +38,27 @@ class InvitationService
         $normalized = $this->normalizer->normalize($intendedEmail);
         $plainToken = Str::random(64);
 
-        $invitation = Invitation::create([
-            'intended_email' => $normalized,
-            'token_hash' => Hash::make($plainToken),
-            'invited_actor' => $invitedActor,
-            'issued_at' => now(),
-            'expires_at' => now()->addDays((int) config('identity.invitation_ttl_days')),
-            'issuer_user_id' => $issuer?->id,
-        ]);
+        // IMP-004: invitation_issued is CRITICAL/MUTATION_ATOMIC — creation
+        // and the canonical audit append commit as ONE transaction (Q26), and
+        // the event requires a resolved issuer Principal actor (fail-closed).
+        $invitation = DB::transaction(function () use ($normalized, $plainToken, $invitedActor, $issuer) {
+            $invitation = Invitation::create([
+                'intended_email' => $normalized,
+                'token_hash' => Hash::make($plainToken),
+                'invited_actor' => $invitedActor,
+                'issued_at' => now(),
+                'expires_at' => now()->addDays((int) config('identity.invitation_ttl_days')),
+                'issuer_user_id' => $issuer?->id,
+            ]);
 
-        $this->audit->record('invitation_issued', $issuer, [
-            'invitation_public_id' => $invitation->public_id,
-            'invited_actor' => $invitedActor,
-        ]);
+            $this->audit->record('invitation_issued', $issuer, [
+                'invitation_id' => $invitation->id,
+                'invitation_public_id' => $invitation->public_id,
+                'invited_actor' => $invitedActor,
+            ]);
+
+            return $invitation;
+        });
 
         return ['invitation' => $invitation, 'plain_token' => $plainToken];
     }
@@ -76,6 +84,7 @@ class InvitationService
             ])->save();
 
             $this->audit->record('invitation_revoked', $revoker, [
+                'invitation_id' => $locked->id,
                 'invitation_public_id' => $locked->public_id,
             ]);
 
@@ -121,6 +130,7 @@ class InvitationService
 
             $this->audit->record('identity_created', $user);
             $this->audit->record('invitation_accepted', $user, [
+                'invitation_id' => $locked->id,
                 'invitation_public_id' => $locked->public_id,
                 'invited_actor' => $locked->invited_actor,
             ]);

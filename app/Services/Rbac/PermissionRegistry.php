@@ -29,6 +29,16 @@ class PermissionRegistry
 
     public const RBAC_PRINCIPAL_DEACTIVATE = 'rbac.principal.deactivate';
 
+    // IMP-004 audit-read permission family (Q27 / IMP004-SPEC-M05). Super
+    // Admin is NOT granted any of these by default — each requires its own
+    // explicit Role/Permission grant through RolePermissionService. None of
+    // them grants any financial-domain business authority.
+    public const AUDIT_READ = 'audit.read';
+
+    public const AUDIT_READ_SECURITY = 'audit.read.security';
+
+    public const AUDIT_READ_FINANCIAL_REFERENCE = 'audit.read.financial_reference';
+
     /**
      * @return array<string, array{description: string, module: string}>
      */
@@ -68,6 +78,21 @@ class PermissionRegistry
                 'description' => 'Permanently deactivate a System or Integration Principal catalog '.
                     'entry (and its linked canonical Principal) — a one-way transition.',
                 'module' => 'rbac',
+            ],
+            self::AUDIT_READ => [
+                'description' => 'Read canonical audit evidence whose registry visibility class is GENERAL '.
+                    '(with no populated financial-reference fields).',
+                'module' => 'audit',
+            ],
+            self::AUDIT_READ_SECURITY => [
+                'description' => 'Read canonical audit evidence whose registry visibility class is SECURITY.',
+                'module' => 'audit',
+            ],
+            self::AUDIT_READ_FINANCIAL_REFERENCE => [
+                'description' => 'Read otherwise-authorized canonical audit evidence containing protected '.
+                    'financial references — grants NO financial-domain business authority, Payment/Ledger/'.
+                    'Withdrawal/Refund/Reconciliation access, or scope bypass.',
+                'module' => 'audit',
             ],
         ];
     }

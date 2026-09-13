@@ -65,11 +65,10 @@ return [
             'replace_placeholders' => true,
         ],
 
-        // Identity/Authentication audit emission points (IMP-002 "Audit Events").
-        // No canonical Audit domain sink exists yet (owned by Governance & Platform
-        // Services, MODULE-OWNERSHIP.md §16) — this channel is the approved,
-        // deferred-persistence emission abstraction until that domain is built.
-        // Never contains secrets; see App\Services\Identity\IdentityAuditLogger.
+        // Identity/Authentication audit (IMP-002 "Audit Events"). IMP-004:
+        // the canonical durable sink is now the audit_records table via
+        // App\Services\Audit\AuditWriter — this channel is retained only as
+        // legacy non-canonical config; nothing writes to it anymore.
         'identity_audit' => [
             'driver' => 'single',
             'path' => storage_path('logs/identity-audit.log'),
@@ -77,13 +76,24 @@ return [
             'replace_placeholders' => true,
         ],
 
-        // RBAC/Scope/Business-Authority audit emission points (IMP-003
-        // "Audit Contract"). Same deferred-persistence pattern as
-        // identity_audit above — see App\Services\Rbac\RbacAuditLogger.
+        // RBAC/Scope/Business-Authority audit (IMP-003 "Audit Contract").
+        // IMP-004: superseded by the canonical audit_records sink — retained
+        // only as legacy non-canonical config; nothing writes to it anymore.
         'rbac_audit' => [
             'driver' => 'single',
             'path' => storage_path('logs/rbac-audit.log'),
             'level' => 'info',
+            'replace_placeholders' => true,
+        ],
+
+        // IMP-004: operational/security failure path for canonical
+        // CRITICAL/DENIAL_DURABLE audit-persistence failures (IMP004-SPEC-M04
+        // §4) — a denial-audit write failure is reported here, never silent,
+        // and never recursed through the canonical audit sink itself.
+        'security_audit_failures' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/security-audit-failures.log'),
+            'level' => 'error',
             'replace_placeholders' => true,
         ],
 

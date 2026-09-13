@@ -23,7 +23,14 @@ class RbacRoleSeeder extends Seeder
             ['name' => 'Super Admin', 'description' => 'Canonical platform Super Admin role.', 'is_system' => true],
         );
 
-        $permissionCodes = array_keys(PermissionRegistry::definitions());
+        // IMP-004 (Q27): the audit.read.* family is deliberately EXCLUDED
+        // from the super_admin bulk grant — Super Admin receives no automatic
+        // audit access merely because of role name; each audit.read.*
+        // permission requires its own explicit grant via RolePermissionService.
+        $permissionCodes = array_filter(
+            array_keys(PermissionRegistry::definitions()),
+            fn (string $code) => ! str_starts_with($code, 'audit.'),
+        );
 
         foreach (Permission::whereIn('code', $permissionCodes)->get() as $permission) {
             $alreadyGranted = $superAdmin->permissions()->where('permissions.id', $permission->id)->exists();

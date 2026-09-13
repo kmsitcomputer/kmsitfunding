@@ -28,15 +28,20 @@ class RegistrationService
     {
         $normalized = $this->normalizer->normalize($email);
 
+        // IMP-004: both audit events are CRITICAL/MUTATION_ATOMIC — the
+        // mutation and their canonical appends commit as ONE transaction;
+        // a forced audit failure rolls the identity creation back (Q26).
         $user = DB::transaction(function () use ($normalized, $password) {
-            return User::create([
+            $user = User::create([
                 'email' => $normalized,
                 'password' => Hash::make($password),
             ]);
-        });
 
-        $this->audit->record('identity_created', $user);
-        $this->audit->record('self_registration_completed', $user);
+            $this->audit->record('identity_created', $user);
+            $this->audit->record('self_registration_completed', $user);
+
+            return $user;
+        });
 
         event(new Registered($user));
 

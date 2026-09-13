@@ -219,10 +219,14 @@ class MfaService
         // framework session-store operation, not a DB row this connection's
         // transaction can enforce atomically (see PasswordService for the
         // same reasoning) — it is performed immediately after commit.
+        // IMP-004: the CRITICAL/MUTATION_ATOMIC audit append joins the
+        // security mutation's transaction (Q26) — a forced audit failure
+        // rolls the MFA disable/reset back.
         DB::transaction(function () use ($request, $user) {
             MfaSecret::where('user_id', $user->id)->delete();
             $user->forceFill(['mfa_enabled' => false])->save();
             $this->sessions->invalidateAllExcept($user, $request->session()->getId());
+            $this->audit->record('mfa_reset_or_disabled', $user);
         });
 
         // IMP002-REAUDIT (M07 follow-up): same fail-closed ordering as
@@ -231,8 +235,6 @@ class MfaService
         // retained session still carrying pre-transition ELEVATED assurance.
         $this->assurance->invalidate();
         $request->session()->regenerate();
-
-        $this->audit->record('mfa_reset_or_disabled', $user);
 
         return true;
     }
