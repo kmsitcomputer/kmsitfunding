@@ -17,11 +17,11 @@ use App\Services\Rbac\PrincipalService;
 use App\Services\Rbac\RbacAuditLogger;
 use App\Services\Rbac\RoleAssignmentService;
 use App\Services\Rbac\RolePermissionService;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\Support\Rbac\CapturesRbacAudit;
 use Tests\Support\Rbac\RbacTestActors;
+use Tests\Support\TruncatesInMemorySqlite;
 use Tests\TestCase;
 
 /**
@@ -29,24 +29,33 @@ use Tests\TestCase;
  * family actually emits its audit event (not merely code inspection),
  * attributes it to a Principal (never a User), keeps the mutation and its
  * audit emission transactionally atomic, and never leaks sensitive material.
+ *
+ * Uses TruncatesInMemorySqlite, not RefreshDatabase: RolePermissionService::
+ * grant() enforces the Transaction Ownership Invariant (IMP004-IMPL-M01)
+ * and must genuinely be the outermost transaction — RefreshDatabase's
+ * per-test wrapper transaction would otherwise trip that check on every
+ * call. See that trait's docblock for why plain DatabaseTruncation does not
+ * work against this repository's `:memory:` SQLite test connection.
  */
 class RbacAuditTest extends TestCase
 {
     use CapturesRbacAudit;
     use RbacTestActors;
-    use RefreshDatabase;
+    use TruncatesInMemorySqlite;
 
     private int $userSequence = 0;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->setUpTruncatedDatabase();
         $this->captureRbacAuditLog();
     }
 
     protected function tearDown(): void
     {
         $this->tearDownRbacAuditCapture();
+        $this->tearDownTruncatedDatabase();
         parent::tearDown();
     }
 
@@ -79,12 +88,14 @@ class RbacAuditTest extends TestCase
 
         $assignment = app(RoleAssignmentService::class)->assign($actor, $target, $role, ScopeType::GlobalPlatform, null);
 
-        $context = $this->assertRbacAuditEventLogged('role_assigned');
-        $this->assertSame($actor->id, $context['grantor_principal_id']);
-        $this->assertSame($target->id, $context['target_principal_id']);
-        $this->assertSame($role->id, $context['role_id']);
-        $this->assertArrayNotHasKey('grantor_user_id', $context);
-        $this->assertArrayNotHasKey('target_user_id', $context);
+        $record = $this->assertRbacAuditEventLogged('rbac.role.assigned');
+        $this->assertSame($actor->id, $record->actor_principal_id);
+        $this->assertSame('human', $record->actor_principal_kind);
+        $this->assertSame($assignment->id, $record->subject_id);
+        $this->assertSame($target->id, $record->metadata['target_principal_id']);
+        $this->assertSame($role->id, $record->metadata['role_id']);
+        $this->assertArrayNotHasKey('grantor_user_id', $record->metadata);
+        $this->assertArrayNotHasKey('target_user_id', $record->metadata);
     }
 
     public function test_role_revocation_emits_audit_event_attributed_to_principal(): void
@@ -96,10 +107,10 @@ class RbacAuditTest extends TestCase
 
         app(RoleAssignmentService::class)->revoke($actor, $assignment);
 
-        $context = $this->assertRbacAuditEventLogged('role_revoked');
-        $this->assertSame($actor->id, $context['revoker_principal_id']);
-        $this->assertSame($assignment->id, $context['assignment_id']);
-        $this->assertArrayNotHasKey('revoker_user_id', $context);
+        $record = $this->assertRbacAuditEventLogged('rbac.role.revoked');
+        $this->assertSame($actor->id, $record->actor_principal_id);
+        $this->assertSame($assignment->id, $record->subject_id);
+        $this->assertArrayNotHasKey('revoker_user_id', $record->metadata ?? []);
     }
 
     // --- 3/4: Authority assignment / revocation ---
@@ -111,10 +122,11 @@ class RbacAuditTest extends TestCase
 
         $assignment = app(AuthorityAssignmentService::class)->assign($actor, $target, $this->financialApprover(), ScopeType::GlobalPlatform, null);
 
-        $context = $this->assertRbacAuditEventLogged('authority_assigned');
-        $this->assertSame($actor->id, $context['grantor_principal_id']);
-        $this->assertSame($target->id, $context['target_principal_id']);
-        $this->assertArrayNotHasKey('grantor_user_id', $context);
+        $record = $this->assertRbacAuditEventLogged('rbac.authority.assigned');
+        $this->assertSame($actor->id, $record->actor_principal_id);
+        $this->assertSame($assignment->id, $record->subject_id);
+        $this->assertSame($target->id, $record->metadata['target_principal_id']);
+        $this->assertArrayNotHasKey('grantor_user_id', $record->metadata);
     }
 
     public function test_authority_revocation_emits_audit_event_attributed_to_principal(): void
@@ -125,9 +137,9 @@ class RbacAuditTest extends TestCase
 
         app(AuthorityAssignmentService::class)->revoke($actor, $assignment);
 
-        $context = $this->assertRbacAuditEventLogged('authority_revoked');
-        $this->assertSame($actor->id, $context['revoker_principal_id']);
-        $this->assertArrayNotHasKey('revoker_user_id', $context);
+        $record = $this->assertRbacAuditEventLogged('rbac.authority.revoked');
+        $this->assertSame($actor->id, $record->actor_principal_id);
+        $this->assertArrayNotHasKey('revoker_user_id', $record->metadata ?? []);
     }
 
     // --- 5/6: Role-Permission grant / revoke ---
@@ -140,11 +152,11 @@ class RbacAuditTest extends TestCase
 
         app(RolePermissionService::class)->grant($actor, $role, $permission);
 
-        $context = $this->assertRbacAuditEventLogged('role_permission_granted');
-        $this->assertSame($actor->id, $context['actor_principal_id']);
-        $this->assertSame($role->id, $context['role_id']);
-        $this->assertSame($permission->id, $context['permission_id']);
-        $this->assertArrayNotHasKey('actor_user_id', $context);
+        $record = $this->assertRbacAuditEventLogged('rbac.role_permission.granted');
+        $this->assertSame($actor->id, $record->actor_principal_id);
+        $this->assertSame($role->id, $record->metadata['role_id']);
+        $this->assertSame($permission->id, $record->metadata['permission_id']);
+        $this->assertArrayNotHasKey('actor_user_id', $record->metadata);
     }
 
     public function test_role_permission_revoke_emits_audit_event(): void
@@ -156,8 +168,8 @@ class RbacAuditTest extends TestCase
 
         app(RolePermissionService::class)->revoke($actor, $role, $permission);
 
-        $context = $this->assertRbacAuditEventLogged('role_permission_revoked');
-        $this->assertSame($actor->id, $context['actor_principal_id']);
+        $record = $this->assertRbacAuditEventLogged('rbac.role_permission.revoked');
+        $this->assertSame($actor->id, $record->actor_principal_id);
     }
 
     // --- 7/8: Non-human Principal deactivation ---
@@ -169,10 +181,10 @@ class RbacAuditTest extends TestCase
 
         app(PrincipalService::class)->deactivateSystem($actor, $systemRow);
 
-        $context = $this->assertRbacAuditEventLogged('non_human_principal_deactivated');
-        $this->assertSame($actor->id, $context['actor_principal_id']);
-        $this->assertSame('system', $context['kind']);
-        $this->assertArrayNotHasKey('actor_user_id', $context);
+        $record = $this->assertRbacAuditEventLogged('rbac.principal.non_human_deactivated');
+        $this->assertSame($actor->id, $record->actor_principal_id);
+        $this->assertSame('system', $record->metadata['kind']);
+        $this->assertArrayNotHasKey('actor_user_id', $record->metadata);
     }
 
     public function test_integration_principal_deactivation_emits_audit_event(): void
@@ -182,9 +194,9 @@ class RbacAuditTest extends TestCase
 
         app(PrincipalService::class)->deactivateIntegration($actor, $integrationRow);
 
-        $context = $this->assertRbacAuditEventLogged('non_human_principal_deactivated');
-        $this->assertSame($actor->id, $context['actor_principal_id']);
-        $this->assertSame('integration', $context['kind']);
+        $record = $this->assertRbacAuditEventLogged('rbac.principal.non_human_deactivated');
+        $this->assertSame($actor->id, $record->actor_principal_id);
+        $this->assertSame('integration', $record->metadata['kind']);
     }
 
     // --- Sensitive payload safety ---
@@ -198,11 +210,11 @@ class RbacAuditTest extends TestCase
 
         $forbidden = ['password', 'password_hash', 'mfa_secret', 'totp_secret', 'session_token', 'api_token', 'credential', 'secret'];
 
-        foreach ($this->readRbacAuditEvents() as $entry) {
-            $flattened = strtolower(json_encode($entry['context']));
+        foreach ($this->readRbacAuditEvents() as $record) {
+            $flattened = strtolower(json_encode($record->metadata));
 
             foreach ($forbidden as $needle) {
-                $this->assertStringNotContainsString($needle, $flattened, "Audit context must never contain '{$needle}'.");
+                $this->assertStringNotContainsString($needle, $flattened, "Audit metadata must never contain '{$needle}'.");
             }
         }
     }
@@ -213,6 +225,8 @@ class RbacAuditTest extends TestCase
     {
         $this->app->bind(RbacAuditLogger::class, fn () => new class extends RbacAuditLogger
         {
+            public function __construct() {}
+
             public function record(string $event, array $context = []): void
             {
                 throw new \RuntimeException('forced audit failure');

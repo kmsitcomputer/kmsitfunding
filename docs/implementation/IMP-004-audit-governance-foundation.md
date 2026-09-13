@@ -2,11 +2,19 @@
 
 ## Status
 
-IN PROGRESS (Codex specification audit: 0 BLOCKER/MAJOR/MINOR/EDITORIAL/HUMAN DECISION REQUIRED;
-Human Implementation Authorization: GRANTED; Temporary Completion Owner: Claude Code, BOUND to
-claude-sonnet-5; Human has explicitly released execution — see "Implementation Ownership" below.
-Implementation is not yet complete and is not FINAL/LOCKED — that requires its own Codex
-implementation audit and Human Stage Gate)
+REMEDIATION PASS 2 COMPLETE LOCALLY — PENDING TARGETED CODEX RE-AUDIT (targeted Codex re-audit of
+Remediation Pass 1 returned: IMP004-IMPL-M01/M02/M03/M04/m01 RESOLVED; IMP004-IMPL-M05 NOT
+RESOLVED; new regression finding IMP004-REAUDIT-R1-01 MAJOR. Both patched this pass —
+IMP004-IMPL-M05 (targeted second-event forced-failure evidence for
+identity.user.self_registered) and IMP004-REAUDIT-R1-01 (invalid null-issuer invitation test
+fixtures; Codex determined this was NOT a specification contradiction — the earlier
+IMP-002/IMP-004 "Human Decision Required" claim was itself incorrect and has been corrected, not
+erased, in `docs/audits/IMP-004-OWNERSHIP-HANDOFF.md` "Remediation Pass 2 (Targeted Codex
+Re-Audit)"). Human Decision Required: NO. Temporary Completion Owner: Claude Code, BOUND to
+claude-sonnet-5, unchanged throughout. Full suite PASS with 0 failures/0 errors on both SQLite
+and disposable MySQL 8.4.11 (MySQL-only concurrency test skipped on SQLite, as already approved);
+Pint/TypeScript/build/composer audit PASS. NOT FINAL/LOCKED — that requires its own Codex
+implementation audit and Human Stage Gate, neither of which this owner can self-declare)
 
 ## Implementation Ownership
 

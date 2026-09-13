@@ -11,21 +11,41 @@ use App\Models\User;
 use App\Services\Identity\AssuranceService;
 use App\Services\Rbac\PrincipalService;
 use App\Services\Rbac\RolePermissionService;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\Support\Rbac\RbacTestActors;
+use Tests\Support\TruncatesInMemorySqlite;
 use Tests\TestCase;
 
 /**
  * `IMP003-IMPL-M03` — the canonical, authoritative Role-Permission
  * grant/revoke mutation service: authorization + ELEVATED assurance +
  * self-expansion protection + durable history + audit.
+ *
+ * Uses TruncatesInMemorySqlite, not RefreshDatabase: RolePermissionService::
+ * grant() enforces the Transaction Ownership Invariant (IMP004-IMPL-M01)
+ * and must genuinely be the outermost transaction — RefreshDatabase's
+ * per-test wrapper transaction would otherwise trip that check on every
+ * call. See that trait's docblock for why plain DatabaseTruncation does not
+ * work against this repository's `:memory:` SQLite test connection.
  */
 class RolePermissionServiceTest extends TestCase
 {
     use RbacTestActors;
-    use RefreshDatabase;
+    use TruncatesInMemorySqlite;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->setUpTruncatedDatabase();
+    }
+
+    protected function tearDown(): void
+    {
+        $this->tearDownTruncatedDatabase();
+        parent::tearDown();
+    }
 
     private int $userSequence = 0;
 

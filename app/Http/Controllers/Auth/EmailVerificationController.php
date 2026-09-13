@@ -7,6 +7,7 @@ use App\Services\Identity\IdentityAuditLogger;
 use Illuminate\Foundation\Auth\EmailVerificationRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -33,9 +34,15 @@ class EmailVerificationController extends Controller
             return redirect()->route('dashboard');
         }
 
-        $request->fulfill();
+        // IMP-004 (IMP004-SPEC-M03): identity.email.verified is
+        // CRITICAL/MUTATION_ATOMIC — the verification state change and the
+        // canonical audit append are ONE atomic transaction; a forced audit
+        // failure leaves the email unverified with no orphan audit record.
+        DB::transaction(function () use ($request, $audit) {
+            $request->fulfill();
 
-        $audit->record('email_verified', $request->user());
+            $audit->record('email_verified', $request->user());
+        });
 
         return redirect()->route('dashboard');
     }

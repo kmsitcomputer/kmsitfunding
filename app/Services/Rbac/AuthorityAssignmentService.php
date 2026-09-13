@@ -101,6 +101,7 @@ class AuthorityAssignmentService
 
             $this->audit->record('authority_assigned', [
                 'grantor_principal_id' => $lockedGrantor->id,
+                'assignment_id' => $assignment->id,
                 'target_principal_id' => $lockedTarget->id,
                 'authority_type_id' => $authorityType->id,
                 'scope_type' => $scopeType->value,

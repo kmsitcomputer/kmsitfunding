@@ -36,10 +36,14 @@ class PasswordService
         // operations, not DB rows this transaction can enforce atomically —
         // they run immediately after commit (see "Security Transition
         // Atomicity" in docs/audits/IMP-002-IMPLEMENTATION-REMEDIATION-1.md).
+        // IMP-004: the CRITICAL/MUTATION_ATOMIC audit append joins the
+        // credential mutation's transaction — a forced audit failure rolls
+        // the password change back (Q26).
         DB::transaction(function () use ($request, $user, $newPassword) {
             $user->forceFill(['password' => Hash::make($newPassword)])->save();
             Password::deleteToken($user);
             $this->sessions->invalidateAllExcept($user, $request->session()->getId());
+            $this->audit->record('password_changed', $user);
         });
 
         // IMP002-REAUDIT (M07 follow-up): invalidate ELEVATED in the current
@@ -50,8 +54,6 @@ class PasswordService
         // Do not depend on regenerate() succeeding to remove ELEVATED.
         $this->assurance->invalidate();
         $request->session()->regenerate();
-
-        $this->audit->record('password_changed', $user);
     }
 
     public function sendResetLink(string $email): void
@@ -73,17 +75,18 @@ class PasswordService
                 // Same reasoning as changePassword(): the credential mutation
                 // and other-session invalidation are one transaction; current-
                 // session rotation and assurance invalidation follow after commit.
+                // IMP-004: the CRITICAL/MUTATION_ATOMIC audit append joins
+                // this transaction (Q26) — see changePassword().
                 DB::transaction(function () use ($request, $user, $password) {
                     $user->forceFill(['password' => Hash::make($password)])->save();
                     $this->sessions->invalidateAllExcept($user, $request->session()->getId());
+                    $this->audit->record('password_reset_completed', $user);
                 });
 
                 // Same fail-closed ordering as changePassword() — see the
                 // comment there.
                 $this->assurance->invalidate();
                 $request->session()->regenerate();
-
-                $this->audit->record('password_reset_completed', $user);
             }
         );
 

@@ -123,6 +123,7 @@ class RoleAssignmentService
 
             $this->audit->record('role_assigned', [
                 'grantor_principal_id' => $lockedGrantor->id,
+                'assignment_id' => $assignment->id,
                 'target_principal_id' => $lockedTarget->id,
                 'role_id' => $role->id,
                 'scope_type' => $scopeType->value,
