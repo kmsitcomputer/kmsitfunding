@@ -18,6 +18,19 @@ and
 [docs/audits/IMP-002-TARGETED-READINESS-REMEDIATION-1.md](../audits/IMP-002-TARGETED-READINESS-REMEDIATION-1.md).
 No entry below was invented, reinterpreted, or simplified beyond what was supplied.
 
+Q26-Q28 were materialized during the "IMP-004 — Human Decision Materialization + Specification"
+task, resolving HD-IMP004-01/HD-IMP004-02/HD-IMP004-03 — the three Human Decisions this same task
+identified as required by
+[docs/implementation/IMP-004-audit-governance-readiness.md](../implementation/IMP-004-audit-governance-readiness.md)
+— from Human Decision content ("Saya setuju dengan HD-IMP004-01, HD-IMP004-02, dan HD-IMP004-03.")
+supplied directly to that task. See
+[docs/implementation/IMP-004-audit-governance-foundation.md](../implementation/IMP-004-audit-governance-foundation.md)
+for the specification these decisions govern. Unlike Q1-Q25 (a repository copy of a pre-existing
+external baseline), Q26-Q28 are new Human Decisions made directly within this repository's
+implementation process — they carry the same Level 1 authority per
+[docs/00-governance/DOCUMENT-AUTHORITY.md](../00-governance/DOCUMENT-AUTHORITY.md) ("Human Decision
+Register — explicit approved Human changes").
+
 Per [docs/00-governance/DOCUMENT-AUTHORITY.md](../00-governance/DOCUMENT-AUTHORITY.md), this
 register is Level 1 — the highest authority in this repository. No Master Requirement,
 architecture document, ADR, implementation specification, governance document, or code may
@@ -51,12 +64,15 @@ Q22 — A  Hybrid Registration by Actor
 Q23 — A  Configurable MFA with TOTP Baseline
 Q24 — A  Separated Identity Lifecycle + Verification + Security Restriction Model
 Q25 — A  Controlled One-Time CLI Bootstrap for First Super Admin
+Q26 — A  Per-Category Audit Write Failure Semantics (Critical Fail-Closed, Default Fail-Closed)
+Q27 — A  Explicit Permission + Domain-Aware Scope for Audit Read (No Automatic Super Admin Access)
+Q28 — A  Append-Only Audit Operational Model + Governed Retention Purge
 ```
 
-Q21-Q25 are detailed in "Extended Decisions — Detailed Rules (Q21-Q25)" below; Q1-Q20 above
+Q21-Q28 are detailed in "Extended Decisions — Detailed Rules (Q21-Q28)" below; Q1-Q20 above
 retain their original one-line form as supplied during IMP-001 Readiness Remediation Pass 1.
 
-## Extended Decisions — Detailed Rules (Q21-Q25)
+## Extended Decisions — Detailed Rules (Q21-Q28)
 
 ### Q21 — Email as Canonical Login Identifier
 
@@ -147,6 +163,70 @@ Canonical RBAC Super Admin authority (role/permission/scope/business authority) 
 Later Super Admin provisioning (beyond the first one) does not use this first-bootstrap
   mechanism — it uses whatever ordinary provisioning path IMP-003+ establishes.
 ```
+
+### Q26 — Per-Category Audit Write Failure Semantics
+
+```
+Security/authority/governance-critical audit events use one atomic transaction: business/
+  authority mutation + audit append together; if the critical audit append fails, the mutation
+  ROLLS BACK. No silent audit loss for a critical event.
+Critical categories include at minimum: identity lifecycle; persistent security restriction;
+  Principal lifecycle; role assignment/revocation; permission grant/revoke; scope mutation;
+  business-authority mutation; privileged governance/security operations; future approval/
+  financial authority operations when applicable.
+Default for any event whose failure category has not yet been explicitly classified: FAIL-CLOSED.
+A future event may use less restrictive (non-critical/fail-open-with-alert) failure semantics
+  only when its category is explicitly classified and authorized — never silently, and never
+  merely for availability.
+```
+
+This canonizes, as a Level 1 rule, the fail-closed/transactional behavior IMP-003 already
+implemented for RBAC mutations (proven by tests) and extends it as the IMP-004 default for every
+current and future critical category, resolving readiness finding HD-IMP004-01. See
+[docs/implementation/IMP-004-audit-governance-foundation.md](../implementation/IMP-004-audit-governance-foundation.md)
+for the exact criticality classification table.
+
+### Q27 — Explicit Permission + Domain-Aware Scope for Audit Read
+
+```
+Audit-read authorization is never inferred merely from role name. It follows the canonical
+  authorization architecture (docs/05-rbac/RBAC-ARCHITECTURE.md "Canonical Authorization
+  Evaluation"): Authenticated AND Applicable Subject Context AND Permission AND Domain-Aware
+  Scope AND Ownership/Subject Rule where applicable AND Business Authority where applicable AND
+  Authentication Assurance where required AND No Security Restriction.
+Default: DENY.
+Super Admin does NOT automatically receive unrestricted audit access — this preserves "Super
+  Admin != automatic Financial Authority" (docs/05-rbac/BUSINESS-AUTHORITY-MODEL.md), applied to
+  audit visibility.
+Audit visibility must never become a mechanism for bypassing the source domain's own authority or
+  confidentiality boundary. Financial, security, and privacy-sensitive audit information remains
+  subject to the applicable domain's own authority/visibility restrictions.
+IMP-004 creates the generic audit-read authorization foundation only — it does not invent
+  unrelated domain permissions or prematurely implement future financial/domain authority.
+```
+
+Resolves readiness finding HD-IMP004-02.
+
+### Q28 — Append-Only Audit Operational Model + Governed Retention Purge
+
+```
+Ordinary audit record behavior: CREATE/APPEND allowed only through the authorized canonical audit
+  sink; UPDATE prohibited; arbitrary DELETE prohibited; manual/administrative DELETE prohibited.
+Q17 (Configurable Retention Policy Matrix) remains possible: a future retention purge may exist
+  ONLY through an authorized retention policy -> a versioned policy -> eligibility determination
+  -> an authorized controlled purge process -> purge governance evidence of its own.
+IMP-004 does not invent retention durations — retention values remain configurable through a
+  future authorized policy, per Q17.
+Purge must never be usable to: conceal activity; rewrite audit history; perform discretionary
+  administrator deletion; bypass an investigation/security/financial hold; or destroy records
+  merely because they are inconvenient.
+Where an applicable authorized hold exists, purge is PROHIBITED until the hold is legitimately
+  released.
+IMP-004 provides structural compatibility/foundation only — it does not build a complete
+  retention-policy engine.
+```
+
+Resolves readiness finding HD-IMP004-03.
 
 ## Superseded Decisions
 
