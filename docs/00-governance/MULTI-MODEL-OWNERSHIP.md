@@ -552,7 +552,7 @@ IMPLEMENTATION MAY PROCEED
 ```
 
 Resolved (not guessed, not inferred from a generic `claude` invocation), from this session's own
-runtime/configuration evidence:
+runtime/configuration evidence, and now Human-approved:
 
 ```
 Provider:                 Anthropic
@@ -561,16 +561,18 @@ Exact Model Identifier:   claude-sonnet-5
 Claude Code Version:      2.1.269
 Execution Environment:    Claude Code (VS Code extension; entrypoint claude-vscode)
 Resolution/Verification Date: 2026-09-13
-Binding Status:            MODEL RESOLVED — AWAITING HUMAN MODEL APPROVAL
+Human Model Binding Approval: "Claude Sonnet 5 (claude-sonnet-5) is BOUND as the Claude Code
+                           model for Temporary Completion Owner IMP-004." — Human, 2026-09-13
+Binding Status:            BOUND
 ```
 
-No prior repository evidence records explicit Human approval of `claude-sonnet-5` specifically for
-IMP-004 — Human's approval of Claude Code as Temporary Completion Owner is a distinct control from
-approval of this exact model identifier, per GOV-MM-002's own "owner approval and exact model
-binding approval are separate controls" principle, restated here explicitly per this task's
-instruction. **IMP-004 implementation execution does not proceed on the strength of model
-resolution alone — `BOUND` requires a separate, explicit Human approval of `claude-sonnet-5` for
-IMP-004, not yet given.**
+Human's approval of Claude Code as Temporary Completion Owner (GOV-MM-004's owner designation) and
+this separate, explicit approval of `claude-sonnet-5` as the exact bound model identifier for
+IMP-004 (this section) are two distinct controls, per GOV-MM-002's own "owner approval and exact
+model binding approval are separate controls" principle — both are now satisfied for IMP-004.
+Silent substitution remains prohibited: if the execution environment departs from `claude-sonnet-5`
+during IMP-004 work, that is detected and reported per "Silent Substitution" above, not silently
+continued under a different model.
 
 ## Non-Concurrent Ownership Rule
 
@@ -1041,24 +1043,34 @@ GOV-MM-004 Authorization (IMP-004 Temporary Completion Ownership Exception):
                      only, automatically expiring at IMP-004 FINAL/LOCKED, with the Amendment V2
                      prospective matrix (IMP-005 onward, and IMP-004's own standing DeepSeek
                      V4.1 Flash assignment for every other purpose) explicitly unaffected. Does
-                     NOT approve any specific Claude model generation for IMP-004 — that remains
-                     a separate GOV-MM-002-style Per-IMP Model Binding control, itself still
-                     PENDING (see "Claude Model Binding" below). Does NOT authorize IMP-004
-                     implementation execution to begin (still gated on Amendment V2's own
-                     FINAL/LOCKED status and the model-binding approval below). Does NOT
-                     authorize application source/migration/test/dependency changes, adoption or
-                     modification of the pre-existing uncommitted IMP-004 artifacts, or git push.
+                     NOT approve any specific Claude model generation for IMP-004 by itself — see
+                     "Claude Model Binding" below for that separate, since-completed approval.
+                     Does NOT authorize application source/migration/test/dependency changes to
+                     the pre-existing uncommitted IMP-004 artifacts beyond what the required
+                     ownership-provenance review (docs/audits/IMP-004-OWNERSHIP-HANDOFF.md)
+                     itself governs, and does NOT authorize git push.
+
+Execution Release (explicit Human instruction, distinct from and subsequent to the two approvals
+above): Human explicitly instructed IMP-004 execution to proceed under GOV-MM-004 ("You may now
+proceed with IMP-004 ownership handoff and implementation"). This is the Human directly exercising
+final authority over this narrow, scoped exception (IMP-004 only) — it does NOT retroactively
+declare Amendment V2 or GOV-MM-004 themselves `FINAL / LOCKED` (both remain `PROPOSED`, Codex
+re-audit still pending for the base replacement program), and it does NOT affect IMP-005 onward,
+which still requires the ordinary Stage Gate sequence (Codex independent review -> Human Stage
+Gate) with no execution-ahead-of-audit precedent implied by this one exception.
 
 Claude Model Binding for IMP-004 (GOV-MM-004, distinct control from owner designation above):
-  Status:            MODEL RESOLVED — AWAITING HUMAN MODEL APPROVAL (not BOUND)
+  Status:            BOUND
   Exact Model Identifier: claude-sonnet-5
   Model Display Name: Claude Sonnet 5
   Claude Code Version: 2.1.269
   Execution Environment: Claude Code (VS Code extension; entrypoint claude-vscode)
   Resolution Evidence: this session's own runtime/configuration context; not guessed, not
                      inferred from a generic invocation
-  Human Approver:
-  Approval Date:
+  Human Approval Statement: "Claude Sonnet 5 (claude-sonnet-5) is BOUND as the Claude Code model
+                     for Temporary Completion Owner IMP-004."
+  Human Approver:    Human
+  Approval Date:     2026-09-13
 ```
 
 ## References

@@ -2,10 +2,11 @@
 
 ## Status
 
-READY (Codex specification audit: 0 BLOCKER/MAJOR/MINOR/EDITORIAL/HUMAN DECISION REQUIRED; Human
-Implementation Authorization: GRANTED — "Saya setuju. IMP-004 Implementation Authorized." — but
-EXECUTION remains on HOLD; see "Implementation Ownership" and "Pre-Existing Implementation
-Artifacts / Ownership-Provenance Review" below for the exact release conditions)
+IN PROGRESS (Codex specification audit: 0 BLOCKER/MAJOR/MINOR/EDITORIAL/HUMAN DECISION REQUIRED;
+Human Implementation Authorization: GRANTED; Temporary Completion Owner: Claude Code, BOUND to
+claude-sonnet-5; Human has explicitly released execution — see "Implementation Ownership" below.
+Implementation is not yet complete and is not FINAL/LOCKED — that requires its own Codex
+implementation audit and Human Stage Gate)
 
 ## Implementation Ownership
 
@@ -27,9 +28,8 @@ Stage Type:   NORMAL IMPLEMENTATION STAGE
 Primary/Temporary Completion Owner: Claude Code (GOV-MM-004; IMP-004 ONLY — expires automatically
                                      at IMP-004 FINAL/LOCKED)
 Scope:                               IMP-004 only
-Model Binding:                       PENDING HUMAN APPROVAL — exact model resolved
-                                     (claude-sonnet-5, Claude Code 2.1.269) but not yet
-                                     Human-approved for IMP-004; see "Claude Model Binding" below
+Model Binding:                       BOUND — claude-sonnet-5, Claude Code 2.1.269, Human-approved
+                                     for IMP-004; see "Claude Model Binding" below
 Specialist:                          NONE by default (Amendment V2) — an optional specialist may
                                      be added later only if technically justified, and must be
                                      READ ONLY when used
@@ -56,14 +56,17 @@ Claude Code Version:          2.1.269
 Resolution/Verification Date: 2026-09-13
 Resolution Evidence:          this session's own runtime/configuration context — not guessed, not
                                inferred from a generic `claude` invocation
-Human Model Binding Approval: NOT YET GIVEN
-Binding Status:                MODEL RESOLVED — AWAITING HUMAN MODEL APPROVAL (not BOUND)
+Human Model Binding Approval: "Claude Sonnet 5 (claude-sonnet-5) is BOUND as the Claude Code
+                               model for Temporary Completion Owner IMP-004." — Human, 2026-09-13
+Binding Status:                BOUND
 Model Change Requests against this binding: none
 ```
 
-**`IMP-004 IMPLEMENTATION EXECUTION DOES NOT PROCEED WHILE BINDING STATUS IS BELOW `BOUND`.`**
 Owner approval (Claude Code as Temporary Completion Owner) and exact model binding approval
-(`claude-sonnet-5` for IMP-004) are separate controls — the former does not imply the latter.
+(`claude-sonnet-5` for IMP-004) were separate controls, both now satisfied. Per "Model Continuity"
+discipline (GOV-MM-002/Model Change Control), if the execution environment departs from
+`claude-sonnet-5` during IMP-004 work, that must be detected and reported, not silently continued
+under a different model.
 
 ### Owner Transition Record
 
@@ -93,33 +96,31 @@ artifact either as of this patch — see "Pre-Existing Implementation Artifacts 
 Ownership-Provenance Review" below for the required review before any such artifact may be
 treated as adopted work under any owner, current or prior.
 
-**`IMP-004 IMPLEMENTATION EXECUTION IS ON HOLD.`** Human Implementation Authorization is GRANTED
-in principle ("Saya setuju. IMP-004 Implementation Authorized.") and is model-neutral — it
-authorized implementing IMP-004, not a specific owner — so the ownership changes recorded above
-(Kimi K3 -> DeepSeek V4.1 Flash -> Claude Code, Temporary Completion Owner) do not, by themselves,
-require re-obtaining that authorization. Separately, Human has explicitly designated Claude Code
-as Temporary Completion Owner ("Saya setuju. Claude Code ditetapkan sebagai Temporary Completion
-Owner untuk IMP-004 saja..." — see GOV-MM-004). Neither statement is itself approval of the exact
-Claude model identifier — that is the separate, still-outstanding "Claude Model Binding" control
-above. Actual execution remains on HOLD until ALL of the following are true:
+Human Implementation Authorization is GRANTED in principle ("Saya setuju. IMP-004 Implementation
+Authorized.") and is model-neutral. Separately, Human has explicitly designated Claude Code as
+Temporary Completion Owner ("Saya setuju. Claude Code ditetapkan sebagai Temporary Completion
+Owner untuk IMP-004 saja..." — see GOV-MM-004), and separately again has explicitly approved the
+exact Claude model identifier ("Claude Sonnet 5 (claude-sonnet-5) is BOUND..." — see "Claude Model
+Binding" above). **All three controls are now satisfied**, and Human has explicitly instructed
+IMP-004 execution to proceed under this ownership. Remaining before completion:
 
 ```
-1. Governance Amendment V2 — including GOV-MM-004, which is recorded as part of Amendment V2's
-   still-`PROPOSED` state, not a separately-locked clause — passes Codex re-audit and reaches
-   `FINAL / LOCKED` (see "GOV-MM-004 — IMP-004 Temporary Completion Ownership Exception" in the
-   governance document; its own Status line is explicit about this) — NOT YET DONE.
-2. The exact Claude model identifier (claude-sonnet-5) is explicitly Human-approved for IMP-004,
-   reaching Binding Status BOUND (see "Claude Model Binding" above) — NOT YET DONE.
-3. The ownership-provenance review of pre-existing uncommitted IMP-004 artifacts (see below) is
+1. The ownership-provenance review of pre-existing uncommitted IMP-004 artifacts (see below) is
    completed and recorded, with Claude Code (as the now-confirmed reviewing owner) making an
-   explicit ADOPT/REMEDIATE/REPLACE decision per artifact — NOT YET DONE.
-4. Codex remains available and unreplaced as Independent Formal Reviewer for this stage
+   explicit ADOPT/REMEDIATE/REPLACE decision per artifact.
+2. Codex remains available and unreplaced as Independent Formal Reviewer for this stage
    (unchanged — no action required unless this ever becomes false).
+3. Amendment V2 and GOV-MM-004 themselves remain `PROPOSED` (Codex re-audit of the base
+   replacement program still pending) — this does not block IMP-004 execution under the explicit
+   Human execution-release recorded in the governance document's GOV-MM-004 section, but IMP-004
+   still cannot be declared FINAL/LOCKED without its own Codex implementation audit and Human
+   Stage Gate (see "Do Not Self-Audit" discipline — Claude does not declare Codex PASS or Stage
+   Gate approval).
 ```
 
-Approval of HD-IMP004-01/02/03 (Q26-Q28) must not be read as execution authorization — those
-decisions govern *what* IMP-004 must build; they do not authorize *building* it, and do not
-override the HOLD above.
+Approval of HD-IMP004-01/02/03 (Q26-Q28) must not be read as execution authorization on its own —
+those decisions govern *what* IMP-004 must build; the actual authorization to build it is the
+three controls above.
 
 ## Pre-Existing Implementation Artifacts / Ownership-Provenance Review
 
