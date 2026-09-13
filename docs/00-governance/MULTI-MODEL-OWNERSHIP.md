@@ -2,10 +2,12 @@
 
 ## Status
 
-`PROPOSED — AWAITING INDEPENDENT CODEX REVIEW`
+`FINAL / LOCKED`
 
-This amendment is materialized under explicit Human authorization to create it. It is a Level 6
-(Governance / Operating Instructions) document under
+This amendment is materialized under explicit Human authorization to create it, subsequently
+remediated against Codex's independent findings, and is now `FINAL / LOCKED` under explicit Human
+Final Approval following a Codex PASS re-audit — see "Approval" below for both records verbatim.
+It is a Level 6 (Governance / Operating Instructions) document under
 [DOCUMENT-AUTHORITY.md](DOCUMENT-AUTHORITY.md) — it changes only the operational assignment of AI
 implementation/review responsibilities described in
 [IMPLEMENTATION-GOVERNANCE.md](IMPLEMENTATION-GOVERNANCE.md), and does not itself constitute a
@@ -13,12 +15,13 @@ change to Level 1-4 (Human Decisions, Master Requirements, Locked Architecture B
 Approved ADR/Amendments). It is not an ADR: it does not change locked architecture, business
 rules, financial semantics, or security boundaries — see "Source-of-Truth Preservation" below.
 
-This status remains `PROPOSED` until an independent Codex review has run against it and the
-result is recorded in "Approval" below. Until then, this document governs on a provisional basis
-for planning purposes only — it does **not** by itself authorize any IMP-004 (or later)
-implementation work. See [IMPLEMENTATION-GOVERNANCE.md](IMPLEMENTATION-GOVERNANCE.md) and
+`FINAL / LOCKED` governs this document's own operational rules (model baseline, ownership matrix,
+GOV-MM-001, GOV-MM-002, and everything else below) as the authoritative Level 6 baseline. It does
+**not** by itself authorize IMP-004 (or later) implementation work, and does not authorize IMP-030
+work — those each require their own separate Human authorization at their own gate. See
+[IMPLEMENTATION-GOVERNANCE.md](IMPLEMENTATION-GOVERNANCE.md) and
 [CHANGE-CONTROL.md](CHANGE-CONTROL.md) for how this amendment relates to the existing governance
-hierarchy.
+hierarchy, and "IMP-004 Boundary" below for the explicit readiness-vs-implementation distinction.
 
 ## Purpose
 
@@ -130,10 +133,11 @@ section for this purpose (see that file for the exact fields).
 ## Amendment Clauses (Human-Approved Additions)
 
 The following clauses were explicitly approved by Human, verbatim, as additions to this
-provisional amendment. They are recorded here exactly and then restated operatively in the
-sections they affect (IMP-030 ownership matrix row and Codex role; Mission-Critical Claude
-Stages). They do not change this document's overall `PROPOSED — AWAITING INDEPENDENT CODEX
-REVIEW` status.
+amendment (at the time they were added, the amendment was still provisional; both clauses were
+subsequently carried into the Codex targeted re-audit and the Final Human Lock Approval recorded
+in "Approval" below, and are now part of the `FINAL / LOCKED` baseline). They are recorded here
+exactly and then restated operatively in the sections they affect (IMP-030 ownership matrix row
+and Codex role; Mission-Critical Claude Stages).
 
 > **Human, verbatim:**
 >
@@ -600,18 +604,24 @@ not Human approval — three models agreeing with each other does not alter a lo
 
 ## IMP-004 Boundary
 
-This amendment does **not** authorize IMP-004 implementation. Sequence required after this
-amendment is created:
+Sequence required after this amendment was created — now complete:
 
 ```
-1. Amendment created (this document).
-2. Independent Codex review.
-3. Human approval of the amendment itself.
-4. Amendment committed and declared FINAL / LOCKED.
-5. Only then: IMP-004 readiness/specification may proceed.
+1. Amendment created (this document).                                   DONE
+2. Independent Codex review (initial: FAIL; targeted re-audit: PASS).    DONE
+3. Human approval of the amendment itself (Final Human Lock Approval).   DONE
+4. Amendment committed and declared FINAL / LOCKED.                      DONE
+5. IMP-004 readiness/specification may now proceed.                      AUTHORIZED
 ```
 
-IMP-004 intended ownership after this governance amendment is locked:
+This amendment's `FINAL / LOCKED` status and the Human Final Approval recorded in "Approval"
+above together authorize **IMP-004 readiness/specification work** to begin. They do **not**
+authorize **IMP-004 implementation** — that remains a separate future gate requiring its own
+explicit Human authorization once IMP-004's specification, Definition of Ready, and (per
+"Implementation Ownership" in `docs/implementation/IMPLEMENTATION-SPEC-TEMPLATE.md`) its Primary
+Implementation Owner/model/specialist/reviewer fields are recorded and approved.
+
+IMP-004 intended ownership once its own implementation gate is reached:
 
 ```
 Primary:                    Kimi K3
@@ -659,24 +669,49 @@ Amendment Clause Approval (GOV-MM-001, GOV-MM-002):
                      approval. Model tersebut kemudian dipin untuk IMP tersebut. Silent
                      substitution dilarang. Perubahan model setelah binding memerlukan Model
                      Change Request dan Human approval."
-  Scope:            Approves incorporating GOV-MM-001 and GOV-MM-002 into this still-provisional
-                     amendment. Does not by itself move this document's overall Status out of
-                     PROPOSED, and does not authorize IMP-004 (or IMP-030) work — see
-                     "Independent Codex Review" and "Final Human Lock Approval" below, both still
-                     PENDING for the amendment as a whole (GOV-MM-001/002 included).
+  Scope:            Approved incorporating GOV-MM-001 and GOV-MM-002 into the amendment. At the
+                     time of this statement it did not by itself move the document's Status out
+                     of PROPOSED, and did not authorize IMP-004 (or IMP-030) work — the amendment
+                     was subsequently remediated, Codex-re-audited to PASS, and locked by the
+                     separate Final Human Lock Approval recorded immediately below, which is what
+                     moved the overall Status to FINAL / LOCKED.
 
-Independent Codex Review:
-  Status:            PENDING
-  Reviewer:
-  Review Date:
-  Findings:
-  Evidence/Reference:
+Independent Codex Review (Targeted Re-Audit, post-remediation commit 1f9238d):
+  Status:            PASS — GOVERNANCE AMENDMENT ELIGIBLE FOR FINAL HUMAN APPROVAL
+  Reviewer:          Codex
+  Findings:          GOV-MM-001: RESOLVED; GOV-MM-002: RESOLVED;
+                     BLOCKER: 0; MAJOR: 0; MINOR: 0; EDITORIAL: 0; HUMAN DECISION REQUIRED: 0
+  Repository Mutation by Codex: NO
+  Push by Codex:     NO
+  Evidence/Reference: docs/audits/MULTI-MODEL-GOVERNANCE-FINALIZATION.md
 
 Final Human Lock Approval:
-  Status:            PENDING
-  Human Approver:
-  Approval Date:
-  Approval Evidence:
+  Status:            APPROVED
+  Human Approver:    Human
+  Statement:         "Saya setuju.
+
+                     Multi-Model AI Implementation Ownership Governance Amendment
+                     Final Human Approval diberikan.
+
+                     GOV-MM-001: RESOLVED / APPROVED.
+                     GOV-MM-002: RESOLVED / APPROVED.
+
+                     Governance Amendment dapat ditetapkan FINAL / LOCKED.
+
+                     Ownership model IMP-004-IMP-030, model pinning, Claude Per-IMP Model
+                     Binding, specialist READ ONLY, Codex independence, IMP-030 Audit-Only
+                     Stage, dan Human approval authority ditetapkan sebagai governance
+                     baseline.
+
+                     IMP-004 READINESS dapat dimulai.
+                     IMP-004 IMPLEMENTATION belum diotorisasi."
+  Scope:             Locks this amendment (Amendment Clauses GOV-MM-001/GOV-MM-002 included) as
+                     the FINAL / LOCKED Level 6 governance baseline. Separately and explicitly
+                     authorizes IMP-004 readiness/specification work to begin. Does NOT authorize
+                     IMP-004 implementation, IMP-030 work, application source changes,
+                     architecture/database/security/financial/business-rule changes, or git push
+                     — each remains gated on its own future, separate Human authorization.
+  Approval Evidence: docs/audits/MULTI-MODEL-GOVERNANCE-FINALIZATION.md
 ```
 
 ## References
