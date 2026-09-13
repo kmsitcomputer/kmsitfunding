@@ -185,28 +185,39 @@ final class AuditWriter
         $valid = match ($type) {
             'int' => is_int($value),
             'string' => is_string($value),
-            'array' => is_array($value) && $this->isScalarList($value),
+            'array' => is_array($value) && $this->isFlatScalarList($value),
             default => false,
         };
 
         if (! $valid) {
             throw new AuditMetadataViolationException(
-                "Metadata key '{$key}' must be of type '{$type}' — objects, models, requests, exceptions, and unrestricted structures are never persisted."
+                "Metadata key '{$key}' must be of type '{$type}' — objects, models, requests, exceptions, and unrestricted (nested/associative) structures are never persisted."
             );
         }
     }
 
     /**
+     * IMP004-IMPL-M02: an `'array'`-typed allow-list value is permitted ONLY
+     * as a flat, sequential (never associative) list of scalars/null —
+     * strictest behavior compatible with the approved specification, per
+     * "prefer bounded list of permitted scalar values rather than arbitrary
+     * associative nested objects unless specification explicitly allows
+     * structured nested metadata" (it does not). Rejecting ANY nested array
+     * outright — regardless of its own keys — closes the prior bypass where
+     * a hard-prohibited key (e.g. 'password') could be smuggled inside a
+     * nested associative element, since HARD_PROHIBITED_METADATA_KEYS is
+     * only ever checked against the top-level allow-list's own keys.
+     *
      * @param  array<mixed>  $value
      */
-    private function isScalarList(array $value): bool
+    private function isFlatScalarList(array $value): bool
     {
+        if (! array_is_list($value)) {
+            return false;
+        }
+
         foreach ($value as $item) {
-            if (is_array($item)) {
-                if (! $this->isScalarList($item)) {
-                    return false;
-                }
-            } elseif (! is_scalar($item) && $item !== null) {
+            if (! is_scalar($item) && $item !== null) {
                 return false;
             }
         }
@@ -270,15 +281,31 @@ final class AuditWriter
      * return the EXISTING record, no duplicate row. Conflicting reuse →
      * reject loudly; the original row is never overwritten.
      *
+     * IMP004-IMPL-M04: the comparison must cover every immutable canonical
+     * field the specification defines as part of "the fact", not a partial
+     * subset — event identity/version, actor/principal attribution,
+     * subject/resource, source-event scoping, the metadata's canonical
+     * (JSON) representation, and policy/version + execution-context
+     * attribution. A payload that differs in ANY of these is a conflicting
+     * reuse of the scoped key, never a silent return of the existing row.
+     *
      * @param  array<string, mixed>  $attributes
      */
     private function resolveIdempotentReplay(AuditRecord $existing, array $attributes): AuditRecord
     {
-        $immutableMatch = $existing->subject_type === $attributes['subject_type']
-            && $existing->subject_id === $attributes['subject_id']
+        $immutableMatch = $existing->event_type === $attributes['event_type']
+            && $existing->event_version === $attributes['event_version']
+            && $existing->source_domain === $attributes['source_domain']
+            && $existing->source_event_id === $attributes['source_event_id']
             && $existing->actor_principal_id === $attributes['actor_principal_id']
             && $existing->actor_principal_kind === $attributes['actor_principal_kind']
-            && $existing->event_version === $attributes['event_version'];
+            && $existing->execution_context === $attributes['execution_context']
+            && $existing->subject_type === $attributes['subject_type']
+            && $existing->subject_id === $attributes['subject_id']
+            && $existing->policy_version_ref === $attributes['policy_version_ref']
+            && $this->canonicalMetadataJson($existing->getRawOriginal('metadata')) === $this->canonicalMetadataJson(
+                $attributes['metadata'] === null ? null : json_encode($attributes['metadata'])
+            );
 
         if (! $immutableMatch) {
             throw new AuditIdempotencyConflictException(
@@ -287,6 +314,28 @@ final class AuditWriter
         }
 
         return $existing;
+    }
+
+    /**
+     * Normalizes a possibly-differently-ordered JSON metadata payload to a
+     * canonical comparable form — key ORDER must never matter for the
+     * idempotency comparison, only the actual content.
+     */
+    private function canonicalMetadataJson(?string $json): ?string
+    {
+        if ($json === null) {
+            return null;
+        }
+
+        $decoded = json_decode($json, true);
+
+        if (! is_array($decoded)) {
+            return $json;
+        }
+
+        ksort($decoded);
+
+        return json_encode($decoded);
     }
 
     private function isUniqueViolation(QueryException $e): bool

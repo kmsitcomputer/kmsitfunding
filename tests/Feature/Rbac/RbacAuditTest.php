@@ -17,11 +17,11 @@ use App\Services\Rbac\PrincipalService;
 use App\Services\Rbac\RbacAuditLogger;
 use App\Services\Rbac\RoleAssignmentService;
 use App\Services\Rbac\RolePermissionService;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\Support\Rbac\CapturesRbacAudit;
 use Tests\Support\Rbac\RbacTestActors;
+use Tests\Support\TruncatesInMemorySqlite;
 use Tests\TestCase;
 
 /**
@@ -29,24 +29,33 @@ use Tests\TestCase;
  * family actually emits its audit event (not merely code inspection),
  * attributes it to a Principal (never a User), keeps the mutation and its
  * audit emission transactionally atomic, and never leaks sensitive material.
+ *
+ * Uses TruncatesInMemorySqlite, not RefreshDatabase: RolePermissionService::
+ * grant() enforces the Transaction Ownership Invariant (IMP004-IMPL-M01)
+ * and must genuinely be the outermost transaction — RefreshDatabase's
+ * per-test wrapper transaction would otherwise trip that check on every
+ * call. See that trait's docblock for why plain DatabaseTruncation does not
+ * work against this repository's `:memory:` SQLite test connection.
  */
 class RbacAuditTest extends TestCase
 {
     use CapturesRbacAudit;
     use RbacTestActors;
-    use RefreshDatabase;
+    use TruncatesInMemorySqlite;
 
     private int $userSequence = 0;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->setUpTruncatedDatabase();
         $this->captureRbacAuditLog();
     }
 
     protected function tearDown(): void
     {
         $this->tearDownRbacAuditCapture();
+        $this->tearDownTruncatedDatabase();
         parent::tearDown();
     }
 

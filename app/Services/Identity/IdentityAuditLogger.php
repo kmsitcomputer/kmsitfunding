@@ -31,20 +31,22 @@ class IdentityAuditLogger
     /**
      * Legacy event => [canonical event_type, subject_type, actor mode].
      * Actor modes: 'principal' (resolve the canonical Principal for $user,
-     * fail-closed if $user is null); 'principal_optional' (resolve the
-     * Principal if $user is given, else pass a null actor and let the
-     * registry's declared PrePrincipalSystem fallback attribute it — Q22
-     * permits a null issuer/revoker for invitations); 'unauthenticated' /
+     * fail-closed if $user is null — IMP004-IMPL-M03: the pre-principal
+     * actor catalog is NOT expanded to cover a null invitation issuer/
+     * revoker; see the class-level note and
+     * docs/audits/IMP-004-OWNERSHIP-HANDOFF.md for the resulting,
+     * explicitly-flagged IMP-002/IMP-004 conflict); 'unauthenticated' /
      * 'pre_principal_system' (registry-declared pre-principal attribution,
-     * actor always NULL — see IMP004-SPEC-M02).
+     * actor always NULL, for the two specifically pre-approved cases only —
+     * see IMP004-SPEC-M02).
      *
      * @var array<string, array{0: string, 1: string, 2: string}>
      */
     private const EVENT_MAP = [
         'identity_created' => ['identity.user.created', 'user', 'principal'],
         'self_registration_completed' => ['identity.user.self_registered', 'user', 'principal'],
-        'invitation_issued' => ['identity.invitation.issued', 'invitation', 'principal_optional'],
-        'invitation_revoked' => ['identity.invitation.revoked', 'invitation', 'principal_optional'],
+        'invitation_issued' => ['identity.invitation.issued', 'invitation', 'principal'],
+        'invitation_revoked' => ['identity.invitation.revoked', 'invitation', 'principal'],
         'invitation_accepted' => ['identity.invitation.accepted', 'invitation', 'principal'],
         'login_succeeded' => ['identity.session.login_succeeded', 'user', 'principal'],
         'login_failed' => ['identity.session.login_failed', 'user', 'unauthenticated'],
@@ -77,7 +79,6 @@ class IdentityAuditLogger
 
         $actor = match ($actorMode) {
             'principal' => $this->resolvePrincipalActor($event, $user),
-            'principal_optional' => $user !== null ? $this->principals->forUser($user) : null,
             default => null,
         };
 

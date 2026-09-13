@@ -2,15 +2,18 @@
 
 ## Status
 
-IMPLEMENTATION COMPLETE LOCALLY — READY FOR INDEPENDENT CODEX IMPLEMENTATION AUDIT (Codex
-specification audit: 0 BLOCKER/MAJOR/MINOR/EDITORIAL/HUMAN DECISION REQUIRED; Human Implementation
-Authorization: GRANTED; Temporary Completion Owner: Claude Code, BOUND to claude-sonnet-5; Human
-explicitly released execution — see "Implementation Ownership" below. Pre-existing uncommitted
-artifacts reviewed and ADOPTED (two targeted corrections applied) per
-`docs/audits/IMP-004-OWNERSHIP-HANDOFF.md`; missing test coverage authored fresh; full suite
-(258 tests, 838 assertions) PASS on both SQLite and disposable MySQL 8.4.11; Pint/TypeScript/
-build/composer audit PASS. NOT FINAL/LOCKED — that requires its own Codex implementation audit and
-Human Stage Gate, neither of which this owner can self-declare)
+REMEDIATION PASS 1 COMPLETE LOCALLY — PENDING CODEX RE-AUDIT (independent Codex implementation
+audit returned FAIL with six findings — IMP004-IMPL-M01/M02/M03/M04/M05 MAJOR,
+IMP004-IMPL-m01 MINOR; all six PATCHED — PENDING CODEX RE-AUDIT, never self-declared RESOLVED —
+see `docs/audits/IMP-004-OWNERSHIP-HANDOFF.md` "Remediation Pass 1 (Codex Implementation Audit
+Findings)" for the full per-finding Finding/Root Cause/Files Changed/Fix/Tests/Result/Disposition
+record. M03 surfaced a genuine, documented IMP-002/IMP-004 contradiction (Human Decision Required:
+YES) rather than inventing a resolution. Temporary Completion Owner: Claude Code, BOUND to
+claude-sonnet-5, unchanged throughout. Full suite (284 tests, 890/898 assertions) PASS on both
+SQLite and disposable MySQL 8.4.11, aside from the 10 InvitationTest cases the M03 contradiction
+above explicitly accounts for; Pint/TypeScript/build/composer audit PASS. NOT FINAL/LOCKED — that
+requires its own Codex implementation audit and Human Stage Gate, neither of which this owner can
+self-declare)
 
 ## Implementation Ownership
 

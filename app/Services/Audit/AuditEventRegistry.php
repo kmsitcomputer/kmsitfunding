@@ -186,20 +186,25 @@ final class AuditEventRegistry
             new AuditEventDefinition('identity.user.self_registered', 1, $C, $MA, $GENERAL, 'user', false, [
                 'user_public_id' => 'string',
             ], $H, null, false, $GP),
-            // Issuer/revoker may legitimately be NULL (Q22 — e.g. a
-            // system-issued invitation with no administering Human) —
-            // PrePrincipalSystem is the fallback actor kind IdentityAuditLogger
-            // uses when $user is null; the fixed execution_context names this
-            // specific, already-permitted no-issuer path.
+            // IMP004-IMPL-M03: the pre-principal actor catalog is NOT
+            // expanded to cover invitation issue/revoke — Human is the only
+            // approved actor kind for these events (matching every other
+            // ordinary Human-initiated identity event). A null issuer/
+            // revoker (IMP-002 "Invitation Boundary": "records who revoked
+            // it, where available") has no approved canonical attribution
+            // and is REJECTED fail-closed by IdentityAuditLogger — see that
+            // class and docs/audits/IMP-004-OWNERSHIP-HANDOFF.md for the
+            // resulting, explicitly-flagged IMP-002/IMP-004 conflict this
+            // creates (Human Decision Required).
             new AuditEventDefinition('identity.invitation.issued', 1, $C, $MA, $GENERAL, 'invitation', false, [
                 'invitation_public_id' => 'string',
                 'invited_actor' => 'string',
                 'user_public_id' => 'string',
-            ], [AuditActorKind::Human, AuditActorKind::PrePrincipalSystem], 'system:invitation_no_issuer', false, $GP),
+            ], $H, null, false, $GP),
             new AuditEventDefinition('identity.invitation.revoked', 1, $C, $MA, $GENERAL, 'invitation', false, [
                 'invitation_public_id' => 'string',
                 'user_public_id' => 'string',
-            ], [AuditActorKind::Human, AuditActorKind::PrePrincipalSystem], 'system:invitation_no_issuer', false, $GP),
+            ], $H, null, false, $GP),
             new AuditEventDefinition('identity.invitation.accepted', 1, $C, $MA, $GENERAL, 'invitation', false, [
                 'invitation_public_id' => 'string',
                 'invited_actor' => 'string',

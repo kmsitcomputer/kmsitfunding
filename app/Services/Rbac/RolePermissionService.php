@@ -6,6 +6,7 @@ use App\Models\Rbac\Permission;
 use App\Models\Rbac\Principal;
 use App\Models\Rbac\PrincipalRoleAssignment;
 use App\Models\Rbac\Role;
+use App\Services\Audit\Exceptions\TransactionOwnershipViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -38,24 +39,25 @@ class RolePermissionService
      */
     public function grant(Principal $actor, Role $role, Permission $permission): void
     {
-        // IMP004-PASS3-M01 (corrected from the prior draft's blanket
-        // transactionLevel()-based rejection): the deadlock risk Codex
-        // identified (IMP004-REAUDIT-M01/PASS2-M01) is that persisting denial
-        // evidence WHILE the denying closure's own lockForUpdate() locks are
-        // still held risks lock inversion. That risk is fully resolved by
-        // SEQUENCING alone — the denial write below runs only inside the
-        // catch block, strictly AFTER DB::transaction() has already
-        // completed its ROLLBACK (a real ROLLBACK if this is the outermost
-        // transaction, or a ROLLBACK TO SAVEPOINT if nested — InnoDB
-        // releases locks acquired after the savepoint either way), so no
-        // lock from this closure is ever held during the denial write,
-        // regardless of ambient transaction depth. A blanket "reject any
-        // nesting" pre-check was removed: it cannot distinguish a genuine
-        // caller-nested transaction from Laravel's own RefreshDatabase test
-        // wrapper (which unconditionally opens one transaction per test),
-        // making the method untestable under this repository's standard
-        // testing convention while adding no additional safety beyond what
-        // the sequencing below already provides.
+        // IMP004-IMPL-M01 (restored per Codex — this method's own
+        // transaction MUST be the outermost one before any lock, mutation,
+        // or authorization evaluation runs, exactly as the specification's
+        // "Transaction Ownership Invariant" requires). Rejected here as a
+        // distinct calling-contract violation — never treated as, or
+        // persisted as, an authorization-denial outcome; no
+        // security.authorization.denied event is emitted for it. Test code
+        // exercising this method must not rely on an ambient transaction
+        // being open at test-body start — use
+        // Illuminate\Foundation\Testing\DatabaseTruncation (never
+        // RefreshDatabase, whose per-test wrapper transaction would
+        // otherwise always trip this check) for those test classes.
+        if (DB::connection()->transactionLevel() !== 0) {
+            throw new TransactionOwnershipViolationException(
+                'RolePermissionService::grant() must own the outermost DB transaction — '.
+                'an ambient transaction is already open on this connection (level '.
+                DB::connection()->transactionLevel().').'
+            );
+        }
 
         // Denial capture for the F-01 DENIAL_DURABLE event — populated ONLY
         // at the self-escalation throw site below; the DENY decision,

@@ -2,13 +2,18 @@
 
 namespace Tests\Feature\Audit;
 
+use App\Enums\AuditActorKind;
 use App\Enums\AuditCriticality;
 use App\Enums\AuditPersistenceStrategy;
+use App\Enums\AuditVisibilityClass;
+use App\Enums\ScopeType;
 use App\Models\Audit\AuditRecord;
 use App\Models\Rbac\Permission;
 use App\Models\Rbac\Principal;
+use App\Models\Rbac\PrincipalRoleAssignment;
 use App\Models\Rbac\Role;
 use App\Models\User;
+use App\Services\Audit\AuditEventDefinition;
 use App\Services\Audit\AuditEventInput;
 use App\Services\Audit\AuditEventRegistry;
 use App\Services\Audit\AuditQueryFilter;
@@ -16,19 +21,22 @@ use App\Services\Audit\AuditQueryService;
 use App\Services\Audit\AuditReadAuthorizer;
 use App\Services\Audit\AuditRetentionFoundation;
 use App\Services\Audit\AuditWriter;
+use App\Services\Audit\Exceptions\AuditActorAttributionException;
+use App\Services\Audit\Exceptions\AuditIdempotencyConflictException;
 use App\Services\Audit\Exceptions\AuditMetadataViolationException;
 use App\Services\Audit\Exceptions\AuditRecordImmutableException;
 use App\Services\Audit\Exceptions\AuditSourceEventException;
+use App\Services\Audit\Exceptions\TransactionOwnershipViolationException;
 use App\Services\Audit\Exceptions\UnregisteredAuditEventException;
 use App\Services\Identity\IdentityAuditLogger;
 use App\Services\Rbac\PermissionRegistry;
 use App\Services\Rbac\PrincipalService;
 use App\Services\Rbac\RbacAuditLogger;
 use App\Services\Rbac\RolePermissionService;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\Support\Rbac\RbacTestActors;
+use Tests\Support\TruncatesInMemorySqlite;
 use Tests\TestCase;
 
 /**
@@ -36,15 +44,36 @@ use Tests\TestCase;
  * canonical `audit_records` sink (no fake/mock of AuditWriter itself), the
  * required behavior from docs/implementation/IMP-004-audit-governance-foundation.md:
  * event inventory, registry-owned criticality/persistence-strategy,
- * MUTATION_ATOMIC and DENIAL_DURABLE semantics, the Transaction Ownership
- * sequencing fix, pre-principal actor attribution, allow-list redaction,
- * append-only immutability, registry-derived read authorization, and
- * source_event_id idempotency.
+ * MUTATION_ATOMIC and DENIAL_DURABLE semantics, the restored Transaction
+ * Ownership Invariant, pre-principal actor attribution, allow-list
+ * redaction, append-only immutability, registry-derived read authorization,
+ * and source_event_id idempotency.
+ *
+ * Uses TruncatesInMemorySqlite, not RefreshDatabase: several tests exercise
+ * RolePermissionService::grant(), which enforces the Transaction Ownership
+ * Invariant (IMP004-IMPL-M01) and must genuinely be the outermost
+ * transaction — RefreshDatabase's per-test wrapper transaction would
+ * otherwise trip that check on every such call. See that trait's docblock
+ * for why plain DatabaseTruncation does not work against this repository's
+ * `:memory:` SQLite test connection.
  */
 class AuditFoundationTest extends TestCase
 {
     use RbacTestActors;
-    use RefreshDatabase;
+    use TruncatesInMemorySqlite;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->setUpTruncatedDatabase();
+    }
+
+    protected function tearDown(): void
+    {
+        $this->tearDownTruncatedDatabase();
+        parent::tearDown();
+    }
 
     private function makePlainPrincipal(): Principal
     {
@@ -115,6 +144,102 @@ class AuditFoundationTest extends TestCase
             subjectId: $actor->id,
             metadata: ['password' => 'should-never-be-accepted'],
         ));
+    }
+
+    public function test_nested_associative_array_metadata_value_is_rejected(): void
+    {
+        // IMP004-IMPL-M02: HARD_PROHIBITED_METADATA_KEYS is only ever
+        // checked against the top-level allow-list's OWN keys — an
+        // 'array'-typed field must never accept a nested associative
+        // structure, since that would let a prohibited key (e.g.
+        // 'password') be smuggled inside an otherwise-permitted field. The
+        // fix requires a flat, sequential list of scalars only. This
+        // asserts the rejection WITHOUT logging the actual secret value in
+        // any test diagnostic.
+        $this->expectException(AuditMetadataViolationException::class);
+
+        try {
+            app(AuditWriter::class)->record(new AuditEventInput(
+                eventType: 'rbac.super_admin.canonically_authorized',
+                actor: null,
+                subjectType: 'principal',
+                subjectId: null,
+                metadata: [
+                    'role' => 'super_admin',
+                    'scope_type' => 'GLOBAL_PLATFORM',
+                    'granted' => [['password' => 'x']],
+                    'not_granted' => [],
+                ],
+            ));
+        } finally {
+            $this->assertNull(
+                AuditRecord::where('event_type', 'rbac.super_admin.canonically_authorized')->first(),
+                'A rejected metadata payload must never reach canonical storage.'
+            );
+        }
+    }
+
+    public function test_associative_array_metadata_value_is_rejected(): void
+    {
+        // Even without a prohibited key present, an associative (non-list)
+        // array is never a valid 'array'-typed value — only a flat,
+        // sequential list of scalars is permitted.
+        $this->expectException(AuditMetadataViolationException::class);
+
+        app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'rbac.super_admin.canonically_authorized',
+            actor: null,
+            subjectType: 'principal',
+            subjectId: null,
+            metadata: [
+                'role' => 'super_admin',
+                'scope_type' => 'GLOBAL_PLATFORM',
+                'granted' => ['label' => 'role: super_admin'],
+                'not_granted' => [],
+            ],
+        ));
+    }
+
+    public function test_deeply_nested_array_metadata_value_is_rejected(): void
+    {
+        $this->expectException(AuditMetadataViolationException::class);
+
+        app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'rbac.super_admin.canonically_authorized',
+            actor: null,
+            subjectType: 'principal',
+            subjectId: null,
+            metadata: [
+                'role' => 'super_admin',
+                'scope_type' => 'GLOBAL_PLATFORM',
+                'granted' => [['nested', ['still_nested']]],
+                'not_granted' => [],
+            ],
+        ));
+    }
+
+    public function test_flat_scalar_list_array_metadata_value_is_accepted(): void
+    {
+        // The legitimate shape (a flat sequential list of scalars) must
+        // still be accepted — this is the non-regression counterpart to the
+        // rejection tests above.
+        $subject = $this->makePlainPrincipal();
+
+        $record = app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'rbac.super_admin.canonically_authorized',
+            actor: null,
+            subjectType: 'principal',
+            subjectId: $subject->id,
+            metadata: [
+                'role' => 'super_admin',
+                'scope_type' => 'GLOBAL_PLATFORM',
+                'granted' => ['role: super_admin'],
+                'not_granted' => ['financial_authority', 'business_authority'],
+            ],
+        ));
+
+        $this->assertNotNull($record);
+        $this->assertSame(['role: super_admin'], $record->metadata['granted']);
     }
 
     public function test_persisted_event_never_contains_hard_prohibited_categories(): void
@@ -227,24 +352,45 @@ class AuditFoundationTest extends TestCase
         );
     }
 
-    public function test_denial_sequencing_does_not_throw_ownership_violation_under_refresh_database(): void
+    public function test_grant_rejects_ambient_transaction_with_ownership_violation(): void
     {
-        // Regression: the original Transaction Ownership Invariant draft
-        // rejected ANY ambient transaction, which made grant() untestable
-        // under this repository's own RefreshDatabase convention (it always
-        // opens one transaction per test). The corrected implementation
-        // relies on sequencing (catch-after-rollback) alone — this test IS
-        // that regression proof, running (as every test in this suite does)
-        // inside RefreshDatabase's own transaction.
-        $this->assertGreaterThan(0, DB::connection()->transactionLevel());
+        // IMP004-IMPL-M01: grant() must own the outermost transaction. An
+        // ambient (already-open) transaction on the connection is a
+        // calling-contract violation, rejected BEFORE any lock, mutation, or
+        // authorization evaluation runs — never treated as, or persisted as,
+        // an authorization-denial outcome. This suite uses DatabaseTruncation
+        // (not RefreshDatabase) precisely so this test can open its own
+        // ambient transaction deliberately and still start from level 0.
+        $this->assertSame(0, DB::connection()->transactionLevel());
 
         $actor = $this->makeAuthorizedActor();
-        $role = Role::create(['code' => 'audit_found_nested_ok', 'name' => 'Audit Found Nested OK']);
-        $permission = Permission::create(['code' => 'audit.found.nested_ok', 'description' => 'test']);
+        $role = Role::create(['code' => 'audit_found_ownership_violation', 'name' => 'Audit Found Ownership Violation']);
+        $permission = Permission::create(['code' => 'audit.found.ownership_violation', 'description' => 'test']);
 
-        app(RolePermissionService::class)->grant($actor, $role, $permission);
+        DB::beginTransaction();
 
-        $this->assertTrue($role->permissions()->where('permissions.id', $permission->id)->exists());
+        try {
+            try {
+                app(RolePermissionService::class)->grant($actor, $role, $permission);
+                $this->fail('Expected TransactionOwnershipViolationException under an ambient transaction.');
+            } catch (TransactionOwnershipViolationException $e) {
+                // expected
+            }
+        } finally {
+            DB::rollBack();
+        }
+
+        $this->assertSame(
+            0,
+            DB::table('role_permissions')->where('role_id', $role->id)->where('permission_id', $permission->id)->count(),
+            'No business mutation may occur when the invariant rejects the call.'
+        );
+        $this->assertNull(
+            AuditRecord::where('event_type', 'security.authorization.denied')
+                ->where('actor_principal_id', $actor->id)
+                ->first(),
+            'An ownership-contract violation must never be persisted as an authorization-denial outcome.'
+        );
     }
 
     // --- Pre-Principal Actor (IMP004-SPEC-M02) ---
@@ -276,19 +422,24 @@ class AuditFoundationTest extends TestCase
         $this->assertNull($record->subject_id, 'Unknown-email attempt has no resolvable subject.');
     }
 
-    public function test_invitation_issued_with_no_issuer_uses_pre_principal_attribution(): void
+    public function test_invitation_issued_with_no_issuer_is_rejected_fail_closed(): void
     {
+        // IMP004-IMPL-M03: the approved actor catalog is NOT expanded to
+        // cover invitation issue/revoke — PrePrincipalSystem remains reserved
+        // for the specific, named Q25 bootstrap CLI path only. A null issuer
+        // (an intentional, locked IMP-002 "Invitation Boundary" possibility —
+        // "records who revoked it, where available") has no approved
+        // canonical attribution under IMP-004 and is REJECTED fail-closed
+        // here, rather than silently attributed to a fabricated or expanded
+        // actor kind. This is the flagged IMP-002/IMP-004 contradiction — see
+        // docs/audits/IMP-004-OWNERSHIP-HANDOFF.md.
+        $this->expectException(AuditActorAttributionException::class);
+
         app(IdentityAuditLogger::class)->record('invitation_issued', null, [
             'invitation_id' => 999999,
             'invitation_public_id' => 'test-public-id',
             'invited_actor' => 'partner_representative',
         ]);
-
-        $record = AuditRecord::where('event_type', 'identity.invitation.issued')->latest('id')->first();
-
-        $this->assertNotNull($record);
-        $this->assertNull($record->actor_principal_id, 'A legitimately null issuer (Q22) must never fabricate a human actor.');
-        $this->assertSame('pre_principal_system', $record->actor_principal_kind);
     }
 
     // --- Immutability (Q28) ---
@@ -379,6 +530,253 @@ class AuditFoundationTest extends TestCase
         );
     }
 
+    /**
+     * IMP004-IMPL-M04: no currently-migrated event declares a source_domain
+     * policy, so exercising the full idempotency-comparison contract
+     * requires a throwaway, test-only registry entry that DOES — registered
+     * into its OWN AuditEventRegistry instance and bound into the container
+     * only for the duration of one test (never touching the canonical
+     * 29-active/6-reserved inventory any other test asserts against).
+     */
+    private function bindRegistryWithSourceDomainProbeEvent(): void
+    {
+        $registry = new AuditEventRegistry;
+        $registry->register(new AuditEventDefinition(
+            eventType: 'test.idempotency.probe',
+            eventVersion: 1,
+            criticality: AuditCriticality::NonCritical,
+            persistenceStrategy: null,
+            visibilityClass: AuditVisibilityClass::General,
+            subjectType: 'probe',
+            subjectIdNullable: true,
+            metadataAllowList: ['label' => 'string'],
+            actorKinds: [AuditActorKind::Human],
+            executionContext: null,
+            requiresElevatedAssuranceToRead: false,
+            scopeType: ScopeType::GlobalPlatform,
+            sourceDomain: 'test_probe_domain',
+        ));
+
+        $this->app->instance(AuditEventRegistry::class, $registry);
+    }
+
+    public function test_idempotent_replay_with_identical_immutable_fields_returns_existing_record(): void
+    {
+        $this->bindRegistryWithSourceDomainProbeEvent();
+        $actor = $this->makePlainPrincipal();
+
+        $first = app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'test.idempotency.probe',
+            actor: $actor,
+            subjectType: 'probe',
+            subjectId: null,
+            metadata: ['label' => 'same'],
+            sourceDomain: 'test_probe_domain',
+            sourceEventId: 'probe-key-1',
+        ));
+
+        $second = app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'test.idempotency.probe',
+            actor: $actor,
+            subjectType: 'probe',
+            subjectId: null,
+            metadata: ['label' => 'same'],
+            sourceDomain: 'test_probe_domain',
+            sourceEventId: 'probe-key-1',
+        ));
+
+        $this->assertSame($first->id, $second->id);
+        $this->assertSame(
+            1,
+            AuditRecord::where('event_type', 'test.idempotency.probe')->where('source_event_id', 'probe-key-1')->count()
+        );
+    }
+
+    public function test_idempotency_key_reuse_with_changed_metadata_is_rejected(): void
+    {
+        $this->bindRegistryWithSourceDomainProbeEvent();
+        $actor = $this->makePlainPrincipal();
+
+        app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'test.idempotency.probe',
+            actor: $actor,
+            subjectType: 'probe',
+            subjectId: null,
+            metadata: ['label' => 'original'],
+            sourceDomain: 'test_probe_domain',
+            sourceEventId: 'probe-key-2',
+        ));
+
+        $this->expectException(AuditIdempotencyConflictException::class);
+
+        app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'test.idempotency.probe',
+            actor: $actor,
+            subjectType: 'probe',
+            subjectId: null,
+            metadata: ['label' => 'changed'],
+            sourceDomain: 'test_probe_domain',
+            sourceEventId: 'probe-key-2',
+        ));
+    }
+
+    public function test_idempotency_key_reuse_with_changed_actor_attribution_is_rejected(): void
+    {
+        $this->bindRegistryWithSourceDomainProbeEvent();
+        $actorA = $this->makePlainPrincipal();
+        $actorB = $this->makePlainPrincipal();
+
+        app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'test.idempotency.probe',
+            actor: $actorA,
+            subjectType: 'probe',
+            subjectId: null,
+            metadata: ['label' => 'same'],
+            sourceDomain: 'test_probe_domain',
+            sourceEventId: 'probe-key-3',
+        ));
+
+        $this->expectException(AuditIdempotencyConflictException::class);
+
+        app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'test.idempotency.probe',
+            actor: $actorB,
+            subjectType: 'probe',
+            subjectId: null,
+            metadata: ['label' => 'same'],
+            sourceDomain: 'test_probe_domain',
+            sourceEventId: 'probe-key-3',
+        ));
+    }
+
+    public function test_idempotent_replay_is_insensitive_to_metadata_key_order(): void
+    {
+        // The canonical comparison must be over CONTENT, not raw JSON byte
+        // ordering — key order is never a legitimate basis for a conflict.
+        $this->bindRegistryWithSourceDomainProbeEvent();
+
+        $registry = app(AuditEventRegistry::class);
+        $registry->register(new AuditEventDefinition(
+            eventType: 'test.idempotency.probe.multi',
+            eventVersion: 1,
+            criticality: AuditCriticality::NonCritical,
+            persistenceStrategy: null,
+            visibilityClass: AuditVisibilityClass::General,
+            subjectType: 'probe',
+            subjectIdNullable: true,
+            metadataAllowList: ['a' => 'string', 'b' => 'string'],
+            actorKinds: [AuditActorKind::Human],
+            executionContext: null,
+            requiresElevatedAssuranceToRead: false,
+            scopeType: ScopeType::GlobalPlatform,
+            sourceDomain: 'test_probe_domain',
+        ));
+
+        $actor = $this->makePlainPrincipal();
+
+        $first = app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'test.idempotency.probe.multi',
+            actor: $actor,
+            subjectType: 'probe',
+            subjectId: null,
+            metadata: ['a' => '1', 'b' => '2'],
+            sourceDomain: 'test_probe_domain',
+            sourceEventId: 'probe-key-4',
+        ));
+
+        $second = app(AuditWriter::class)->record(new AuditEventInput(
+            eventType: 'test.idempotency.probe.multi',
+            actor: $actor,
+            subjectType: 'probe',
+            subjectId: null,
+            metadata: ['b' => '2', 'a' => '1'],
+            sourceDomain: 'test_probe_domain',
+            sourceEventId: 'probe-key-4',
+        ));
+
+        $this->assertSame($first->id, $second->id);
+    }
+
+    public function test_concurrent_same_source_key_insertion_yields_exactly_one_canonical_record(): void
+    {
+        // MySQL only: SQLite's single-writer-connection model cannot
+        // exercise genuine concurrent insertion. Two truly independent OS
+        // processes (not merely two sequential calls in this same process,
+        // which could never actually race the pre-insert check) each race
+        // the composite (source_domain, source_event_id, event_type)
+        // DB-level uniqueness constraint — the loser must fall back to the
+        // QueryException/isUniqueViolation path, re-select, and converge on
+        // the winner's row, never silently produce a second one.
+        if (DB::connection()->getDriverName() !== 'mysql') {
+            $this->markTestSkipped('Concurrency evidence requires MySQL; SQLite has no real concurrent writers.');
+        }
+
+        // Committed and visible to the child processes' own connections —
+        // only true because this suite uses TruncatesInMemorySqlite (no
+        // wrapping test transaction), never RefreshDatabase.
+        $actor = $this->makePlainPrincipal();
+
+        $script = base_path('tests/Support/scripts/audit_idempotency_probe_race.php');
+        $sourceEventId = 'probe-key-concurrent-'.bin2hex(random_bytes(6));
+        $barrierFile = storage_path('framework/testing/audit_probe_barrier_'.bin2hex(random_bytes(6)));
+
+        if (file_exists($barrierFile)) {
+            unlink($barrierFile);
+        }
+
+        $env = array_filter(
+            array_merge($_ENV, $_SERVER, ['APP_ENV' => 'testing']),
+            static fn ($value) => is_scalar($value)
+        );
+        $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+        $cmd = [PHP_BINARY, $script, $sourceEventId, (string) $actor->id, $barrierFile];
+
+        $procA = proc_open($cmd, $descriptors, $pipesA, base_path(), $env);
+        $procB = proc_open($cmd, $descriptors, $pipesB, base_path(), $env);
+
+        $this->assertIsResource($procA);
+        $this->assertIsResource($procB);
+
+        usleep(100_000);
+        touch($barrierFile);
+
+        $outA = stream_get_contents($pipesA[1]);
+        $errA = stream_get_contents($pipesA[2]);
+        foreach ($pipesA as $pipe) {
+            fclose($pipe);
+        }
+        $statusA = proc_close($procA);
+
+        $outB = stream_get_contents($pipesB[1]);
+        $errB = stream_get_contents($pipesB[2]);
+        foreach ($pipesB as $pipe) {
+            fclose($pipe);
+        }
+        $statusB = proc_close($procB);
+
+        if (file_exists($barrierFile)) {
+            unlink($barrierFile);
+        }
+
+        $this->assertSame(0, $statusA, "Probe process A failed: {$errA}");
+        $this->assertSame(0, $statusB, "Probe process B failed: {$errB}");
+        $this->assertStringStartsWith('OK:', trim($outA), "Process A: {$outA} {$errA}");
+        $this->assertStringStartsWith('OK:', trim($outB), "Process B: {$outB} {$errB}");
+
+        $idA = (int) substr(trim($outA), 3);
+        $idB = (int) substr(trim($outB), 3);
+
+        $this->assertSame(
+            $idA,
+            $idB,
+            'Two genuinely concurrent OS processes racing the same idempotency key must converge on exactly one canonical row.'
+        );
+        $this->assertSame(
+            1,
+            AuditRecord::where('event_type', 'test.idempotency.probe')->where('source_event_id', $sourceEventId)->count()
+        );
+    }
+
     // --- Read Authorization (Q27 / IMP004-SPEC-M05) ---
 
     public function test_default_deny_for_actor_without_audit_read_permission(): void
@@ -436,6 +834,143 @@ class AuditFoundationTest extends TestCase
         app(RolePermissionService::class)->grant($authorizedActor, $role, $permission);
 
         $result = app(AuditQueryService::class)->search($reader, new AuditQueryFilter(eventType: 'rbac.role_permission.granted'));
+
+        $this->assertSame(0, $result['authorized_count']);
+        $this->assertSame([], $result['records']);
+    }
+
+    /**
+     * A reader granted ONLY audit.read.security (never audit.read) —
+     * SECURITY-visibility events are readable, GENERAL-visibility events are
+     * not, for the exact same reader in the exact same result set. Mirrors
+     * makeAuthorizedActor()'s internal-setup bypass pattern rather than
+     * routing through RolePermissionService, to keep the grant scoped to
+     * precisely one permission.
+     */
+    private function makeSecurityOnlyReader(): Principal
+    {
+        $user = User::create([
+            'email' => 'audit-found-security-reader-'.uniqid().'@example.com',
+            'password' => Hash::make('correct-horse-battery-staple'),
+        ]);
+        $principal = app(PrincipalService::class)->forUser($user);
+
+        $role = Role::create(['code' => 'audit_found_security_reader_role_'.uniqid(), 'name' => 'Security-Only Reader']);
+        $permission = Permission::firstOrCreate(
+            ['code' => PermissionRegistry::AUDIT_READ_SECURITY],
+            ['description' => 'test']
+        );
+        $role->permissions()->attach($permission->id, ['granted_at' => now(), 'granted_by_principal_id' => null]);
+
+        PrincipalRoleAssignment::create([
+            'principal_id' => $principal->id,
+            'role_id' => $role->id,
+            'scope_type' => ScopeType::GlobalPlatform->value,
+            'scope_id' => null,
+            'starts_at' => now(),
+            'assigned_by_principal_id' => null,
+        ]);
+
+        return $principal;
+    }
+
+    public function test_query_service_pagination_never_returns_unauthorized_records_and_is_deterministic(): void
+    {
+        // IMP004-IMPL-m01: interleave GENERAL-visibility (identity.user.created,
+        // requires audit.read) and SECURITY-visibility (rbac.role_permission.granted,
+        // requires audit.read.security) records for the SAME reader, who holds
+        // ONLY audit.read.security — so within one ordered result set some
+        // records are authorized and some are not, and a naive
+        // skip()/take()-then-filter implementation would silently shrink or
+        // skip pages instead of always filling perPage with authorized rows
+        // (until genuinely exhausted).
+        $reader = $this->makeSecurityOnlyReader();
+        $writer = app(AuditWriter::class);
+        $identityAuditLogger = app(IdentityAuditLogger::class);
+
+        $expectedVisibleIds = [];
+
+        for ($i = 0; $i < 12; $i++) {
+            $subjectUser = User::create([
+                'email' => 'audit-found-query-subject-'.uniqid().'@example.com',
+                'password' => Hash::make('correct-horse-battery-staple'),
+            ]);
+
+            // Unauthorized to this reader (GENERAL visibility).
+            $identityAuditLogger->record('identity_created', $subjectUser);
+
+            // Authorized to this reader (SECURITY visibility).
+            $actor = $this->makePlainPrincipal();
+            $record = $writer->record(new AuditEventInput(
+                eventType: 'rbac.role_permission.granted',
+                actor: $actor,
+                subjectType: 'role_permission',
+                subjectId: null,
+                metadata: ['role_id' => $i + 1, 'permission_id' => $i + 1],
+            ));
+            $expectedVisibleIds[] = $record->id;
+        }
+
+        $service = app(AuditQueryService::class);
+        $filter = new AuditQueryFilter(eventType: null, perPage: 5, page: 1);
+
+        $seenIds = [];
+        $page = 1;
+
+        while (true) {
+            $result = $service->search($reader, new AuditQueryFilter(eventType: null, perPage: 5, page: $page));
+
+            if ($result['records'] === []) {
+                break;
+            }
+
+            foreach ($result['records'] as $record) {
+                // Never an unauthorized (GENERAL) record.
+                $this->assertSame('rbac.role_permission.granted', $record->event_type);
+                $this->assertNotContains($record->id, $seenIds, 'No record may appear on more than one page.');
+                $seenIds[] = $record->id;
+            }
+
+            $page++;
+
+            if ($page > 20) {
+                $this->fail('Pagination did not terminate — possible infinite loop.');
+            }
+        }
+
+        // Every authorized record was eventually surfaced, across however
+        // many pages it took, none skipped because unauthorized rows
+        // occupied the same raw-offset window.
+        sort($seenIds);
+        $sortedExpected = $expectedVisibleIds;
+        sort($sortedExpected);
+        $this->assertSame($sortedExpected, $seenIds);
+
+        // Re-running the identical first-page query is stable/deterministic.
+        $again = $service->search($reader, $filter);
+        $this->assertSame(
+            array_map(fn ($r) => $r->id, $again['records']),
+            array_map(fn ($r) => $r->id, $service->search($reader, $filter)['records'])
+        );
+    }
+
+    public function test_query_service_authorized_count_never_leaks_unauthorized_total(): void
+    {
+        // The `authorized_count` field is scoped to records actually
+        // returned on THIS page — never a hint about how many additional
+        // (unauthorized) rows exist in the underlying table.
+        $reader = $this->makeSecurityOnlyReader();
+        $identityAuditLogger = app(IdentityAuditLogger::class);
+
+        for ($i = 0; $i < 5; $i++) {
+            $subjectUser = User::create([
+                'email' => 'audit-found-count-subject-'.uniqid().'@example.com',
+                'password' => Hash::make('correct-horse-battery-staple'),
+            ]);
+            $identityAuditLogger->record('identity_created', $subjectUser);
+        }
+
+        $result = app(AuditQueryService::class)->search($reader, new AuditQueryFilter(eventType: 'identity.user.created'));
 
         $this->assertSame(0, $result['authorized_count']);
         $this->assertSame([], $result['records']);
