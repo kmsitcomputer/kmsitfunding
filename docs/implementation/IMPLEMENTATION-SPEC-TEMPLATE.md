@@ -10,6 +10,14 @@ Per [docs/00-governance/MULTI-MODEL-OWNERSHIP.md](../00-governance/MULTI-MODEL-O
 no implicit/default model substitution is permitted; if the assigned model/owner is unavailable,
 stop and report rather than substituting silently.
 
+**First determine the Stage Type — this decides which block below applies. Never fill both.**
+
+```
+Stage Type:   NORMAL IMPLEMENTATION STAGE  /  AUDIT-ONLY STAGE (IMP-030 only, see GOV-MM-001)
+```
+
+### If Stage Type = NORMAL IMPLEMENTATION STAGE (every IMP except IMP-030)
+
 ```
 Primary Implementation Owner:
 Primary Model:
@@ -22,24 +30,32 @@ Concurrent Editing:            PROHIBITED
 ```
 
 If this IMP is one of the Mission-Critical Claude Stages (see MULTI-MODEL-OWNERSHIP.md), also
-record the GOV-MM-002 Per-IMP Model Binding before implementation begins:
+record the GOV-MM-002 Claude Per-IMP Model Binding before implementation begins — implementation
+may not proceed unless Binding Status below is `BOUND`:
 
 ```
-Bound Model Name/Identifier:
-Binding Recorded Date:
-Human Approver (binding):
-Human Approval Date (binding):
+Execution Environment:               Claude Code
+Actual Claude Model Name:
+Exact Model Identifier:
+Resolution/Verification Date:
+Human Model Binding Approval:
+Binding Status:                      UNBOUND / MODEL RESOLVED / AWAITING HUMAN MODEL APPROVAL /
+                                      BOUND
 Model Change Requests against this binding: none / list
 ```
 
-If this IMP is the Audit-Only Stage (IMP-030), use the GOV-MM-001 fields instead of "Primary
-Implementation Owner" above:
+### If Stage Type = AUDIT-ONLY STAGE (IMP-030 only)
+
+Use ONLY this block. Do not also fill the "NORMAL IMPLEMENTATION STAGE" block above — IMP-030 has
+no Primary Implementation Owner, and `Independent Formal Reviewer: Codex` must never be recorded
+for IMP-030 (Codex cannot independently review its own audit — see GOV-MM-001).
 
 ```
-Primary Audit Owner:              Codex
-Independent Reviewer of this audit: NONE (see GOV-MM-001)
-Findings returned to:             <Primary Implementation Owner of each affected prior IMP>
-Human Final System Approval:
+Primary Audit Owner:                Codex
+Independent Formal Reviewer:        N/A — audit-only exception, see GOV-MM-001
+Findings returned to:               <Primary Implementation Owner of each affected prior IMP>
+Final Approval Authority:           Human Final System Approval (mandatory; a Codex PASS on the
+                                     final audit does not by itself satisfy this)
 ```
 
 ## Objective

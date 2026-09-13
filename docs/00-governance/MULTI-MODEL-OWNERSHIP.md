@@ -57,7 +57,11 @@ Each IMP specification must explicitly record, before implementation begins:
 
 - Primary Implementation Owner
 - Primary Model
-- Exact Model ID where applicable
+- Exact Model ID — for Kimi/Qwen/DeepSeek this is the pinned baseline ID from "Model Version
+  Pinning" below; for Claude Code on a mission-critical stage, this field is satisfied **only**
+  by a completed `BOUND` GOV-MM-002 Per-IMP Model Binding record (see "Claude Model Binding"
+  under "Execution Evidence") — never by a placeholder, a general "Claude Code" label, or an
+  unbound/unresolved state
 - Execution Environment
 - Specialist Reviewer(s)
 - Independent Formal Reviewer
@@ -169,27 +173,152 @@ IMP-030 is an **Audit-Only Stage**, not an implementation stage:
   to that IMP's own Primary Implementation Owner (per "Remediation Ownership" above) — Codex does
   not remediate it itself. Once remediated, Codex performs a **re-audit** of that finding as part
   of IMP-030, not a fresh independent review of a different owner's unrelated new work.
+- **Codex PASS at IMP-030 does not equal Human Final System Approval.** These are two distinct
+  gates. A Codex PASS on the final audit means only that Codex found no unresolved gate-impact
+  finding — it is a necessary input to Human Final System Approval, never a substitute for it.
+  Human approval of the final system release remains mandatory regardless of the audit result.
+- IMP-030 does **not** require, and must never be represented as requiring, a fictional second
+  Codex reviewer to review Codex's own IMP-030 audit — no such role exists in this governance.
+  Codex's IMP-030 deliverable is an independent final audit of the entire implementation program
+  (IMP-001 through IMP-029), not a review of a single stage's diff, and Human is the sole final
+  approval authority over the resulting system-release/final-system gate.
+- If additional independent review of IMP-030's own audit is ever required for any reason, it
+  must be separately Human-authorized as an explicit exception, naming a genuinely independent
+  reviewer — it must never be represented as "Codex reviewing itself."
+
+The full IMP-030 authority boundary:
+
+```
+IMP-001 ... IMP-029
+        |
+        v
+IMP-030 Final Implementation Audit
+        |
+        v
+Codex = Primary Audit Owner
+        |
+        v
+     Findings?
+        |
+   +----+----+
+   |         |
+  YES        NO
+   |         |
+   v         |
+Return finding to the responsible
+Primary Implementation Owner
+   |
+   v
+Remediation
+   |
+   v
+Codex Re-Audit ---------+
+                         |
+   +---------------------+
+   |
+   v
+No unresolved gate-impact findings
+   |
+   v
+HUMAN FINAL SYSTEM APPROVAL   <- mandatory; Codex PASS alone never satisfies this
+```
 
 This changes the "030 | Final Implementation Audit | Codex | ..." matrix row's semantics: "Codex"
 in the Primary Owner column for IMP-030 means **Primary Audit Owner**, never "Primary
-Implementation Owner" — see the matrix row's note below.
+Implementation Owner" — see the matrix row's note below. The matrix row's "Specialist / Review"
+cell for IMP-030 names Human Final System Approval explicitly for this same reason — it is not an
+optional or implied step.
 
 ### GOV-MM-002 — Per-IMP Model Binding for Claude Code Mission-Critical Stages
 
 For each of the mission-critical stages assigned to Claude Code (see "Mission-Critical Claude
 Stages" below), Claude Code uses **Per-IMP Model Binding**, not a single fixed model identifier
-for all of them:
+for all of them. No Claude model/generation is invented, guessed, or silently selected on behalf
+of Human by this amendment — see "Mission-Critical Claude Stages" below, which assigns none now.
 
 - Before implementation of that specific IMP begins, the exact Claude model name/identifier
-  actually available for use must be recorded and must receive explicit Human approval.
+  actually available for use (the actual product-visible model name and its exact identifier at
+  execution time) must be recorded and must receive explicit Human approval.
 - That exact model is then **pinned/bound** to that IMP only — not to Claude Code's role in
   general, and not automatically carried over to the next mission-critical IMP.
 - Silent substitution is prohibited — the same rule as "Model Version Pinning"/"Model Change
   Control" above, applied per-IMP rather than once for the whole baseline.
 - Changing the bound model after binding (e.g. a newer Claude generation becomes available mid-
-  stage) requires a Model Change Request and fresh Human approval, exactly as "Model Change
-  Control" describes — it does not get a lighter-weight process merely because it is Claude
-  rather than a Command Code model.
+  stage) requires a Model Change Request and fresh Human approval — see "Model Change After
+  Binding" below. It does not get a lighter-weight process merely because it is Claude rather
+  than a Command Code model.
+- This requirement is **prospective only**. It does not retroactively apply to IMP-003, which is
+  already `FINAL / LOCKED` under the prior single-owner governance — its historical
+  implementation evidence (`docs/audits/IMP-003-*.md`) is not rewritten or reinterpreted to add a
+  binding record it never required at the time. GOV-MM-002 governs IMP-009, IMP-010, IMP-011,
+  IMP-014, IMP-015, IMP-016, and IMP-027 going forward, once each reaches its own implementation
+  gate.
+
+#### Binding State Model
+
+```
+UNBOUND
+   |
+   v
+MODEL RESOLVED               (exact Claude model name/identifier determined)
+   |
+   v
+AWAITING HUMAN MODEL APPROVAL
+   |
+   v
+BOUND                         (Human-approved; pinned to this IMP only)
+   |
+   v
+IMPLEMENTATION MAY PROCEED
+```
+
+Only `BOUND` is an acceptable state for a Claude-owned governed implementation to begin. If the
+exact model identity cannot be determined at any point in this sequence: **STOP** — implementation
+must not begin, and this is reported rather than guessed.
+
+#### Silent Substitution (Explicitly Prohibited)
+
+The following are all prohibited under a `BOUND` binding, with no exception:
+
+- automatic Claude model upgrades;
+- automatic Claude model downgrades;
+- a provider-selected fallback that changes the governed model identity;
+- switching Claude generations during implementation without a Model Change Request;
+- describing a materially different Claude model merely as generic "Claude Code" (the exact
+  bound model name/identifier is what governs, not the product label).
+
+If the execution environment silently changes the actual model away from the approved `BOUND`
+binding and that change is detected at any point: **STOP**. Implementation must not continue
+under the new, unapproved model — the discrepancy is reported and a Model Change Request is
+raised before any further governed work resumes.
+
+#### Model Change After Binding
+
+```
+Model Change Request
+        |
+        v
+Reason / availability issue
+        |
+        v
+Compatibility assessment
+        |
+        v
+Impact assessment
+        |
+        v
+Human approval
+        |
+        v
+Binding update
+        |
+        v
+Resume implementation
+```
+
+No Human approval means **NO MODEL CHANGE** — the prior `BOUND` model remains the only approved
+one, and if it is genuinely unavailable, implementation stops rather than substituting silently.
+Provider outage or deprecation does not, by itself, authorize silent substitution.
 
 Each mission-critical IMP's execution evidence (see "Execution Evidence" below) must therefore
 carry a "Claude Model Binding" record in addition to the standard fields.
@@ -270,7 +399,7 @@ must never result in concurrent editing.
 | 027 | Security Hardening | Claude Code | DeepSeek V4 Pro |
 | 028 | Performance | Qwen 3.8 Max 0902 | DeepSeek V4 Pro |
 | 029 | Deployment | Kimi K3 | DeepSeek V4 Pro |
-| 030 | Final Implementation Audit (Audit-Only Stage) | Codex — **Primary Audit Owner**, not Primary Implementation Owner (see GOV-MM-001) | Kimi/DeepSeek READ ONLY if explicitly required |
+| 030 | Final Implementation Audit (Audit-Only Stage) | Codex — **Primary Audit Owner**, not Primary Implementation Owner (see GOV-MM-001) | **Human Final System Approval** (mandatory; Codex PASS does not satisfy it); Kimi/DeepSeek READ ONLY only if explicitly authorized |
 
 For IMP-004 onward, Codex remains the Independent Formal Reviewer unless an explicitly approved
 exception is recorded. IMP-000 through IMP-003 were completed under the prior single-owner
@@ -299,6 +428,12 @@ Binding**: the exact Claude model available is recorded and Human-approved befor
 IMP's implementation begins, then pinned to that IMP only. It is not a single binding that
 carries across all seven stages, and it is not satisfied by this document's general "Claude Code"
 baseline entry alone.
+
+**No Claude generation/model is assigned to any of these seven stages by this amendment.** This
+document does not name, guess, or pre-select a model for IMP-009, IMP-010, IMP-011, IMP-014,
+IMP-015, IMP-016, or IMP-027 — each independently goes through the full Binding State Model
+(`UNBOUND -> MODEL RESOLVED -> AWAITING HUMAN MODEL APPROVAL -> BOUND -> IMPLEMENTATION MAY
+PROCEED`, see GOV-MM-002 above) only when that specific IMP reaches its own implementation gate.
 
 ## Model Version Pinning
 
@@ -369,25 +504,34 @@ Concurrent Editing: PROHIBITED
 ### Claude Model Binding (Mission-Critical Stages Only, GOV-MM-002)
 
 In addition to the standard fields above, each of the seven Mission-Critical Claude Stages must
-record, before implementation begins:
+record, before implementation begins, a Claude Per-IMP Model Binding record — at minimum:
 
 ```
-Bound Model Name/Identifier:
-Binding Recorded Date:
-Human Approver (binding):
-Human Approval Date (binding):
+IMP ID:
+Execution Environment:               Claude Code
+Actual Claude Model Name:
+Exact Model Identifier:              (exact product-visible model identifier at execution time)
+Resolution/Verification Date:
+Human Model Binding Approval:        (approver + date)
+Binding Status:                      UNBOUND / MODEL RESOLVED / AWAITING HUMAN MODEL APPROVAL /
+                                      BOUND
+Execution/Version Metadata:          (any additional detail required by repository governance)
 Model Change Requests against this binding (if any): list, each with date + Human approval
 ```
+
+Only a record whose Binding Status is `BOUND` authorizes implementation to proceed for that IMP.
 
 Example:
 
 ```
 IMP-009 Payment Hub
 Primary Implementation Owner: Claude Code
-Bound Model Name/Identifier: <exact Claude model identifier available at binding time>
-Binding Recorded Date: <date>
-Human Approver (binding): Human
-Human Approval Date (binding): <date>
+Execution Environment: Claude Code
+Actual Claude Model Name: <exact model name available at binding time>
+Exact Model Identifier: <exact product-visible model identifier available at binding time>
+Resolution/Verification Date: <date>
+Human Model Binding Approval: Human, <date>
+Binding Status: BOUND
 Model Change Requests against this binding: none
 ```
 
