@@ -2,73 +2,64 @@
 
 namespace Tests\Support\Rbac;
 
+use App\Models\Audit\AuditRecord;
+
 /**
- * Redirects the `rbac_audit` log channel to a private, per-test file so
- * tests can assert on actually-emitted audit events (`IMP003-REAUDIT1-m01`)
- * instead of only inspecting the emitting code. No fake/mock is
- * substituted for `RbacAuditLogger` itself — this exercises the real
- * `Log::channel('rbac_audit')` sink end to end.
+ * IMP-004: captures canonical `audit_records` rows created during a test
+ * (`IMP003-REAUDIT1-m01`, migrated onto the canonical sink per IMP-004's
+ * "Migration / Backward Compatibility") so tests can assert on
+ * actually-persisted audit evidence instead of only inspecting the emitting
+ * code. No fake/mock is substituted for the canonical `AuditWriter` sink
+ * itself — this exercises the real `audit_records` table end to end. The
+ * legacy `rbac_audit` log channel is no longer canonical (nothing writes to
+ * it) and is not used by this trait.
  */
 trait CapturesRbacAudit
 {
-    private ?string $rbacAuditLogPath = null;
+    private ?int $rbacAuditWatermarkId = null;
 
     private function captureRbacAuditLog(): void
     {
-        $this->rbacAuditLogPath = storage_path('logs/rbac-audit-test-'.uniqid('', true).'.log');
-
-        config(['logging.channels.rbac_audit.path' => $this->rbacAuditLogPath]);
-        app('log')->forgetChannel('rbac_audit');
+        $this->rbacAuditWatermarkId = (int) (AuditRecord::query()->max('id') ?? 0);
     }
 
     /**
-     * @return array<int, array{event: string, context: array}>
+     * @return array<int, AuditRecord>
      */
     private function readRbacAuditEvents(): array
     {
-        if ($this->rbacAuditLogPath === null || ! file_exists($this->rbacAuditLogPath)) {
-            return [];
-        }
-
-        $events = [];
-
-        foreach (file($this->rbacAuditLogPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
-            if (! preg_match('/\.INFO: (\S+) (\{.*\})\s*$/', $line, $matches)) {
-                continue;
-            }
-
-            $events[] = [
-                'event' => $matches[1],
-                'context' => json_decode($matches[2], true) ?? [],
-            ];
-        }
-
-        return $events;
+        return AuditRecord::query()
+            ->where('id', '>', $this->rbacAuditWatermarkId ?? 0)
+            ->orderBy('id')
+            ->get()
+            ->all();
     }
 
-    private function assertRbacAuditEventLogged(string $eventName): array
+    private function assertRbacAuditEventLogged(string $canonicalEventType): AuditRecord
     {
-        $events = $this->readRbacAuditEvents();
-        $matching = array_values(array_filter($events, fn ($e) => $e['event'] === $eventName));
+        $matching = array_values(array_filter(
+            $this->readRbacAuditEvents(),
+            fn (AuditRecord $record) => $record->event_type === $canonicalEventType,
+        ));
 
-        $this->assertNotEmpty($matching, "Expected an audit event '{$eventName}' to have been logged. Logged events: ".
-            implode(', ', array_column($events, 'event')));
+        $this->assertNotEmpty($matching, "Expected a canonical audit record '{$canonicalEventType}' to have been persisted. Persisted events: ".
+            implode(', ', array_map(fn (AuditRecord $r) => $r->event_type, $this->readRbacAuditEvents())));
 
-        return $matching[0]['context'];
+        return $matching[0];
     }
 
-    private function assertRbacAuditEventNotLogged(string $eventName): void
+    private function assertRbacAuditEventNotLogged(string $canonicalEventType): void
     {
-        $events = $this->readRbacAuditEvents();
-        $matching = array_filter($events, fn ($e) => $e['event'] === $eventName);
+        $matching = array_filter(
+            $this->readRbacAuditEvents(),
+            fn (AuditRecord $record) => $record->event_type === $canonicalEventType,
+        );
 
-        $this->assertEmpty($matching, "Expected NO audit event '{$eventName}' to have been logged, but found one.");
+        $this->assertEmpty($matching, "Expected NO canonical audit record '{$canonicalEventType}' to have been persisted, but found one.");
     }
 
     protected function tearDownRbacAuditCapture(): void
     {
-        if ($this->rbacAuditLogPath !== null && file_exists($this->rbacAuditLogPath)) {
-            @unlink($this->rbacAuditLogPath);
-        }
+        $this->rbacAuditWatermarkId = null;
     }
 }
