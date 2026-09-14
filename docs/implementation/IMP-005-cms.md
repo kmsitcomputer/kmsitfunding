@@ -484,7 +484,8 @@ No Redis, Supervisor, PM2, WebSocket, production Node runtime or separate worker
 Time: config/app.php uses UTC. Persist/compare UTC instants at database datetime precision.
 Accept explicit-offset ISO-8601 input, normalize to UTC, reject ambiguous timezone-less input.
 Admin input/display labels its timezone and converts explicitly; payloads serialize UTC. Capture
-one UTC cutoff per run; published_on is display metadata, never the scheduling clock.
+one UTC cutoff per run; first_published_at and a revision's published_at are display metadata,
+never the scheduling clock.
 
 Human intent: lock the identity, authorize content.publish, validate lifecycle and save timestamps,
 schedule_version, scheduled_by_principal_id, scheduled_at and scheduled_revision_id. Publish binds
@@ -538,7 +539,7 @@ Revision identity     cms_content_revisions row (BIGINT internal id + per-owner 
 
 IMMUTABLE-AFTER-PUBLISH FIELDS — EXHAUSTIVE (not "the payload fields"; these ARE the list, and it
    is the same list as `cms_content_revisions`' payload columns in section 13):
-     revision_no, page_id, article_id, title, article_type, slug_snapshot, body_html,
+     revision_no, page_id, article_id, title, excerpt, article_type, slug_snapshot, body_html,
      meta_title, meta_description, og_title, og_description, og_image_asset_id, no_index,
      author_principal_id, authored_at
    Plus the derived facts that depend on them, which are consequently frozen too: the revision's
@@ -552,19 +553,107 @@ IMMUTABLE-AFTER-PUBLISH FIELDS — EXHAUSTIVE (not "the payload fields"; these A
    While state = DRAFT these columns are editable by content.update; DRAFT is the only state in
    which a payload write is ever legal.
 
+CANONICAL FIELD OWNERSHIP — excerpt, published_on, published_at (IMP005-REAUDIT-R2-03)
+   The previous text had `excerpt` and `published_on` living on `cms_articles` while the
+   publication flow said the identity's display columns were "refreshed FROM the new revision",
+   and the fields_changed vocabulary listed both as revision payload. Neither column existed on the
+   revision table, so the specification named a source that did not exist. Resolved field by
+   field, with the owner stated once:
+
+     excerpt — CANONICAL OWNER: the REVISION. It is editorial prose that changes when the content
+       changes, so it belongs to the versioned payload (added to the immutable list above and to
+       the section 13 revision payload columns). The Article's identity-level `excerpt` is retained
+       ONLY as an explicitly justified current PROJECTION of the currently published revision —
+       see "Identity projections" below. Publication copies revision -> projection; it never
+       copies projection -> revision, and no code may write the projection except through the
+       publication transaction.
+
+     published_on — REMOVED ENTIRELY as an ambiguous name. It was asked to mean two different
+       things (the date the article first appeared, and the date of the current version) and could
+       mean only one. Its two roles are now split into two unambiguously named columns:
+         cms_articles.first_published_at  (DATE/datetime, nullable, identity level) — set ONCE by
+           the identity's FIRST-EVER successful publication and NEVER updated again, by any later
+           publication, replacement, re-exposure or rollback-by-copy. This is the canonical
+           "published on" display value for an Article. Being identity-level, it is exactly the
+           fact that is not about any one revision, and it can never drift because there is no
+           operation that writes it twice.
+         cms_content_revisions.published_at (per revision) — the moment THAT REVISION was
+           published. See "Publication timestamps" below.
+       No third "publication date" concept exists in IMP-005. Anything needing "when did this
+       piece of content first go public" reads first_published_at; "when did this version go
+       public" reads the published revision's published_at.
+
+     PUBLICATION TIMESTAMPS — the re-exposure rule. `published_at` on a revision is written ONCE,
+       by the transition that moves it DRAFT -> PUBLISHED, and is IMMUTABLE THEREAFTER, including
+       across a retirement cycle. Concretely, re-publishing content that is RETIRED at a revision
+       that is already PUBLISHED (the identity was withdrawn and comes back with no new draft)
+       MUST NOT rewrite that revision's published_at — the original publication genuinely happened
+       and the field records that fact, not current visibility. Visibility is carried by the
+       IDENTITY's status, which is what the resolver checks (section 14 resolution table).
+       A separate "current visibility started at" column was considered and REJECTED: nothing in
+       IMP-005 reads it (no SLA, no ordering requirement, no UI surface names it), the audit trail
+       already records every visibility transition with its timestamp and actor, and adding it
+       would create a second mutable lifecycle field whose only job is to duplicate an audit
+       event. If a later stage genuinely needs it, it is that stage's additive change, not a
+       speculative column here. `first_published_at` covers the one display case that looked like
+       a visibility-cycle timestamp.
+     SUMMARY TABLE (normative; each row states who owns the value and what may write it):
+       field                              | canonical owner | written by
+       title, excerpt, body_html, SEO set,|    REVISION     | RevisionService::createDraft/editDraft
+       article_type, slug_snapshot        |  (immutable after| while state = DRAFT only
+                                          |   publication)  |
+       identity title / excerpt           |  PROJECTION of  | PublicationService inside the
+                                          |    revision     | publication transaction only
+       cms_articles.first_published_at    |    IDENTITY     | PublicationService, ONCE, on the
+                                          |                 | identity's first publication
+       revision.published_at              |    REVISION     | PublicationService::publish, ONCE
+       revision.superseded_at             |    REVISION     | PublicationService::supersede, ONCE
+       identity status                    |    IDENTITY     | PublicationService transitions
+       revision.edit_version              |    REVISION     | RevisionService::editDraft only
+
+   IDENTITY PROJECTIONS, JUSTIFIED (section 16 of the remediation asks that denormalized identity
+   fields exist only where justified, and that no field have two canonical owners): the identity's
+   `title` and `excerpt` exist so admin listings and the neutral destination contract (section 21)
+   can sort and display a content list without joining to the revision table for every row on
+   every page of a listing. They are READ-ONLY PROJECTIONS: no writer outside PublicationService,
+   never accepted from request input, and always copied FROM the newly published revision IN the
+   same transaction that moves published_revision_id. Their canonical owner is the revision; the
+   projection is derived data. Where this matters for testing: after any operation that does not
+   publish, the projections are asserted unchanged; after any publication, they are asserted equal
+   to the newly published revision's values (test O11).
+
 LIFECYCLE-MUTABLE FIELDS — EXHAUSTIVE (schema names as in section 13; writable ONLY through the
    named authorized service operation, per the per-operation whitelists in enforcement layer 2):
      state                            (DRAFT | PUBLISHED | SUPERSEDED)
-     published_at                     set once, by publish(); never changed afterwards
+     published_at                     set once, by publish(); never changed afterwards, including
+                                      by a re-exposure after retirement (see above)
      superseded_at                    set once, by supersede(); never changed afterwards
      state_changed_by_principal_id    who/what performed the most recent transition (a lifecycle
                                       fact, not origin attribution — authorship is the immutable
                                       author_principal_id, see "Editor / timestamp attribution")
-     edit_version                     draft optimistic-locking token (IMP005-REAUDIT-R1-04,
-                                      section 19); increments on every authorized DRAFT payload
-                                      write; meaningless once state != DRAFT
-   The lifecycle set is closed. Nothing in the IMMUTABLE list may be added to it, and no column is
-   both.
+   These four are the lifecycle set and they are PublicationService's alone. edit_version is
+   DELIBERATELY NOT IN IT (IMP005-REAUDIT-R2-03): it is a CONCURRENCY CONTROL column written by
+   RevisionService::editDraft(), not a lifecycle transition, and the previous text classified it
+   as lifecycle while simultaneously requiring editDraft() to increment it and forbidding
+   editDraft() from touching lifecycle columns — three statements that cannot all hold. It now has
+   its own single-row classification, and the authoritative write permissions for every column are
+   the operation matrix below, which supersedes any prose list anywhere else in this document:
+
+ REVISION OPERATION MATRIX (THE ONE AUTHORITATIVE TABLE — layer 2's prose is a summary of this,
+   and where they disagree THIS TABLE GOVERNS):
+   | operation | payload columns | edit_version | state | published_at | superseded_at | state_changed_by_principal_id |
+   |---|---|---|---|---|---|---|
+   | createDraft   | WRITE (any)  | initialize to 0 | set DRAFT (only) | not writable | not writable | set (creation is a transition) |
+   | editDraft     | WRITE (any) if locked state is DRAFT, else REJECT | INCREMENT (+1, exactly) | NOT writable | NOT writable | NOT writable | NOT writable |
+   | publish       | READ ONLY    | NOT writable  | DRAFT->PUBLISHED or stays PUBLISHED on re-exposure | WRITE once, only if currently NULL | NOT writable | WRITE |
+   | supersede     | READ ONLY    | NOT writable  | PUBLISHED->SUPERSEDED | NOT writable | WRITE once | WRITE |
+   | retire (identity unpublish; no revision change) | READ ONLY | NOT writable | NOT writable | NOT writable | NOT writable | NOT writable |
+   | archive (identity) | READ ONLY | NOT writable | NOT writable | NOT writable | NOT writable |
+   Any cell not listed above is unwritable by that operation. `retire` and `archive` change the
+   IDENTITY's status only and write NOTHING on the revision row — that is why re-exposing a
+   previously published revision leaves its published_at intact. edit_version is writable by
+   exactly one operation, publish() cannot touch it, and no operation may write a payload column
+   and a lifecycle column in the same statement.
 
 Revision identity vs pointer:
    The identity row's published_revision_id is the ONLY statement of "what is currently published".
@@ -586,14 +675,30 @@ Revision identity vs pointer:
      Article -> Page revision      REJECTED
      Page A -> Page B revision     REJECTED
      Article A -> Article B revision REJECTED
-   Enforcement MECHANISM: composite foreign keys of the form
-     cms_pages(id, published_revision_id) -> cms_content_revisions(id, page_id)
-   against the candidate keys UNIQUE(id, page_id) / UNIQUE(id, article_id) that section 13 adds to
-   cms_content_revisions. This makes the mismatched-ownership state UNREPRESENTABLE at the storage
-   layer (including via raw SQL), rather than merely disfavoured. Section 13 "Ownership-exact FKs"
-   is the schema-side statement, including the DDL ordering consequence this creates; the service
-   layer additionally validates under lock so the operator receives a classified error rather than
-   a driver exception. Negative tests: section 29, O-series.
+   Enforcement MECHANISM: composite foreign keys. A composite FK binds its column lists
+   POSITIONALLY, first-to-first, second-to-second — the names do not matter and nothing is
+   inferred. The canonical form used throughout this specification is therefore
+   **(child owner column, child revision column) -> (parent owner column, parent id column)**:
+     cms_pages(id, published_revision_id)
+       -> cms_content_revisions(page_id, id)
+         page.id                       <-> revisions.page_id   (owner match)
+         page.published_revision_id    <-> revisions.id        (revision identity match)
+   against the candidate keys UNIQUE(page_id, id) / UNIQUE(article_id, id) that section 13 adds
+   to cms_content_revisions.
+   (The reverse ordering — `-> revisions(id, page_id)` with the child written
+   `(id, published_revision_id)` — is WRONG and was the IMP005-REAUDIT-R2-01 defect: it would
+   bind page.id to revisions.id, i.e. require a page's own primary key to equal its published
+   revision's primary key, and bind published_revision_id to page_id. A schema built that way
+   would reject every legitimate pointer while accepting some mismatches. Every FK example in
+   this document now states BOTH bindings on separate lines, so a reversal cannot hide.)
+   This makes the mismatched-ownership state UNREPRESENTABLE at the storage layer (including via
+   raw SQL), rather than merely disfavoured. Section 13 "Ownership-exact FKs" is the schema-side
+   statement, including the DDL ordering consequence this creates; the service layer additionally
+   validates under lock so the operator receives a classified error rather than a driver
+   exception. Because a reversal of these two forms is only detectable by a fixture that can
+   TELL them apart, section 29's O-series is required to use deliberately non-coinciding ids
+   (O-positive-1 below): a fixture where page.id equals revision.id passes under BOTH the
+   correct and the reversed mapping, and would therefore certify a broken schema.
 ```
 
 Permitted lifecycle transitions (the only three UPDATEs any revision row ever receives):
@@ -629,19 +734,29 @@ protecting against something it cannot protect against):
        state before writing, so the boundary is not merely "which class is calling" but "what the
        database says the row's state is at write time".
 2. EXPLICIT FIELD WHITELISTS PER OPERATION (service-level, the mechanism that makes "payload
-   immutable, lifecycle mutable" concrete):
-     createDraft()   may set: payload columns + state='DRAFT' + revision_no + author/attribution
-     editDraft()     may set: payload columns ONLY, and only when the locked row's state is DRAFT;
-                      it MUST NOT change state, published_at, superseded_at, revision_no, or
-                      authorship
-     publish()       may set: state='PUBLISHED', published_at,
-                      state_changed_by_principal_id — and NOTHING else; it cannot touch a payload
-                      column at all
-     supersede()     may set: state='SUPERSEDED', superseded_at,
-                      state_changed_by_principal_id — and NOTHING else
-     SUPERSEDED rows: no operation may write to them. Terminal.
+   immutable, lifecycle mutable" concrete). THE AUTHORITATIVE STATEMENT IS THE "REVISION OPERATION
+   MATRIX" in this section — one table, every column, every operation. The prose below is a
+   summary of that matrix and is not a second rule: where the two could be read differently, the
+   matrix governs, and an earlier draft that let editDraft() write "payload columns ONLY" while
+   separately requiring it to increment edit_version is corrected by including the concurrency
+   token in editDraft()'s permitted write set explicitly:
+     createDraft()   payload columns + state=DRAFT + revision_no + author/attribution
+                     + edit_version initialized to 0
+     editDraft()     payload columns + edit_version (increment by exactly 1), and only while the
+                     locked row's state is DRAFT; it MUST NOT change state, published_at,
+                     superseded_at, revision_no, or authorship
+     publish()       lifecycle {state, published_at (only where currently NULL),
+                     state_changed_by_principal_id}; NO payload column, and no edit_version write
+     supersede()     lifecycle {state, superseded_at, state_changed_by_principal_id}; NO payload
+                     column, no published_at change, no edit_version write
+     SUPERSEDED rows: terminal. No operation writes them at all.
+   No operation may write a payload column and a lifecycle column in the same statement, and the
+   per-transition writes are one row each — section 11's bulk-write policy prohibits the builder
+   forms outright, so these whitelists are enforced on the model path that actually exists.
    The whitelists are closed and exhaustive: an attribute that is not listed is not writable by
-   that operation, and a proposed new column must be added to the relevant whitelist explicitly.
+   that operation, and a proposed new column must be added to the matrix explicitly (a new payload
+   column with no matrix row is a review BLOCKER, which is what stops the whitelist decaying into
+   an allow-all).
 3. MODEL GUARD — an immutability guard on the revision model rejects any dirty attribute outside
    the whitelist for the row's current state (mirroring IMP-004's application-level append-only
    guard for AuditRecord). SCOPE OF THIS GUARD, STATED HONESTLY: it protects instances that go
@@ -695,21 +810,37 @@ implements layer 3 IS NOT EXECUTED. `DB::table('cms_content_revisions')->update(
 case with fewer moving parts. Neither call can be intercepted by model events, and no version of
 Laravel changes this.
 
-Consequently:
-  - PROHIBITED IN APPLICATION CODE: any direct Query Builder or Eloquent Builder MUTATION of
-    cms_content_revisions. Examples, both forbidden as call sites (enforced by layer 5):
-        Revision::query()->update([...])
-        Revision::where(...)->update([...])
-        Revision::query()->whereIn('id', $ids)->update([...])
-        DB::table('cms_content_revisions')->update([...])
-        DB::statement('UPDATE cms_content_revisions SET ...')
-    Reads are unaffected — SELECTs via any builder are fine and normal.
-  - There is NO approved internal lifecycle operation that needs a bulk write. Lifecycle
-    transitions are per-row, performed inside the publication transaction under a row lock, and
-    each emits its own audit event; a batch update would defeat the audit contract as much as the
-    immutability one. So the prohibition is ABSOLUTE rather than "prohibited unless", and the
-    narrower alternative (allow it for defined lifecycle batches) was rejected on that ground.
-  - A reviewer finding any such call site in the Content namespace is finding a BLOCKER.
+ THE POLICY, CHOSEN ONCE (IMP005-REAUDIT-R2-03 — the previous text said the prohibition was
+ "absolute" in one paragraph while another allowed exceptions for internal lifecycle operations,
+ which is two rules, not one):
+   BUILDER / RAW / QUERY-LEVEL MUTATION OF cms_content_revisions IS PROHIBITED ENTIRELY, INCLUDING
+   INSIDE THE SERVICES. Every revision write — payload AND lifecycle — goes through a HYDRATED
+   MODEL INSTANCE, obtained by a locking read (`SELECT ... FOR UPDATE`) inside the service's own
+   transaction, and saved through the model path. There is no allow-list of permitted bulk call
+   sites; the set of permitted call sites is empty, which is a simpler thing to audit and to prove.
+   The rejected alternative was to allow targeted query-level lifecycle writes from named service
+   methods subject to field/owner/state/test conditions. It was rejected because:
+     - it permanently bypasses layer 3 (the model guard) on exactly the path — lifecycle
+       transition — where a mistake rewrites published history, buying a small performance win on a
+       table with a handful of rows per content item;
+     - "prohibited unless an approved internal operation exists" requires a reviewer to confirm the
+       exception list is complete on every change, whereas "no builder writes exist" is a single
+       greppable property (R4a), and R4a's whole design depends on there being nothing to except;
+     - nothing needs a set-based write. Lifecycle transitions are per-row, each inside its own
+       locked transaction, each emitting its own audit event. A batch would have to violate the
+       audit contract to be faster than the correct implementation.
+   What the policy does NOT prohibit, explicitly, so the boundary is unambiguous:
+     - SELECTs of any shape, including through builders and DB::table — reads are unrestricted;
+     - the `INSERT` of a NEW revision row (createDraft), which is a create, not a mutation of
+       existing payload; a hydrated model `create()`/`save()` on a new instance is the required
+       route, and an INSERT ... SELECT bulk copy is prohibited like any other bulk write;
+     - writes to OTHER cms_* tables, which are governed by their own rules (identity pointers and
+       path claims are also model-path writes; section 13 mass-assignment rules still apply).
+   Consequence for optimistic concurrency: because writes are model-path and the row is already
+   locked, the `edit_version` check is a LOCK-THEN-COMPARE-THEN-WRITE, not a
+   `WHERE edit_version = ?` statement. Same guarantee (no lost update), one fewer way to bypass the
+   guard — see section 19 step 5, which is stated in these terms.
+   A reviewer finding any prohibited call site in the Content namespace is finding a BLOCKER.
 ```
 
 The four payload/lifecycle operations named in layer 1 are the specification of the write
@@ -862,7 +993,7 @@ not listed for that event.
 |---|---|---|---|---|
 | `content.page.created` | `revision_id` | — | — (`slug_snapshot` is NOT part of this event: a revision's slug_snapshot is NULL until a path is claimed, and claims exist only for published paths (sections 13/14), so create can never carry one. The earlier inventory listed it here, which under the no-null absence rule would have forced either a null value or a lie) | int |
 | `content.page.updated` | `revision_id`, `fields_changed` | — | `slug_snapshot` (present only when the draft carries one, i.e. it is a scheduled draft whose snapshot was frozen at schedule time — sections 13/14); `article_type` never on a Page | int, array<string>, string |
-| `content.page.published` | `revision_id`, `from_status`, `to_status`, `path`, `path_change`, `redirect_created`, `homepage_designated` | — | `previous_revision_id` (only a replacement publish — a FIRST publish OMITS it, never nulls it); `previous_path` (only when `path_change` = `RENAMED`); the four schedule keys `schedule_version`, `scheduled_at`, `scheduled_revision_id`, `scheduled_by_principal_id` PLUS `system_operation` (`content.scheduler`) — ALL FIVE together, and only when actor = system; a manual publish omits all five | int, string, string, string, string, int, int, then int, string, int, int, string |
+| `content.page.published` | `revision_id`, `from_status`, `to_status`, `path`, `path_change`, `homepage_designated` | — | `previous_revision_id` (only a replacement publish — a FIRST publish OMITS it, never nulls it); `previous_path` AND `redirect_created` (= 1) — each ONLY when `path_change` = `RENAMED`, both OMITTED otherwise; the four schedule keys `schedule_version`, `scheduled_at`, `scheduled_revision_id`, `scheduled_by_principal_id` PLUS `system_operation` (`content.scheduler`) — ALL FIVE together, and only when actor = system; a manual publish omits all five | int, string, string, string, string, int, then int, string, int, string |
 | `content.page.unpublished` | `revision_id`, `from_status`, `to_status`, `path` | — | `path_change` = `UNCHANGED` only when the withdrawn path is still its CURRENT claim (always true at withdraw, so in practice this key is present and equals `UNCHANGED`); the four schedule keys PLUS `system_operation` when actor = system | int, string, string, string, string |
 | `content.page.archived` | `from_status`, `to_status`, `redirect_claims_retained`, `homepage_designation` | — | `path_claim_retained` (the identity's CURRENT path at archive time) is required when it holds an ACTIVE CURRENT claim and OMITTED when it does not (an archived never-published DRAFT has none); `article_type` never on a Page | string, string, int, string, then string |
 | `content.article.created` | `revision_id`, `article_type` | — | — (same slug_snapshot exclusion as `page.created`) | int, string |
@@ -884,14 +1015,24 @@ not listed for that event.
 Derived-key definitions (so the table above is executable without invention):
 
 ```
-  path_change            UNCHANGED (published at the path the identity already held, or its first
-                         publication) | RENAMED (the identity's previous CURRENT claim was
-                         converted to REDIRECT by this transaction)
-  redirect_created       int 0 | 1 — 1 IFF path_change = RENAMED. Kept as an explicit assertion
-                         rather than left derivable, because a rename's whole point is the
-                         redirect and the audit record should state it. The pairing is CHECKed by
-                         test A6b: `redirect_created = 1` and `previous_path` present iff
-                         `path_change = RENAMED`.
+  path_change           (string; the publication branch that ran — IMP005-REAUDIT-R2-02 makes
+                         these distinct rather than folded together)
+                           NEW        branch A: the identity had no ACTIVE CURRENT claim; one row
+                                      was INSERTED for this path
+                           UNCHANGED  branch B: the identity's existing ACTIVE CURRENT claim IS
+                                      this path; no insert, its revision_id updated
+                           RENAMED    branch C: the existing CURRENT claim was CONVERTED to
+                                      REDIRECT and a new CURRENT row was INSERTED
+                         One of the three is ALWAYS present on a published event; there is no
+                         fourth value and no "unknown".
+  redirect_created       CONDITIONAL, not required: int 1, emitted ONLY when
+                         path_change = RENAMED. Same-path replacement and first publication OMIT
+                         the key entirely rather than sending 0 — the transition it would assert
+                         did not happen is fully described by path_change already, and an
+                         always-present 0/1 on every publish duplicated a fact the sibling key
+                         had just stated. Where present its only lawful value is 1. CHECKed by
+                         test A6b: `redirect_created` present AND `previous_path` present
+                         <=> `path_change` = `RENAMED`.
   homepage_designated    int 0 | 1 — whether THIS page identity is the singleton designee AFTER
                          this publication (read under the tier-5 order if the transaction takes
                          it; publish does not, so this is a post-commit-consistent read of the
@@ -909,10 +1050,18 @@ Derived-key definitions (so the table above is executable without invention):
                          asserts that)
   fields_changed         array<string> drawn from a CLOSED vocabulary, and the vocabulary is
                          PER-EVENT-KIND because two different tables are being described:
-                           content.* (page/article updated): title, body_html, meta_title,
-                             meta_description, og_title, og_description, og_image_asset_id,
-                             no_index, slug_snapshot, article_type (Article only), excerpt,
-                             published_on (Article display fields)
+                           content.* (page/article updated): the REVISION payload set, exactly and
+                             only — title, excerpt, body_html, meta_title, meta_description,
+                             og_title, og_description, og_image_asset_id, no_index, slug_snapshot,
+                             article_type (Article only). IMP005-REAUDIT-R2-03 removed
+                             `published_on` from this list because it stopped being a column at
+                             all: first_published_at is written once by publication and never
+                             "changed" by a draft edit, so a vocabulary item naming it would have
+                             been unmatchable. The list must equal section 13's payload columns
+                             MINUS the identity/structural ones that are never edited
+                             (revision_no, page_id, article_id, author_principal_id, authored_at),
+                             and this correspondence is asserted structurally by test A14 rather
+                             than trusted.
                            content.media.updated: alt_text, caption, original_filename
                              (the only three mutable columns on cms_media_assets — section 13)
                          A value outside the relevant vocabulary is a registry rejection. An EMPTY
@@ -1244,24 +1393,41 @@ columns            title (string 255 — identity-level display title, always mi
                     the next authorized schedule change,
                     created_by_principal_id FK principals RESTRICT, updated_by_principal_id FK
                     principals RESTRICT
- REVISION-POINTER OWNERSHIP (IMP005-REAUDIT-R1-02 — the pointers below are NOT plain single-column
-                    FKs; each is a COMPOSITE FK whose second column is this page's own id, so a
-                    revision belonging to a different Page, or to any Article, cannot satisfy it.
-                    See "Ownership-exact FKs" under cms_content_revisions for the candidate keys
-                    this depends on and for why this is DB-enforced rather than service-checked):
-                      latest_draft_revision_id  -> FK (id, latest_draft_revision_id)
-                                                   REFERENCES cms_content_revisions(id, page_id)
-                      published_revision_id     -> FK (id, published_revision_id)
-                                                   REFERENCES cms_content_revisions(id, page_id)
-                      scheduled_revision_id     -> FK (id, scheduled_revision_id)
-                                                   REFERENCES cms_content_revisions(id, page_id)
+ REVISION-POINTER OWNERSHIP (IMP005-REAUDIT-R1-02; direction corrected per IMP005-REAUDIT-R2-01 —
+                    each pointer is a COMPOSITE FK written (child owner, child revision) and
+                    referenced as (parent owner, parent id), POSITIONALLY. All three pointers on
+                    this table are shown with both bindings made explicit, because a reversed
+                    column order is not detectable from the notation alone):
+                      latest_draft_revision_id:
+                        FK (cms_pages.id, cms_pages.latest_draft_revision_id)
+                           REFERENCES cms_content_revisions(page_id, id)
+                        binds  pages.id                    -> revisions.page_id
+                        binds  pages.latest_draft_revision_id -> revisions.id
+                      published_revision_id:
+                        FK (cms_pages.id, cms_pages.published_revision_id)
+                           REFERENCES cms_content_revisions(page_id, id)
+                        binds  pages.id                   -> revisions.page_id
+                        binds  pages.published_revision_id -> revisions.id
+                      scheduled_revision_id:
+                        FK (cms_pages.id, cms_pages.scheduled_revision_id)
+                           REFERENCES cms_content_revisions(page_id, id)
+                        binds  pages.id                   -> revisions.page_id
+                        binds  pages.scheduled_revision_id -> revisions.id
                     Effect: `Page A.published_revision_id = <revision owned by Page B>` is an
                     ERRORED WRITE at the storage layer, not a state this schema can be left in. It
                     is unreachable by any code path, including raw SQL, an importer, or a manual
                     UPDATE, because the composite FK is checked by the engine on every statement.
+                    WHY THE OWNER COLUMN COMES FIRST HERE: it makes the identity-pointer FKs, the
+                    cms_paths revision FK and the cms_media_references revision FK all reference
+                    the SAME two candidate keys, UNIQUE(page_id, id) / UNIQUE(article_id, id), so
+                    the schema needs two candidate keys rather than four (section 13). The alternative
+                    ordering is equally correct as a constraint but would require the mirrored
+                    UNIQUE(id, page_id) set as well; carrying both sets to accommodate two notations
+                    is redundancy with no enforcement benefit, and it is what this pass removed.
                     NULL semantics: a NULL pointer satisfies the FK trivially (MATCH SIMPLE, the
                     default on BOTH MySQL 8 and SQLite), which is correct — no pointer means no
-                    claim about ownership.
+                    claim about ownership. It is also why the positive fixtures in section 29 must
+                    set the pointer to a real id rather than leaving it NULL.
 path               NOT A COLUMN. The page's public path is its ACTIVE CURRENT row in cms_paths
                    (section 13). A page with no ACTIVE CURRENT claim is unreachable by path
                    (possible only transiently inside the publish transaction, never at commit).
@@ -1325,22 +1491,40 @@ resolution         read by HomepageContentResolver (section 8/18) only; returns 
 Same shape as cms_pages (title, status, revision pointers, scheduling timestamps/source/version
 fields and due indexes; created_by/updated_by attribution). REVISION-POINTER OWNERSHIP applies
 identically and is not a restatement-by-comment: each of `published_revision_id`,
-`latest_draft_revision_id` and `scheduled_revision_id` on cms_articles is a COMPOSITE FK
-  cms_articles(id, <pointer>) -> cms_content_revisions(id, article_id)
-against UNIQUE(id, article_id) on the revisions table, so an Article can only ever point at a
-revision it owns (IMP005-REAUDIT-R1-02; see cms_pages "REVISION-POINTER OWNERSHIP" and
-cms_content_revisions "Ownership-exact FKs"). The Page-side and Article-side pointer FKs are
-SEPARATE constraints on SEPARATE tables — neither can be satisfied by the other kind's revision,
-which is what makes Page↔Article cross-type mixing unrepresentable rather than merely discouraged.
+`latest_draft_revision_id` and `scheduled_revision_id` on cms_articles is a COMPOSITE FK,
+positionally bound owner-to-owner and revision-to-id:
+  FK (cms_articles.id, cms_articles.<pointer>)
+       REFERENCES cms_content_revisions(article_id, id)
+  binds  articles.id       -> revisions.article_id
+  binds  articles.<pointer> -> revisions.id
+against UNIQUE(article_id, id) on the revisions table, so an Article can only ever point at a
+revision it owns (IMP005-REAUDIT-R1-02; direction corrected per IMP005-REAUDIT-R2-01; see cms_pages
+"REVISION-POINTER OWNERSHIP" and cms_content_revisions "Ownership-exact FKs"). The Page-side and
+Article-side pointer FKs are SEPARATE constraints on SEPARATE tables referencing SEPARATE candidate
+keys — neither can be satisfied by the other kind's revision, which is what makes Page↔Article
+cross-type mixing unrepresentable rather than merely discouraged.
 is_homepage and the path column are
 ABSENT — Articles are never homepage-designated and their public path is likewise a cms_paths
 claim. The former config-driven '<article_prefix>/' namespace scoping is REMOVED: with a single
 shared cms_paths namespace there is no separate article namespace to prefix, and a config prefix
 would be a second, unenforced copy of the path rule. An article's path is simply the claim the
 publisher chose for it (e.g. /news/ramadan-appeal).
-extra columns:   excerpt (string 511, nullable), published_on (date nullable) — display metadata,
-                 maintained by the publish transaction alongside the pointer move (not free-write),
-ENGINEERING CHOICE minimal set.
+extra columns:   excerpt (string 511, nullable) — an explicit CURRENT PROJECTION of the published
+                 revision's excerpt, NOT a second canonical owner (section 11 "Identity
+                 projections"): maintained by the publish transaction alongside the pointer move,
+                 never free-write, never request-assignable, and never copied in the reverse
+                 direction.
+                 first_published_at (datetime nullable; UTC) — identity-level, set ONCE by the
+                 identity's FIRST-EVER successful publication and never written again by any later
+                 publication, replacement, re-exposure or rollback-by-copy (section 11 "Canonical
+                 field ownership"). It replaces the former `published_on`, whose name was removed
+                 because it did not say WHICH of two real dates it meant; per-revision publication
+                 time remains `cms_content_revisions.published_at`, also set once and never
+                 rewritten. NULL means "never published", which is exactly the state of a DRAFT or
+                 of content scheduled-but-not-yet-executed, so the column is genuinely nullable
+                 rather than defaulted to a sentinel.
+ ENGINEERING CHOICE minimal set; justified by admin-listing and destination-contract read cost,
+ not by display habit.
 ```
 
 ### `cms_content_revisions`
@@ -1361,22 +1545,39 @@ pk                 id BIGINT UNSIGNED AUTO_INCREMENT
                    inventing a parallel notion of ownership.
                    The CHECK is the "exactly-one-owner invariant" the remediation requires and is
                    enforced identically on MySQL 8 and SQLite (both enforce CHECK).
- Ownership-exact FKs (the mechanism IMP005-REAUDIT-R1-02 asks to be defined, not asserted):
+ Ownership-exact FKs (the mechanism IMP005-REAUDIT-R1-02 asks to be defined, not asserted;
+                   direction corrected per IMP005-REAUDIT-R2-01):
+                   THE POSITIONAL RULE, stated once for the whole schema because it is the thing
+                   that was gotten wrong: in
+                     FOREIGN KEY (c1, c2) REFERENCES parent (p1, p2)
+                   c1 is compared to p1 and c2 to p2. Column names are irrelevant to the matching,
+                   the database does not align them by meaning, and a reversed pair is silently a
+                   DIFFERENT constraint. Every composite FK in this specification therefore follows
+                   ONE notation convention — child written (owner, revision), parent referenced
+                   (owner, id) — and every restatement of one in prose or a test name spells out
+                   both bindings on their own lines.
                    The identity→pointer FKs on cms_pages/cms_articles, the revision FK on cms_paths,
                    and the revision FK on cms_media_references are ALL COMPOSITE foreign keys that
-                   carry the OWNER COLUMN alongside the revision id. They work because this table
-                   exposes the candidate keys declared under "candidate keys" below, which exist
-                   SOLELY to be legal FK reference targets — a requirement of both MySQL/InnoDB and
-                   SQLite. A composite FK such as
+                   carry the OWNER COLUMN ALONGSIDE the revision id, in that order. They work
+                   because this table exposes the candidate keys declared under "candidate keys"
+                   below, which exist SOLELY to be legal FK reference targets — a requirement of
+                   both MySQL/InnoDB and SQLite. So:
                      cms_pages(id, published_revision_id)
-                       -> cms_content_revisions(id, page_id)
-                   is then satisfied only when the revision's page_id EQUALS the referencing page's
-                   id. Consequences, all enforced by the storage engine on every statement:
+                       -> cms_content_revisions(page_id, id)
+                     binds  pages.id                   <-> revisions.page_id  (same owner)
+                     binds  pages.published_revision_id <-> revisions.id       (that revision)
+                   is satisfied only when the revision's page_id EQUALS the referencing page's id
+                   AND the revision's id EQUALS the pointer. Consequences, all enforced by the
+                   storage engine on every statement:
                      - Page A -> revision owned by Page B          : REJECTED (page_id mismatch)
                      - Page A -> revision owned by any Article     : REJECTED (revision.page_id is
                        NULL by the CHECK above, so it can never equal a non-null page id)
                      - Article A -> revision owned by any Page     : REJECTED (symmetric)
                      - Article A -> revision owned by Article B    : REJECTED
+                   A reversed-parent form (`-> revisions(id, page_id)`) is NOT an equivalent
+                   spelling of the above; it is a different, wrong constraint. It must never appear
+                   with a child written (id, <pointer>). Section 29's O-series uses non-coinciding
+                   page/revision ids precisely so a reversed constraint cannot pass the tests.
                    WHY THIS INSTEAD OF "THE SERVICE VALIDATES IT": a service check is correct only
                    until the first code path that forgets it — an importer, a repair command, a
                    future stage's direct write, or a bug in the check itself. The cross-type and
@@ -1398,16 +1599,13 @@ pk                 id BIGINT UNSIGNED AUTO_INCREMENT
                    between those writes is prohibited by the single-transaction rule (section 26).
                    The mutual RESTRICT is deliberate and harmless: a Page whose revisions exist can
                    never be deleted, and v1 deletes no rows at all (section 27).
- generated keys     page_key    = COALESCE(page_id, 0)   STORED
-                    article_key = COALESCE(article_id, 0) STORED
-                    (needed because a UNIQUE index over a nullable FK column cannot detect
-                     duplicates in MySQL/SQLite: two NULLs never collide. Coalescing to 0 makes the
-                     owner dimension total, so the uniqueness below is real on BOTH engines. These
-                     serve the per-owner revision_no uniqueness ONLY; the ownership FKs above
-                     reference the REAL page_id/article_id columns, never these, because a COALESCE
-                     to 0 would let a bogus owner value of 0 match.)
 payload columns    revision_no (BIGINT, per-owner increasing, immutable),
                    title (string 255 — versioned: titles change with revisions),
+                   excerpt (string 511 NULLABLE — versioned editorial summary; canonical owner is
+                     the REVISION (IMP005-REAUDIT-R2-03). Page rows may store it and the Page
+                     surface simply never writes it; the column is shared because the table is
+                     shared, and the section 11 ownership rule, not a table split, is what keeps
+                     a Page from ever presenting one),
                    article_type (string 16; ARTICLE|NEWS for Article, NULL for Page),
                    CHECK: Page owner => NULL; Article owner => ARTICLE or NEWS; new Article
                    drafts default ARTICLE, service + DB validation rejects unknown values,
@@ -1424,29 +1622,48 @@ payload columns    revision_no (BIGINT, per-owner increasing, immutable),
                      checks the way a body-token-only scan would leave it),
                    no_index (TINYINT bool default 0),
                    author_principal_id FK principals RESTRICT + authored_at (immutable origin)
- candidate keys     UNIQUE(id, page_id)
-                    UNIQUE(id, article_id)
-                    UNIQUE(page_id, id)
+ candidate keys     UNIQUE(page_id, id)
                     UNIQUE(article_id, id)
-                    (All four are trivially unique on id. They exist SOLELY to be legal composite-
-                     FK reference targets — a requirement of both MySQL/InnoDB and SQLite — because
-                     a composite FK needs the referenced columns in the ORDER the child lists them:
-                     cms_pages/cms_articles pointers reference (id, <owner>) while cms_paths and
-                     cms_media_references reference (<owner>, id). IMP005-REAUDIT-R1-02. The
-                     generated page_key/article_key columns below are NOT used as FK targets:
-                     coalescing an absent owner to 0 would let a bogus owner value of 0 satisfy
-                     the constraint.)
-lifecycle columns  state (string 16: DRAFT|PUBLISHED|SUPERSEDED), published_at (nullable),
-                   superseded_at (nullable), state_changed_by_principal_id FK principals
-                   RESTRICT NULL — written ONLY by PublicationService (section 11);
-                   edit_version INT UNSIGNED NOT NULL default 0 — the DRAFT optimistic-locking
-                   token (section 19; increments on every authorized draft payload write, and the
-                   only writer is RevisionService::editDraft())
+                    (Both trivially unique — id alone is the PK. They exist SOLELY to be legal
+                     composite-FK reference targets, which MySQL/InnoDB and SQLite both require,
+                     and they are the ONLY such keys the schema needs: because every composite FK
+                     in this table's direction convention lists (owner, revision), the same two
+                     keys serve cms_pages, cms_articles, cms_paths AND cms_media_references
+                     simultaneously. IMP005-REAUDIT-R2-01: the previous four — these plus mirrored
+                     UNIQUE(id, page_id) / UNIQUE(id, article_id) — were needed only because the
+                     identity-pointer FKs were written against the reversed parent ordering
+                     (id, <owner>). With one consistent direction there is no second ordering to
+                     key for, so the mirrors are REMOVED rather than kept "just in case"; a
+                     redundant unique index is not free (write cost, migration surface, and a
+                     future reader wondering which pair is authoritative). The generated
+                     page_key/article_key columns below are NOT used as FK targets: coalescing an
+                     absent owner to 0 would let a bogus owner value of 0 satisfy the constraint.)
+lifecycle columns  state (string 16: DRAFT|PUBLISHED|SUPERSEDED), published_at (nullable; written
+                  ONCE by publish() where currently NULL and never rewritten afterwards —
+                  including on re-exposure after retirement, section 11 "Publication timestamps"),
+                  superseded_at (nullable; written once), state_changed_by_principal_id FK
+                  principals RESTRICT NULL — these FOUR and only these are written by
+                  PublicationService (section 11 "LIFECYCLE-MUTABLE FIELDS")
+concurrency column edit_version INT UNSIGNED NOT NULL default 0 — the DRAFT optimistic-locking
+                  token. NOT a lifecycle column (IMP005-REAUDIT-R2-03: it was previously
+                  classified as one while being required to be written by editDraft(), which the
+                  lifecycle whitelist forbade — a contradiction). Its only writer is
+                  RevisionService::editDraft() (increment by exactly 1, alongside the payload it
+                  validates) and createDraft() (initialize to 0); createDraft/editDraft are the
+                  ONLY operations permitted to write it. Meaningless once state != DRAFT, but
+                  never reset and never reused as anything else. The authoritative per-operation
+                  write permissions are section 11's REVISION OPERATION MATRIX.
 generated keys     page_key    = COALESCE(page_id, 0)   STORED
                    article_key = COALESCE(article_id, 0) STORED
-                   (needed because a UNIQUE index over a nullable FK column cannot detect
+                   (THE ONLY declaration of these two columns — an earlier revision of this
+                    document stated them twice, which is the IMP005-REAUDIT-R2-07 duplication;
+                    this block is canonical and the duplicate is removed.
+                    Needed because a UNIQUE index over a nullable FK column cannot detect
                     duplicates in MySQL/SQLite: two NULLs never collide. Coalescing to 0 makes the
-                    owner dimension total, so the uniqueness below is real on BOTH engines.)
+                    owner dimension total, so the revision_no uniqueness below is real on BOTH
+                    engines. These serve the per-owner revision_no uniqueness ONLY; the ownership
+                    FKs reference the REAL page_id/article_id columns via the candidate keys above,
+                    never these, because a COALESCE to 0 would let a bogus owner value of 0 match.)
 unique             (page_key, article_key, revision_no) — per-owner revision numbering is unique;
                    single-active-draft: generated active_draft_page_id (= page_id WHEN
                    state='DRAFT' ELSE NULL) UNIQUE and active_draft_article_id (= article_id WHEN
@@ -1492,27 +1709,33 @@ columns            id BIGINT UNSIGNED AUTO_INCREMENT
                    revision_id FK cms_content_revisions RESTRICT NOT NULL — the revision whose
                      publication created this claim (provenance; for REDIRECT rows, the revision
                      that HELD this path before it was superseded).
-                     OWNERSHIP CONSTRAINT (IMP005-REAUDIT-R1-02): this is NOT an unconstrained
-                     single-column FK. It is TWO composite FKs, one per owner kind, each pairing
-                     the revision with THIS CLAIM'S OWN owner column:
+                     OWNERSHIP CONSTRAINT (IMP005-REAUDIT-R1-02; direction restated per
+                     IMP005-REAUDIT-R2-01 to make both bindings explicit): this is NOT an
+                     unconstrained single-column FK. It is TWO composite FKs, one per owner kind,
+                     each listing the OWNER FIRST and the revision SECOND, matching the identity
+                     pointers exactly:
                        cms_paths(page_id, revision_id)
-                           -> cms_content_revisions(page_id, id)   [needs UNIQUE(page_id, id)]
+                           -> cms_content_revisions(page_id, id)
+                         binds  paths.page_id     -> revisions.page_id
+                         binds  paths.revision_id -> revisions.id
                        cms_paths(article_id, revision_id)
-                           -> cms_content_revisions(article_id, id) [needs UNIQUE(article_id, id)]
+                           -> cms_content_revisions(article_id, id)
+                         binds  paths.article_id   -> revisions.article_id
+                         binds  paths.revision_id  -> revisions.id
+                     Both reference the SAME two candidate keys the identity pointers use —
+                     UNIQUE(page_id, id) / UNIQUE(article_id, id) — which is the payoff of keeping
+                     one direction convention schema-wide.
                      InnoDB/SQLite skip an FK check when any child column is NULL, and the CHECK
                      XOR on this table guarantees exactly one owner column is NULL, so for every
                      row EXACTLY ONE of these two constraints is live — the one matching the
-                     claim's owner kind. A CMS_PATH whose revision belongs to another identity, or
-                     to the other identity KIND, is therefore rejected by the engine on every
+                     claim's owner kind. A cms_paths row whose revision belongs to another identity,
+                     or to the other identity KIND, is therefore rejected by the engine on every
                      write path, including raw SQL. Making revision_id NOT NULL is what turns the
                      constraint from "vacuously satisfied by NULL" into an invariant, and it is
-                     always satisfiable: a CURRENT claim names the revision published at it, and a
-                     REDIRECT claim names the revision that held the path (section 14 rename step
-                     4), so no claim has ever existed without one.
-                     The two additional candidate keys UNIQUE(page_id, id) / UNIQUE(article_id, id)
-                     on cms_content_revisions exist for this; the identity-pointer FKs above use
-                     UNIQUE(id, page_id) / UNIQUE(id, article_id). All four are trivially unique
-                     and exist purely as FK targets.
+                     always satisfiable: a CURRENT claim names the revision PUBLISHED AT IT (and
+                     that value is UPDATED on same-path replacement — section 14 provenance rule),
+                     and a REDIRECT claim names the revision that held the path when it was
+                     converted (section 14 rename step 4), so no claim has ever existed without one.
                    destination_owner_page_id / destination_owner_article_id — NOT stored. A
                      REDIRECT row's target is resolved by following ITS OWN owner to that owner's
                      ACTIVE CURRENT claim, so a redirect can never go stale when the owner is
@@ -1625,11 +1848,19 @@ columns            id BIGINT UNSIGNED AUTO_INCREMENT
                        field (both entries of the closed `field_path` vocabulary live on the
                        revision — section 19). An identity-level-only reference would be a
                        reference to nothing versioned, and no such relationship exists.
-                     - REVISION-OWNER CONSISTENCY IS DB-ENFORCED, not service-hoped:
+                     - REVISION-OWNER CONSISTENCY IS DB-ENFORCED, not service-hoped (owner listed
+                       FIRST, revision SECOND, as everywhere in this schema —
+                       IMP005-REAUDIT-R2-01):
                          cms_media_references(owner_page_id, owner_revision_id)
                              -> cms_content_revisions(page_id, id)
+                           binds  refs.owner_page_id     -> revisions.page_id
+                           binds  refs.owner_revision_id  -> revisions.id
                          cms_media_references(owner_article_id, owner_revision_id)
                              -> cms_content_revisions(article_id, id)
+                           binds  refs.owner_article_id    -> revisions.article_id
+                           binds  refs.owner_revision_id   -> revisions.id
+                       Both reuse the same two candidate keys UNIQUE(page_id, id) /
+                       UNIQUE(article_id, id).
                        Exactly one is live per row (the NULL owner column makes the other
                        vacuous), so a reference row naming a revision owned by a DIFFERENT
                        identity — or by the other identity KIND — cannot be written at all,
@@ -1832,21 +2063,26 @@ Every semantically-constrained pointer in the CMS schema, with the mechanism tha
 A pointer with NO row here would be an unfinished design; nothing is left as "the service will
 check it" without a named lock, a named validation and a named negative test.
 
-| pointer | meaning | mechanism | engine-enforced? | service check + test |
+| pointer | meaning | mechanism (child -> parent, POSITIONAL) | engine-enforced? | service check + test |
 |---|---|---|---|---|
-| `cms_content_revisions.page_id` / `article_id` | the canonical revision owner (exactly one) | real FK + `CHECK` XOR | YES (both engines) | creation is by RevisionService only; O10 positive control |
-| `cms_pages.published_revision_id` | what is currently live | composite FK `(id, ptr) -> revisions(id, page_id)` | YES | pre-write owner check -> `revision_owner_mismatch` 422; O1/O3/O5/O9 |
-| `cms_pages.latest_draft_revision_id` | the live draft | same composite FK | YES | same; O5/O9 |
-| `cms_pages.scheduled_revision_id` | the frozen publish target | same composite FK | YES | validated at schedule config (the target must be a DRAFT of THIS identity); O6/O9 |
-| `cms_articles.*` (three pointers) | as above, Article side | composite FK to `revisions(id, article_id)` / `(article_id, id)` | YES | O2/O4/O5/O9 |
+| `cms_content_revisions.page_id` / `article_id` | the canonical revision owner (exactly one) | real FK + `CHECK` XOR | YES (both engines) | creation is by RevisionService only; O-positive/O10 control |
+| `cms_pages.published_revision_id` | what is currently live | `(id, published_revision_id) -> revisions(page_id, id)` | YES | pre-write owner check -> `revision_owner_mismatch` 422; O1/O3/O5/O9 |
+| `cms_pages.latest_draft_revision_id` | the live draft | `(id, latest_draft_revision_id) -> revisions(page_id, id)` | YES | same; O5/O9 |
+| `cms_pages.scheduled_revision_id` | the frozen publish target | `(id, scheduled_revision_id) -> revisions(page_id, id)` | YES | validated at schedule config (the target must be a DRAFT of THIS identity); O6/O9 |
+| `cms_articles` (three pointers) | as above, Article side | `(id, <pointer>) -> revisions(article_id, id)` | YES | O2/O4/O5/O9 |
 | `cms_paths.page_id` / `article_id` | claim owner | real FK + `CHECK` XOR | YES | — |
-| `cms_paths.revision_id` | which revision created/lost this path | composite FK `(owner, revision_id) -> revisions(owner, id)`, NOT NULL | YES | insert happens only inside publish; O7/O9 |
+| `cms_paths.revision_id` | which revision is responsible for this claim | `(page_id, revision_id) -> revisions(page_id, id)` and `(article_id, revision_id) -> revisions(article_id, id)`, NOT NULL; CURRENT rows are UPDATEd to the newly published revision on same-path publication (section 14 provenance rule) | YES | insert happens only inside publication branch A/C; UPDATE in branch B/D; O7/O9, P13 |
 | `cms_media_references.owner_*` | reference identity owner | real FK + `CHECK` XOR | YES | — |
-| `cms_media_references.owner_revision_id` | which payload refers | composite FK `(owner, revision_id) -> revisions(owner, id)`, NOT NULL | YES | attach protocol step 4; O8/O9 |
+| `cms_media_references.owner_revision_id` | which payload refers | `(owner_page_id, owner_revision_id) -> revisions(page_id, id)` and the article twin, NOT NULL | YES | attach protocol step 4; O8/O9 |
 | `cms_media_references.media_asset_id` | what is referred to | real FK RESTRICT + the reference IS the existence claim | YES | attach protocol step 2 (`media_asset_not_attachable`); M3/M15 |
-| `cms_media_assets.og_image` direction: `cms_content_revisions.og_image_asset_id` | structured media ref | real FK RESTRICT + write-time token validation (section 20 rule 5) + paired `cms_media_references` row | YES (FK) / reference-row pairing enforced in the transaction | M1 |
+| `cms_content_revisions.og_image_asset_id` | structured media ref (direction: content -> asset) | real FK RESTRICT + write-time token validation (section 20 rule 5) + paired `cms_media_references` row | YES (FK) / reference-row pairing enforced in the transaction | M1 |
 | `cms_homepage_assignment.page_id` | the designee | real FK RESTRICT + `CHECK (id=1)` singleton | YES | H-series; a designation is data, never a route (section 8) |
 | `*.created_by_principal_id` / `updated_by_principal_id` / `author_principal_id` / `state_changed_by_principal_id` / `scheduled_by_principal_id` / `uploaded_by_principal_id` / `archived_by_principal_id` | attribution | real FK to `principals` RESTRICT | YES | resolved from the authenticated/System context, never from request input (section 28) |
+
+All four composite-FK sites above use ONE column-order convention — child `(owner, revision)`,
+parent `(owner, id)` — so exactly two candidate keys exist on `cms_content_revisions` and every
+site references one of them. There is no `(id, <owner>)` referenced form anywhere in this
+schema; a reader who finds one is looking at a defect (IMP005-REAUDIT-R2-01).
 
 No semantically unconstrained pointer remains. Where a relationship is deliberately not a
 foreign key, the reason is stated rather than omitted:
@@ -1978,45 +2214,126 @@ whose name it wants CMS to be able to claim without deciding that explicitly.
 Claim / rename / release mechanics (the cms_paths operations; CLAIM and RENAME occur ONLY inside
 the publication transaction that also moves the identity pointer — section 26):
 
-  CLAIM    (first publication of an identity, or a replacement published at the SAME path)
-           insert ACTIVE CURRENT row for (path, owner, revision). UNIQUE(active_path) rejects a
-           duplicate claim; the loser gets 409 path_conflict and does NOT retry automatically.
-           Creating content's first path and publishing at a brand-new path are the same operation.
-           No conversion step precedes the insert here, because this owner holds no other ACTIVE
-           CURRENT claim — UNIQUE(active_current_owner) is not at risk. If the owner DOES hold a
-           different ACTIVE CURRENT claim, this is a RENAME and the sequence below is MANDATORY.
+ IMP005-REAUDIT-R2-02: PUBLICATION IS NOT ONE PATH OPERATION. The previous text described
+ "CLAIM" as covering both a first publication and a same-path replacement, and both as INSERTS.
+ That is wrong: an identity that ALREADY owns an ACTIVE CURRENT claim at the target path must NOT
+ insert a second row for that path — doing so collides with UNIQUE(active_path) against its own
+ existing row and would fail every same-path re-publication. Three mutually exclusive branches now
+ exist, selected by a single predicate evaluated AFTER the identity and its CURRENT claim are
+ locked. NO OTHER CODE PATH WRITES cms_paths, and no branch may fall through into another.
 
-  RENAME   (IMP005-REAUDIT-R1-01 — executable ordering; the order is FORCED by the constraints)
-           The previous ordering (insert the new CURRENT claim first, convert the old one after) is
-           NOT EXECUTABLE and is removed. Reason: UNIQUE(active_current_owner) is an IMMEDIATE
-           constraint over the owner key ('P:<id>' / 'A:<id>'). At the instant the new row would be
-           inserted, the old row is still purpose=CURRENT and status=ACTIVE, so the owner key is
-           NON-NULL ON BOTH ROWS WITH THE SAME VALUE — the INSERT fails on duplicate key before any
-           conversion can run. MySQL 8 provides NO deferrable or deferred unique constraints (no
-           PostgreSQL-style SET CONSTRAINTS ... DEFERRABLE), so that window cannot be made legal by
-           delaying the check. The only correct fix is an ordering in which NO intermediate state
-           violates ANY constraint.
-           The transaction, in this order:
-             1. LOCK the content identity row (cms_pages / cms_articles, lockForUpdate) — the
-                serialization point for "which transaction is renaming this owner";
-             2. LOCK the owner's existing ACTIVE CURRENT claim row (SELECT ... FOR UPDATE by id;
-                exactly one exists, guaranteed by UNIQUE(active_current_owner));
-             3. VALIDATE the target path — normalize (this section), bounds, reserved-registry
-                check, and the non-authoritative availability pre-check (see below);
-             4. CONVERT the old claim: UPDATE purpose CURRENT -> REDIRECT and set revision_id to
-                the revision that was holding it. status stays ACTIVE, so active_path remains
-                non-NULL and the old path is CONTINUOUSLY RESERVED; active_current_owner on that
-                row becomes NULL (the generated CASE no longer matches purpose='CURRENT'), which
-                releases the OWNER SLOT — not the path;
-             5. INSERT the new ACTIVE CURRENT claim row (new path, owner, new revision);
-             6. MOVE the identity routing pointers: published_revision_id -> new revision,
-                latest_draft_revision_id cleared, identity display columns (title; Article
-                excerpt/published_on) refreshed from the new revision;
-             7. SUPERSEDE the previous PUBLISHED revision (lifecycle columns only — section 11);
-             8. EMIT the PARENT canonical audit event (content.<kind>.published) carrying the path
-                transition facts (previous_path, path, redirect_created). There is NO standalone
-                path event — section 12;
-             9. COMMIT.
+   BRANCH SELECTION (evaluate under the tier-3 identity lock, from the LOCKED rows, never from a
+   pre-lock read — a stale read here would select the wrong branch):
+     existing     = the owner's ACTIVE CURRENT cms_paths row (0 or 1; 1 is guaranteed by
+                    UNIQUE(active_current_owner))
+     target       = normalize(revision.slug_snapshot of the revision being published)
+     A. FIRST PUBLICATION      : existing IS NULL
+     B. SAME-PATH REPLACEMENT  : existing IS NOT NULL AND existing.path = target
+     C. PATH RENAME            : existing IS NOT NULL AND existing.path != target
+   A re-publication of RETIRED content is NOT a fourth branch: retiring releases nothing
+   (section 13 RESERVATION POLICY), so the identity still owns its CURRENT claim and the case
+   selects B or C by the same predicate. Its extra effect is listed under B.
+
+  A. FIRST PUBLICATION — owner holds no ACTIVE CURRENT claim.
+        1. LOCK identity (tier 3, lockForUpdate)
+        2. LOCK the candidate revision; VALIDATE revisions.page_id/article_id = this identity
+           (the composite ownership FK makes a mismatch unwritable; the check exists to produce a
+           classified error — section 13)
+        3. NORMALIZE + validate target (bounds, reserved registry, non-authoritative pre-check)
+        4. INSERT one ACTIVE CURRENT row (path = target, owner, revision_id = candidate)
+        5. PUBLISH the revision (DRAFT|RETIRED-target -> PUBLISHED, section 11 whitelist)
+        6. MOVE identity pointers + refresh identity display projections
+        7. SUPERSEDE the previous PUBLISHED revision IF one exists (possible: the identity was
+           published, retired, and its claim was governed-released meanwhile — then re-published)
+        8. AUDIT content.<kind>.published: path_change = NEW, path = target, NO previous_path,
+           NO redirect_created
+        9. COMMIT
+     Race authority is UNIQUE(active_path): a duplicate-key failure rolls the whole transaction
+     back and is reported as 409 path_conflict. UNIQUE(active_current_owner) is NOT at risk here
+     because the owner had no CURRENT row to compete with. A SECOND CURRENT row for one owner is
+     impossible either way — that is what the unique index is for.
+
+  B. SAME-PATH REPLACEMENT / RE-PUBLICATION — owner already holds the ACTIVE CURRENT claim at the
+     target path.
+        1. LOCK identity (tier 3)
+        2. LOCK the owner's existing ACTIVE CURRENT claim row (tier 4, by id, FOR UPDATE)
+        3. LOCK the candidate revision; VALIDATE revisions owner = this identity
+        4. VALIDATE normalize(revision.slug_snapshot) = existing.path (this is the branch
+           precondition re-asserted under lock; if it is false this is branch C, not B)
+        5. *** NO INSERT. *** The existing ACTIVE CURRENT row IS the claim; it stays the SAME ROW
+           with the SAME id. UPDATE only its revision provenance (step 6). Inserting a second
+           CURRENT row for the same path is a guaranteed UNIQUE(active_path) violation against the
+           identity's own row and MUST NOT be attempted.
+        6. UPDATE the existing CURRENT claim: revision_id = the newly published revision.
+           THIS IS THE CANONICAL PROVENANCE RULE, CHOSEN EXPLICITLY (IMP005-REAUDIT-R2-02):
+             A CURRENT claim's revision_id identifies THE REVISION CURRENTLY RESPONSIBLE FOR THE
+             ROUTE. It is therefore mutable-by-publication: every publication at that path —
+             first, replacement, or re-publication — sets it to the revision now served there.
+             A REDIRECT claim's revision_id is FROZEN: it is the historical revision that held the
+             path at the moment of conversion, and it never changes afterwards (that immutability
+             is the only thing distinguishing the two purposes' use of one column).
+           The rejected alternative was to treat a CURRENT claim as identity-owned and
+           revision-independent, which would make `revision_id` on a CURRENT row meaningless — and
+           `revision_id` is NOT NULL here precisely so the ownership composite FK cannot be
+           satisfied vacuously. Both readings cannot be held at once, so the column's meaning is
+           now stated, and the NOT NULL choice in section 13 is justified by it rather than
+           tolerated by it. No "keep path identity-level" ambiguity remains: the row is
+           identity-owned (owner columns never change) while its revision pointer is
+           publication-owned.
+        7. PUBLISH the revision; SUPERSEDE the previous PUBLISHED revision; MOVE identity pointers
+           + refresh display projections
+        8. AUDIT content.<kind>.published: path_change = UNCHANGED, path = target,
+           previous_revision_id = the superseded revision, NO previous_path, NO redirect_created
+        9. COMMIT
+     RE-PUBLICATION OF RETIRED CONTENT (a sub-case of B, not a separate branch): the claim already
+     exists and was never released, so steps 5-6 are identical — the SAME row is retained, its
+     revision_id is set to the revision now served, and content becomes routable again because the
+     OWNER's status returned to PUBLISHED (resolution depends on owner status, not on the claim,
+     per the RESOLUTION table below). Nothing is inserted, nothing is re-created, and no path event
+     is emitted. If the previously-retired revision is republished unchanged (no new DRAFT), step 6
+     writes the same revision_id it already holds — a legal no-op UPDATE, and the identity's
+     visibility transition is still the audited event.
+     Concurrency: two simultaneous same-path publications of one owner serialize on the identity
+     lock and then on the same claim row lock; there is no unique-index race in branch B at all,
+     because branch B performs no INSERT. The loser is decided by the revision pointer it expected
+     to replace (409 stale_publication), not by a key collision.
+
+  C. PATH RENAME — owner holds an ACTIVE CURRENT claim at a DIFFERENT path.
+     (IMP005-REAUDIT-R1-01 — executable ordering; the order is FORCED by the constraints. This is
+     the ONLY branch that inserts a row while another CURRENT row for the same owner exists.)
+            The previous ordering (insert the new CURRENT claim first, convert the old one after) is
+            NOT EXECUTABLE and is removed. Reason: UNIQUE(active_current_owner) is an IMMEDIATE
+            constraint over the owner key ('P:<id>' / 'A:<id>'). At the instant the new row would be
+            inserted, the old row is still purpose=CURRENT and status=ACTIVE, so the owner key is
+            NON-NULL ON BOTH ROWS WITH THE SAME VALUE — the INSERT fails on duplicate key before any
+            conversion can run. MySQL 8 provides NO deferrable or deferred unique constraints (no
+            PostgreSQL-style SET CONSTRAINTS ... DEFERRABLE), so that window cannot be made legal by
+            delaying the check. The only correct fix is an ordering in which NO intermediate state
+            violates ANY constraint.
+            The transaction, in this order:
+              1. LOCK the content identity row (cms_pages / cms_articles, lockForUpdate) — the
+                 serialization point for "which transaction is renaming this owner";
+              2. LOCK the owner's existing ACTIVE CURRENT claim row (SELECT ... FOR UPDATE by id;
+                 exactly one exists, guaranteed by UNIQUE(active_current_owner));
+              3. LOCK the candidate revision; VALIDATE revisions owner = this identity;
+                 VALIDATE the target path — normalize (this section), bounds, reserved-registry
+                 check, and the non-authoritative availability pre-check (see below);
+                 confirm existing.path != target (else this is branch B);
+              4. CONVERT the old claim: UPDATE purpose CURRENT -> REDIRECT and set revision_id to
+                 the revision that was holding it — FROZEN at that point thereafter. status stays
+                 ACTIVE, so active_path remains non-NULL and the old path is CONTINUOUSLY
+                 RESERVED; active_current_owner on that row becomes NULL (the generated CASE no
+                 longer matches purpose='CURRENT'), which releases the OWNER SLOT — not the path;
+              5. INSERT the new ACTIVE CURRENT claim row (new path, owner, new revision);
+              6. MOVE the identity routing pointers: published_revision_id -> new revision,
+                 latest_draft_revision_id cleared, identity display columns (title; Article
+                 excerpt) refreshed from the new revision, and Article first_published_at set if
+                 this is the identity's first-ever publication;
+              7. SUPERSEDE the previous PUBLISHED revision (lifecycle columns only — section 11);
+              8. EMIT the PARENT canonical audit event (content.<kind>.published) carrying the path
+                 transition facts (previous_path, path, redirect_created = 1). There is NO
+                 standalone path event — section 12;
+              9. COMMIT.
            Constraint audit of every intermediate state (this is what makes the ordering legal, and
            is the proof the remediation requires instead of an assertion):
              after step 4: old row = ACTIVE / REDIRECT (active_path = old path, owner key NULL);
@@ -2033,10 +2350,12 @@ the publication transaction that also moves the identity pointer — section 26)
            snapshot until this transaction commits. No externally observable state ever shows the
            owner with two current paths, or with none.
 
-  FAILURE SAFETY (explicit — the reason all of the above is ONE transaction)
-           If step 5 fails — and the realistic cause IS the constraint: another identity already
-           holds, or concurrently claimed, the target path — the duplicate-key exception propagates
-           and the ENTIRE transaction rolls back:
+  FAILURE SAFETY (explicit — the reason all of the above is ONE transaction). Stated for branch C,
+  where an INSERT can fail after a conversion; branches A and B cannot reach the described state
+  (A inserts without converting, so a failure leaves nothing behind; B does not insert at all).
+           If branch C step 5 fails — and the realistic cause IS the constraint: another identity
+           already holds, or concurrently claimed, the target path — the duplicate-key exception
+           propagates and the ENTIRE transaction rolls back:
              -> the step 4 UPDATE is rolled back, so the old claim is RESTORED as purpose=CURRENT
                 with its original revision_id. Restoration is the storage engine's own undo, not
                 application compensating logic — the row was never deleted and never released;
@@ -2058,12 +2377,16 @@ the publication transaction that also moves the identity pointer — section 26)
                mutation still commits WITH its path transition — the rename is never half-applied
                because the audit write failed.
 
-  AVAILABILITY IS DECIDED BY THE CONSTRAINT, NOT BY THE PRE-CHECK (step 3)
+  AVAILABILITY IS DECIDED BY THE CONSTRAINT, NOT BY THE PRE-CHECK (branch A step 3 / branch C
+  step 3)
            Step 3 exists to classify operator errors cleanly (422 for bounds/reserved) before any
            write begins. It is NOT the reservation mechanism and must never be relied on as
            sufficient: between a pre-check and the insert, another transaction can take the path.
            The reservation is made ATOMICALLY BY THE INSERT ITSELF against the canonical
-           constraints, exactly as IMP005-SPEC-03 established for concurrent claims:
+           constraints, exactly as IMP005-SPEC-03 established for concurrent claims. This sentence
+           applies to branches A and C, which insert; branch B holds its reservation already and
+           has no insert to race, so its only concurrency exposure is the identity/claim lock
+           order described under B.
 
              application validation  (normalize -> bounds -> reserved -> availability pre-check)
                           +
@@ -2089,10 +2412,21 @@ the publication transaction that also moves the identity pointer — section 26)
    + lifecycle flip + audit together); the error is translated to 409 path_conflict. No
    check-then-insert window exists: the insert IS the check. Cross-entity (Page vs Article) and
    current-vs-redirect collisions are the SAME case, which is exactly why they are now covered.
+   BRANCH-SPECIFIC (IMP005-REAUDIT-R2-02): this describes branches A and C, which insert. Two
+   branch-B (same-path) publications of the SAME owner never collide on a key — neither inserts —
+   and serialize on the identity lock, then on the single shared CURRENT claim row, with the loser
+   decided by its expected-revision precondition (409 stale_publication). Two branch-B publications
+   of DIFFERENT owners cannot occur at the same path, because only one owner can hold that ACTIVE
+   CURRENT claim (UNIQUE(active_path)); the other owner's branch selection would have found no
+   CURRENT claim of its own and taken branch A, then lost on the insert. That is the complete
+   case split — A-vs-A, A-vs-C and C-vs-C are all decided by UNIQUE(active_path), and every
+   same-owner pair is decided by the identity lock first.
    Two renames of the SAME owner concurrently: both serialize on the identity row lock (step 1);
    the second re-reads the owner's CURRENT claim AFTER acquiring, finds the path already moved, and
-   fails its expected-path precondition with 409 stale_publication rather than converting a row it
-   no longer owns.
+   either re-selects to branch B (the new path now equals its target — a legitimate same-path
+   replacement, not an error) or fails its expected-revision precondition with 409
+   stale_publication. It never converts a claim it no longer owns, and it never inserts into the
+   slot another transaction just took without the unique index deciding the winner.
 
  RESOLUTION AND 404 BEHAVIOR (single rule for every lifecycle state; the retired/archived
    contradiction is removed):
@@ -2418,12 +2752,47 @@ follows — an earlier section of this document described this flow as locking o
 was the IMP005-REAUDIT-R1-04 gap: without the tier-3 identity/revision lock, a draft edit could
 commit a payload and its reference rows out of step with a concurrent edit of the same draft.
 
-  1. LOCK the relevant media asset row(s) — TIER 1 (`SELECT ... FOR UPDATE` by asset id, ids
-     ASCENDING). The asset row is the serialization point for "can this asset be attached?";
-  2. VERIFY each asset exists and its state is attachable: status = ACTIVE. ARCHIVED/PURGED =>
+  0. DETERMINE THE LOCK SET (IMP005-REAUDIT-R2-04 — this step did not exist, and its absence was a
+     real safety hole):
+        LOCKED_ASSETS = { asset ids named by the revision's EXISTING cms_media_references rows
+                          (ACTIVE or RELEASED, any field_path) }
+                        UNION
+                        { asset ids named by the PROPOSED payload (every data-media token +
+                          og_image_asset_id) }
+        ordered by id ASCENDING. Both sets are read BEFORE the transaction's first lock and are
+        therefore HINTS ONLY (section 26 COMMON RULE); the sets are recomputed and re-verified
+        under the locks at step 4.
+        WHY THE UNION AND NOT JUST THE PROPOSAL: an edit that REMOVES the last reference to an
+        asset must still lock that asset and its reference row, because the row it is about to
+        RELEASE belongs to it. Locking only the proposed set lets a concurrent archive/purge of
+        the dropped asset interleave with this transaction's release of the old reference — the
+        two operations then race over a row that neither of them locked, and the reference state
+        can end up disagreeing with the payload. The removal case is precisely the case a
+        proposal-only lock set loses, and it is the common one (replacing an image is a removal
+        plus an addition).
+        WHY THE UNION AND NOT JUST THE EXISTING SET: an added asset is not yet referenced, so an
+        existing-only set would attach to an asset a concurrent purge had already selected.
+        TIERS 1-2 MAY BE SKIPPED IF AND ONLY IF:
+            existing reference set = EMPTY  AND  proposed reference set = EMPTY
+        — i.e. the revision neither refers to any asset now nor will refer to one afterwards, and
+        the union is provably empty. Any other combination MUST take tiers 1 and 2 over the full
+        union, including the "removal to zero" case (existing non-empty, proposed empty), which is
+        NOT a media-free edit and must not be treated as one. Empty UNION empty is the only skip;
+        there is no size threshold, no "small edit" exemption, and no cache-based substitute for
+        the union computation.
+  1. LOCK the media asset rows in LOCKED_ASSETS — TIER 1 (`SELECT ... FOR UPDATE` by asset id,
+     ids ASCENDING). The asset row is the serialization point for "can this asset be attached?";
+  2. VERIFY attachability FOR THE PROPOSED SUBSET ONLY: status = ACTIVE. ARCHIVED/PURGED =>
      reject `media_asset_not_attachable` (this is what makes an in-flight delete safe: the writer
      cannot attach an asset whose delete already concluded it was unused, because that delete
-     holds the asset lock until commit and has already moved the row to ARCHIVED);
+     holds the asset lock until commit and has already moved the row to ARCHIVED).
+     ASSETS PRESENT IN THE EXISTING SET BUT NOT IN THE PROPOSED SET (the ones being dropped) ARE
+     NOT REJECTED for being non-ACTIVE — they are locked because their reference row must be
+     reconciled, not because they are being attached, and dropping a reference to an already
+     ARCHIVED or already PURGED asset is a legitimate and expected edit. Lock them, release their
+     rows at step 7, do not validate attachability on them. Conflating the two would make it
+     impossible to clean a draft that had come to reference a retired asset — a deadlock in the
+     operator's favour, which is not a safety property.
   3. LOCK TIER 2 — the existing `cms_media_references` rows for those asset ids AND for the
      revision being written, ids ASCENDING. This is the set this transaction is about to
      reconcile; taking the tier in the shared order (rather than only reading it) is what stops a
@@ -2436,20 +2805,29 @@ commit a payload and its reference rows out of step with a concurrent edit of th
        - CHECK THE CONCURRENCY TOKEN (step 5), and
        - RE-VERIFY attachability of every asset against the now-locked rows, not the step-2 read.
   5. CHECK THE DRAFT CONCURRENCY TOKEN — optimistic compare-and-swap on
-     `cms_content_revisions.edit_version`:
-       the request carries `expected_edit_version`; the UPDATE writes
-       `... WHERE id = <revision> AND edit_version = <expected>` and increments edit_version.
-       If zero rows are affected, somebody else advanced this draft: reject 409
-       `draft_edit_conflict`, roll back, and DO NOT retry automatically — the loser's payload is
-       discarded, never merged silently, and the editor is told to reload.
+     `cms_content_revisions.edit_version`, implemented as LOCK-THEN-COMPARE-THEN-WRITE (the
+     row is already locked at step 4, and section 11's bulk-write policy forbids the
+     `WHERE edit_version = ?` statement form, so the comparison is made in the service against
+     the locked value rather than in the UPDATE's predicate):
+       the request carries `expected_edit_version`; with the revision row held by
+       `SELECT ... FOR UPDATE`, compare the locked `edit_version` to it; if they differ, the
+       draft moved underneath this editor: reject 409 `draft_edit_conflict`, roll back, and do
+       NOT retry automatically — the loser's payload is discarded, never merged silently, and the
+       editor is told to reload. If they match, write the payload and set
+       `edit_version = locked value + 1` through the hydrated model instance (section 11 layer 1:
+       a model-path write, which is what keeps the model guard on the path).
+       The row lock makes the compare race-free for the duration of the transaction, so the
+       guarantee is identical to a predicate-based CAS while keeping every revision write on the
+       guarded path. The loser is deterministic: the transaction that commits the payload first
+       owns the version the second one will read and be rejected by.
        (A pessimistic alternative — hold a row lock for the whole edit — was rejected: an edit
        session spans human think-time, and a held MySQL row lock across it is exactly the
        long-transaction pattern this specification prohibits elsewhere. Optimistic versioning costs
-       one column and one predicate.)
+       one column and one comparison.)
        Consequence for the pair (payload, references): because the version bump and the reference
-       reconcile happen in the SAME statement-set and transaction, there is no interleaving in
-       which a losing editor's reference rows survive alongside a winning payload. The reference
-       rows can never desynchronize from the payload they describe, which is the specific failure
+       reconcile happen in the SAME transaction, there is no interleaving in which a losing
+       editor's reference rows survive alongside a winning payload. The reference rows can never
+       desynchronize from the payload they describe, which is the specific failure
        "last-write-wins" was going to allow.
   6. WRITE/REPLACE the content reference (payload column and/or body token inside sanitized HTML);
   7. PERSIST the normalized `cms_media_references` rows for exactly the references present in the
@@ -2467,9 +2845,13 @@ commit a payload and its reference rows out of step with a concurrent edit of th
   (below) and finds the new ACTIVE reference, so it is blocked. There is no interleaving that
   attaches a purged asset or archives an attached one.
 
-  READ-ONLY EXPOSURE: a draft-edit request that carries NO media at all still takes tier 3 and the
-  edit_version check (steps 4-5) — the concurrency control is about the revision, not about media,
-  and a media-free save must not be able to clobber a media-bearing one.
+  MEDIA-FREE EXPOSURE: a draft-edit request takes tier 3 and the edit_version check (steps 4-5)
+  ALWAYS, whether or not media is involved — the concurrency control is about the revision, not
+  about media, and a media-free save must not be able to clobber a media-bearing one.
+  Tiers 1-2 are taken whenever LOCKED_ASSETS (the existing UNION proposed set, step 0) is
+  non-empty, and skipped ONLY when that union is provably empty. In particular an edit whose
+  PROPOSED payload has no media but whose EXISTING references do (the removal-to-zero case) is NOT
+  media-free: it must lock the dropped assets to reconcile their rows safely (step 0).
 ```
 
 ### Shared lock order — ALL media writers and deleters (IMP005-SPEC-06)
@@ -2876,8 +3258,10 @@ columns and tables this schema no longer has and is replaced whole):
   under the lock.
 
   1. CONTENT PUBLISH (manual; the same transaction shape serves re-publish and replacement):
-       pre-read (UNLOCKED, hint only): the candidate revision and the asset ids its
-         cms_media_references rows name
+       pre-read (UNLOCKED, hint only): the candidate revision and the UNION of the asset ids its
+         existing cms_media_references rows name and the asset ids its proposed payload names
+         (section 19 step 0) — the publication branch is likewise selected from rows read here
+         and RE-SELECTED under the lock at tier 4
        -> lock tier 1: those media assets, ids ASCENDING
        -> lock tier 2: their reference rows, ids ASCENDING
        -> lock tier 3: the content IDENTITY row (lockForUpdate), then the candidate revision and
@@ -2887,30 +3271,50 @@ columns and tables this schema no longer has and is replaced whole):
           (attachability re-check, section 19) AND that the candidate revision is still the
           identity's live draft (or a valid RETIRED re-publish target)
        -> transition publication state: candidate revision DRAFT|RETIRED-target -> PUBLISHED
-          (sets published_at), previous PUBLISHED revision -> SUPERSEDED (sets superseded_at),
-          identity published_revision_id pointer moves; latest_draft_revision_id cleared
-       -> lock tier 4 / update path state, in the ORDER section 14 mandates (IMP005-REAUDIT-R1-01):
-          FIRST convert the owner's existing ACTIVE CURRENT claim to purpose=REDIRECT (which frees
-          the UNIQUE(active_current_owner) slot while keeping the old path reserved), THEN insert
-          the new ACTIVE CURRENT claim. Inserting the new claim first is IMPOSSIBLE — it collides
-          with the still-CURRENT old claim on UNIQUE(active_current_owner), and MySQL 8 has no
-          deferred unique constraints to excuse it. For a first publication or a same-path
-          replacement there is no conversion step, only the insert. A duplicate-key failure here
-          rolls the WHOLE flow back: the conversion is undone with it, so the old path is never
-          left orphaned as a REDIRECT. See section 14 "FAILURE SAFETY".
+          (sets published_at FOR THE FIRST TIME for that revision — a revision's published_at is
+          never rewritten afterwards, including when an already-published revision is re-exposed
+          after its owner was retired; see section 11 "Publication timestamps"), previous PUBLISHED
+          revision -> SUPERSEDED (sets superseded_at), identity published_revision_id pointer moves;
+          latest_draft_revision_id cleared
+       -> lock tier 4 / update path state BY SELECTED BRANCH (section 14 "Claim / rename / release
+          mechanics" is normative for all three; IMP005-REAUDIT-R2-02). The branch is chosen AFTER
+          the identity and its ACTIVE CURRENT claim are locked, from the locked rows:
+            A FIRST PUBLICATION (no CURRENT claim for this owner) -> INSERT one ACTIVE CURRENT row
+            B SAME-PATH REPLACEMENT / RETIRED RE-PUBLICATION (existing CURRENT claim at the target
+              path) -> INSERT NOTHING; retain the SAME ROW and UPDATE its revision_id to the newly
+              published revision (the CURRENT-claim provenance rule, section 14 branch B step 6)
+            C RENAME (existing CURRENT claim at a different path) -> UPDATE old CURRENT -> REDIRECT
+              FIRST (frees the UNIQUE(active_current_owner) slot; old path stays reserved), THEN
+              INSERT the new ACTIVE CURRENT row. Inserting before converting is IMPOSSIBLE — it
+              collides with the still-CURRENT old claim on UNIQUE(active_current_owner), and MySQL 8
+              has no deferred unique constraints to excuse it.
+          A duplicate-key failure in A or C rolls the WHOLE flow back, so in branch C the conversion
+          is undone with it and the old path is never left orphaned as a REDIRECT. Branch B has no
+          insert and therefore no key race. See section 14 "FAILURE SAFETY".
        -> update reference state if applicable: revision media references written/released for
           THIS revision only (section 19 attachment protocol)
        -> tier 5 (homepage singleton) is NOT taken by publish; assignment is its own operation
        -> write audit according to the event's classification (section 12)
        -> COMMIT (all-or-nothing; a path-collision duplicate-key aborts the whole flow)
      Failure at any step rolls back state, pointer, claim, references and audit together.
-     PUBLISH WITH NO MEDIA: tiers 1-2 are simply not taken (the candidate names no assets); the
-     relative order of the remaining tiers is unchanged, which is all the shared order requires.
+     PUBLISH WITH NO MEDIA: tiers 1-2 are simply not taken when the union set is EMPTY — that is,
+     when the candidate revision has no existing reference rows AND its payload names no asset.
+     A publication that REMOVES a reference (existing set non-empty, proposed empty) is not a
+     no-media publication and takes tiers 1-2 over the existing assets, exactly as section 19
+     step 0 requires. The relative order of the tiers a flow does take is unchanged, which is all
+     the shared order requires.
      Consequence accepted by design: a publish holds its assets' locks briefly, so a concurrent
      archive of the same asset waits rather than racing. Media sets in v1 are small; this is not
      a throughput concern, and correctness does not depend on it.
 
   2. PATH CHANGE (rename of live published content, or a governed release):
+       WHICH PATH OPERATION APPLIES IS A BRANCH CHOICE, NOT ALWAYS AN INSERT
+       (IMP005-REAUDIT-R2-02; section 14 branches A/B/C are normative). This flow 2 is branch C.
+       Branch A (first publication) is flow 1 minus the conversion; branch B (same-path
+       replacement, and the re-exposure of RETIRED content whose claim was never released) is
+       flow 1 with NO cms_paths INSERT at all — the existing ACTIVE CURRENT row is retained and
+       its revision_id is UPDATED to the newly published revision. A same-path publication must
+       never attempt a second CURRENT insert for the path its own owner already holds.
        A rename is NOT a standalone operation — it is the path portion of flow 1 (a rename of live
        content only happens by publishing a revision whose slug_snapshot differs), so it inherits
        flow 1's locks, guards and audit exactly. Ordered so no constraint is violated at any
@@ -3006,14 +3410,15 @@ Concurrency matrix (normative; each row is a §29 test):
 | homepage assign vs homepage assign (no homepage yet) | the SINGLETON ROW `cms_homepage_assignment` id=1, lockForUpdate — it always exists from reference seeding, so there is never an empty slot to race for; CHECK (id=1) makes two rows impossible | the blocked transaction re-reads after acquiring, finds the slot occupied -> 409 homepage_assignment_conflict reporting the current designee | NO automatic retry (a silent retry would be a destructive surprise); explicit expected_page_id is the deliberate-replacement path |
 | Page path vs Article path (same normalized string) | `cms_paths` UNIQUE(active_path) — one index spanning both kinds | the later commit receives the duplicate-key error, its whole transaction rolls back -> 409 path_conflict | NO automatic retry; the client surfaces the suggested alternative |
 | current content path vs redirect/history path | same UNIQUE(active_path) — a REDIRECT claim holds the slot exactly as a CURRENT claim does, so shadowing is impossible by construction | 409 path_conflict; reuse requires an explicit governed RELEASE first (section 14) | NO |
-| media attach vs media LOGICAL ARCHIVE | asset row lock (tier 1) is the serialization point; attach verifies status=ACTIVE UNDER that lock | if the archive won: attach rejected `media_asset_not_attachable`. If the attach won: the archive still SUCCEEDS (references do not block archive — section 19) but its recheck ran after the attach's commit, so it records `prior_references` = `HAS_ACTIVE` rather than `NONE`. The archive is never lost and never wrong; only its recorded evidence varies, which is exactly why the recheck is under the lock | NO for the attach rejection (durable state, not a transient); N/A for the archive |
+| media attach vs media LOGICAL ARCHIVE (ASYMMETRIC — IMP005-REAUDIT-R2-04) | asset row lock (tier 1) is the serialization point | ARCHIVE FIRST -> the later attach is REJECTED `media_asset_not_attachable` (attach verifies status=ACTIVE under the lock). ATTACH FIRST -> the archive still SUCCEEDS (references never block archive) and records `prior_references` = HAS_ACTIVE. So exactly one order lets both operations through; the claim that both succeed in either order was wrong. The archive NEVER fails because of a reference and the attach NEVER succeeds against an archived asset | NO for the rejected attach (durable state, not transient); N/A for the archive |
+| draft edit REMOVES the last reference to asset A vs archive/purge of A | both take tier 1 on A (the edit's lock set is existing UNION proposed, section 19 step 0), then tier 2 on the reference rows, in id-ascending order | deterministic by lock acquisition: edit-first -> the reference row is RELEASED under lock, then archive succeeds with `prior_references` = NONE and purge becomes eligible on its own later run (never in this transaction); archive/purge-first -> the edit still completes (dropping a reference to a non-ACTIVE asset is allowed, section 19 step 2), and the purge's recheck had found the still-ACTIVE row so it REFUSED. Final reference state always matches the committed payload; no purge happens while the reference row is logically present inside a live transaction | NO |
 | media attach vs media PHYSICAL PURGE | same tier-1 asset lock; attach verifies status=ACTIVE, purge verifies zero ACTIVE references UNDER that same lock | if the purge won: attach rejected `media_asset_not_attachable` (status PURGED). If the attach won: purge's under-lock recheck (case B) finds the new ACTIVE reference and REFUSES — the asset stays ARCHIVED, no unlink happens, no purge event is written. **A newly attached asset can never be purged by the run that raced it** | NO — neither outcome is transient; both are reported |
 | media archive/purge vs media archive/purge (same asset) | same asset row lock, ids ascending | second sees status already ARCHIVED/PURGED -> idempotent NO-OP, no duplicate audit event | N/A |
 | PATH RENAME vs a concurrent claim of the NEW path (IMP005-REAUDIT-R1-01) | `UNIQUE(active_path)` at rename step 5 — the pre-check at step 3 is NOT the decider | the rename's INSERT fails; the whole transaction rolls back, which UNDOES step 4's CURRENT→REDIRECT conversion, so the old path is restored as CURRENT with no compensating code. Loser gets 409 path_conflict; the namespace is exactly as it was | NO automatic retry, and NO manual repair (rollback already did it) |
 | PATH RENAME vs PATH RENAME (same owner) | identity row lock (tier 3, rename step 1), then the owner's ACTIVE CURRENT claim (tier 4) | the second re-reads the owner's CURRENT claim after acquiring, finds the path already moved, and its expected-path precondition fails -> 409 stale_publication. It does NOT convert a claim it no longer owns, and UNIQUE(active_current_owner) makes a two-CURRENT outcome unrepresentable even if the check were omitted | NO |
 | PATH RENAME vs release of the OLD path (same owner) | tier 3 identity lock serializes both; the release then targets a claim whose purpose has moved to REDIRECT | deterministic: rename wins the lock -> release sees purpose=REDIRECT and proceeds as a redirect release; release wins -> rename's step 2 finds no ACTIVE CURRENT claim to convert and fails 409 stale_publication. Either order leaves one consistent namespace | NO |
-| Page pointer -> another Page's revision (IMP005-REAUDIT-R1-02) | composite FK `cms_pages(id, published_revision_id) -> cms_content_revisions(id, page_id)` | the write ERRORS at the storage layer (errno 1452), the service's own pre-write check has already rejected it with `revision_owner_mismatch` (422), and the transaction rolls back including its audit append | NO — not a transient condition |
-| Article pointer -> a Page's revision, and Page pointer -> an Article's revision | the same composite FK mechanism, in the other direction; an Article-owned revision has page_id NULL so it can never match a page's id | rejected by the engine (and by the service check first). Unrepresentable state, not an error to be handled | NO |
+| Page pointer -> another Page's revision (IMP005-REAUDIT-R1-02) | composite FK `(cms_pages.id, cms_pages.published_revision_id) -> cms_content_revisions(page_id, id)` | the write ERRORS at the storage layer (errno 1452), the service's own pre-write check has already rejected it with `revision_owner_mismatch` (422), and the transaction rolls back including its audit append | NO — not a transient condition |
+| Article pointer -> a Page's revision, and Page pointer -> an Article's revision | the twin composite FKs; an Article-owned revision has page_id NULL and a Page-owned revision has article_id NULL, so neither can satisfy the other kind's parent key | rejected by the engine (and by the service check first). Unrepresentable state, not an error to be handled | NO |
 | scheduled publish bound to a mismatched revision | `scheduled_revision_id` composite FK at CONFIGURATION time (a bad binding cannot be saved), plus the executor's under-lock re-validation (section 10: target must still belong to the identity and not be SUPERSEDED) | configuration attempt 422 `revision_owner_mismatch`; if the binding was valid when made but the revision was superseded since, the executor NO-OPS and consumes nothing rather than publishing another identity's content | NO for the 422; N/A for the no-op (idempotent) |
 | cms_paths claim -> revision owned by a different identity | composite FK `(page_id, revision_id)` / `(article_id, revision_id)` on cms_paths -> cms_content_revisions | the INSERT ERRORS; the publication transaction rolls back (claim + pointer + lifecycle + audit together), so no orphan claim survives | NO |
 | media reference -> revision owned by a different identity | composite FK `(owner_page_id, owner_revision_id)` / `(owner_article_id, owner_revision_id)` on cms_media_references | the INSERT ERRORS inside the attach transaction; payload, references and version bump all roll back together, leaving no reference pointing at content that does not describe it | NO |
@@ -3398,13 +3803,19 @@ the finding is NOT remediated, regardless of the prose above):
     M2 an asset referenced only by a SUPERSEDED (historical) revision CANNOT be physically purged,
        while being logically archivable — asserts the historical-rendering guarantee. (M9/M10 are
        the sharper versions of the same distinction.)
-    M3 attach vs PURGE race both directions: purge-then-attach -> attach rejected
-       media_asset_not_attachable; attach-then-purge -> the under-lock recheck refuses the purge.
-       Attach vs ARCHIVE is not a race with a loser: both succeed, in either order, and the
-       archive's recorded prior_references reflects the interleaving that actually happened (the
-       matrix row for it, and M14, cover this). The former expectation "attach-then-archive ->
-       archive rejected media_referenced" is REMOVED as the surviving half of the corrected
-       contradiction.
+    M3  attach vs archive, BOTH DIRECTIONS, WITH THE CORRECT ASYMMETRY
+        (IMP005-REAUDIT-R2-04 — the previous claim that "both operations succeed in either order"
+        is FALSE and is replaced; archive and attach are not symmetric):
+          (a) ATTACH FIRST, then ARCHIVE: attach succeeds; the subsequent archive SUCCEEDS
+              (references never block archive), the existing reference row remains valid, the
+              asset still renders through it, and the event records prior_references = HAS_ACTIVE.
+          (b) ARCHIVE FIRST, then ATTACH: archive succeeds; the subsequent attach is REJECTED
+              `media_asset_not_attachable` (an ARCHIVED asset is never newly attachable).
+        So the outcome depends on the ORDER, and only one of the two orders is fully
+        unobstructed. Assert all three facts in each direction, not just the terminal status.
+        attach vs PURGE remains its own pair of cases (M4/M15) with a genuinely different rule:
+        purge-then-attach rejects the attach; attach-then-purge is refused by the under-lock
+        recheck.
     M4 zero-reference recheck under lock: a candidate query that returns an asset, followed by a
        concurrent attach, must NOT purge (the recheck, not the query, decides).
     M5 orphan FILE with no DB row is reclaimed after the configured grace, and a file whose name
@@ -3613,8 +4024,14 @@ AC-05  Managed slugs can never claim reserved prefixes (unit+feature+boot assert
 AC-06  Sanitizer blocks every §28 XSS vector sample; stored bodies are always post-sanitization
        (bypass attempts return 422, nothing raw persists).
 AC-07  Media pipeline rejects executables/SVG/mismatched-mime/oversized per §19; only generated
-       filenames reach disk; referenced-media ARCHIVE blocked and history-referenced media never
-       purged; cleanup scheduler reclaims orphan files and unreferenced archived assets.
+       filenames reach disk; referenced media MAY be logically archived (references end
+       attachability, they do not block archive — §19, and AC-28 is the same rule: these two
+       criteria must never diverge again) while every existing reference stays resolvable and
+       renderable; media with ANY ACTIVE reference are NEVER physically purged (historical
+       included, because a historical revision's reference row is ACTIVE permanently); cleanup
+       scheduler reclaims orphan files and unreferenced archived assets. The superseded wording
+       "referenced-media ARCHIVE blocked" is REMOVED here; it was the last surviving copy of the
+       rule §19 abandoned in pass 2.
 AC-08  No FK from any cms_* table to financial/business-domain tables; no CMS code path reads or
        writes ledger/payment/donation state or mutates RBAC runtime authority (structure test/grep
        gate); consuming the canonical RBAC evaluator and explicit deploy-time seeding is required.
