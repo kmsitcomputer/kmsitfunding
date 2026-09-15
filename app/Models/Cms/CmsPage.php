@@ -104,4 +104,13 @@ class CmsPage extends Model
     {
         return $this->belongsTo(Principal::class, 'scheduled_by_principal_id');
     }
+
+    /**
+     * Route-model binding by public ULID, never the internal BIGINT id
+     * (section 13: internal PKs/FKs never leave the server layer).
+     */
+    public function getRouteKeyName(): string
+    {
+        return 'ulid';
+    }
 }

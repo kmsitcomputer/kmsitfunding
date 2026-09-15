@@ -11,6 +11,7 @@ use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
+use App\Http\Controllers\Cms\PageController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -85,5 +86,19 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::delete('/account/mfa', [MfaController::class, 'disable'])->name('mfa.disable');
         Route::post('/account/mfa/reset', [MfaController::class, 'reset'])->name('mfa.reset');
         Route::post('/account/mfa/recovery-codes', [MfaController::class, 'regenerateRecoveryCodes'])->name('mfa.recovery-codes.regenerate');
+    });
+
+    // IMP-005 — CMS admin UI (section 24: CMS admin routes live under
+    // /admin/content/*). {page} is bound by ULID (CmsPage::getRouteKeyName()),
+    // never the internal BIGINT id.
+    Route::prefix('admin/content/pages')->name('cms.pages.')->group(function () {
+        Route::get('/', [PageController::class, 'index'])->name('index');
+        Route::get('/create', [PageController::class, 'create'])->name('create');
+        Route::post('/', [PageController::class, 'store'])->name('store');
+        Route::get('/{page}', [PageController::class, 'edit'])->name('edit');
+        Route::patch('/{page}', [PageController::class, 'update'])->name('update');
+        Route::post('/{page}/publish', [PageController::class, 'publish'])->name('publish');
+        Route::post('/{page}/unpublish', [PageController::class, 'unpublish'])->name('unpublish');
+        Route::post('/{page}/archive', [PageController::class, 'archive'])->name('archive');
     });
 });
