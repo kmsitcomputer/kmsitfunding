@@ -7,6 +7,7 @@ use App\Models\Rbac\Principal;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * IMP-005 — managed article identity + lifecycle (docs/implementation/
@@ -48,6 +49,15 @@ class CmsArticle extends Model
     public function revisions(): HasMany
     {
         return $this->hasMany(CmsContentRevision::class, 'article_id');
+    }
+
+    /**
+     * See CmsPage::currentDraft() for why this reads directly rather than
+     * through a maintained pointer column.
+     */
+    public function currentDraft(): HasOne
+    {
+        return $this->hasOne(CmsContentRevision::class, 'article_id')->where('state', 'DRAFT');
     }
 
     public function publishedRevision(): BelongsTo

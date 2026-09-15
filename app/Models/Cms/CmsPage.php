@@ -7,6 +7,7 @@ use App\Models\Rbac\Principal;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * IMP-005 — managed page identity + lifecycle (docs/implementation/
@@ -53,6 +54,20 @@ class CmsPage extends Model
     public function revisions(): HasMany
     {
         return $this->hasMany(CmsContentRevision::class, 'page_id');
+    }
+
+    /**
+     * The owner's live draft, read directly rather than through a maintained
+     * pointer column: section 18 reserves ALL identity-pointer writes
+     * (including latest_draft_revision_id) to PublicationService, so
+     * RevisionService::createDraft() never sets that column. The DB's own
+     * single-active-draft uniqueness (active_draft_page_id) guarantees at
+     * most one row ever matches this query, so it is a safe substitute for
+     * the pointer, not a weaker one.
+     */
+    public function currentDraft(): HasOne
+    {
+        return $this->hasOne(CmsContentRevision::class, 'page_id')->where('state', 'DRAFT');
     }
 
     public function publishedRevision(): BelongsTo
