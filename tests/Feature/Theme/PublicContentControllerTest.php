@@ -106,4 +106,27 @@ class PublicContentControllerTest extends TestCase
             ->where('template.sections.0.components.0.props.headline', 'Custom Hero')
         );
     }
+
+    public function test_a_content_list_component_resolves_a_real_url_per_item(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $page = app(PageService::class)->create(['title' => 'Listed Page', 'body_html' => '<p>x</p>'], $actor);
+        app(PublicationService::class)->publish($page->fresh(), $page->fresh()->currentDraft, $actor, '/listed-page');
+
+        $theme = app(ThemeService::class)->create(['name' => 'Custom'], $actor);
+        $template = app(ThemeTemplateService::class)->create($theme, ['name' => 'Home', 'content_kind' => 'home'], $actor);
+        $section = app(ThemeSectionService::class)->createAndPlace($template, [], $actor);
+        app(ThemeComponentService::class)->create($section, 'content_list', [
+            'content_kind' => 'page', 'limit' => 6, 'order' => 'latest',
+        ], $actor);
+        app(ThemeActivationService::class)->activate($theme, $actor);
+
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $p) => $p
+            ->where('template.sections.0.components.0.props.0.title', 'Listed Page')
+            ->where('template.sections.0.components.0.props.0.url', '/listed-page')
+        );
+    }
 }

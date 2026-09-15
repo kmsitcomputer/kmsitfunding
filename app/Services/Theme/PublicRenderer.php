@@ -259,6 +259,11 @@ class PublicRenderer
         return $items->map(fn ($item) => [
             'ulid' => $item->ulid,
             'title' => $item->title,
+            'url' => $this->destinationResolver->resolve([
+                'destination_type' => 'CMS_CONTENT',
+                'destination_content_kind' => $kind,
+                'destination_content_ulid' => $item->ulid,
+            ]),
         ])->all();
     }
 
