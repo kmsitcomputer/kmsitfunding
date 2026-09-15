@@ -5,6 +5,7 @@ namespace Tests\Feature\Cms;
 use App\Models\Cms\CmsArticle;
 use App\Models\Cms\CmsPage;
 use App\Services\Content\Exceptions\ActiveDraftExistsException;
+use App\Services\Content\Exceptions\ContentSanitizationException;
 use App\Services\Content\Exceptions\DraftEditConflictException;
 use App\Services\Content\Exceptions\RevisionValidationException;
 use App\Services\Content\RevisionService;
@@ -246,5 +247,41 @@ class RevisionServiceTest extends TestCase
         $revision = $this->service()->createDraft($page, ['title' => 'v1', 'body_html' => '<p>1</p>'], $author);
 
         $this->assertSame($revision->id, $page->currentDraft()->first()->id);
+    }
+
+    public function test_create_draft_sanitizes_body_html_and_rejects_a_script_tag(): void
+    {
+        $author = $this->makeUnauthorizedActor();
+        $page = $this->makePage();
+
+        $this->expectException(ContentSanitizationException::class);
+        $this->service()->createDraft($page, [
+            'title' => 'v1',
+            'body_html' => '<p>hi</p><script>alert(1)</script>',
+        ], $author);
+    }
+
+    public function test_create_draft_stores_the_sanitized_body_not_the_raw_input(): void
+    {
+        $author = $this->makeUnauthorizedActor();
+        $page = $this->makePage();
+
+        $revision = $this->service()->createDraft($page, [
+            'title' => 'v1',
+            'body_html' => '<p onclick="alert(1)">hi</p>',
+        ], $author);
+
+        $this->assertStringNotContainsString('onclick', $revision->body_html);
+        $this->assertStringContainsString('hi', $revision->body_html);
+    }
+
+    public function test_edit_draft_sanitizes_body_html_on_edit(): void
+    {
+        $author = $this->makeUnauthorizedActor();
+        $page = $this->makePage();
+        $revision = $this->service()->createDraft($page, ['title' => 'v1', 'body_html' => '<p>1</p>'], $author);
+
+        $this->expectException(ContentSanitizationException::class);
+        $this->service()->editDraft($revision, ['body_html' => '<iframe src="https://evil.example"></iframe>'], expectedEditVersion: 0);
     }
 }

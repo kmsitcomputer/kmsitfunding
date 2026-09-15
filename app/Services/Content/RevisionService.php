@@ -48,10 +48,18 @@ use Illuminate\Support\Facades\DB;
  * that matter are held — attachability is checked under a real row lock,
  * references commit atomically with the payload, and drops are scoped to
  * this revision only — and are what the accompanying tests assert.
+ *
+ * SANITIZATION (section 20): any payload supplying `body_html` is run
+ * through ContentSanitizer BEFORE storage and BEFORE token extraction —
+ * this is the single write-path gate section 20 requires; no caller may
+ * bypass it by calling this service directly.
  */
 class RevisionService
 {
-    public function __construct(private readonly MediaService $mediaService) {}
+    public function __construct(
+        private readonly MediaService $mediaService,
+        private readonly ContentSanitizer $sanitizer,
+    ) {}
 
     /**
      * Create a new DRAFT revision for $owner. The one and only legal way a
@@ -63,7 +71,14 @@ class RevisionService
      */
     public function createDraft(CmsPage|CmsArticle $owner, array $payload, Principal $author): CmsContentRevision
     {
-        $bodyUlids = $this->extractBodyTokens($payload['body_html'] ?? '');
+        // Sanitize FIRST, then extract tokens from the SANITIZED output —
+        // section 20's own round-trip order ("editor input -> sanitizer
+        // (token PRESERVED verbatim) -> stored body_html"). Extracting from
+        // raw input first could reference-track a token that the sanitizer
+        // was about to strip along with its surrounding disallowed markup.
+        $sanitizedBody = $this->sanitizer->sanitize($payload['body_html'] ?? '');
+        $payload['body_html'] = $sanitizedBody;
+        $bodyUlids = $this->extractBodyTokens($sanitizedBody);
         $ogImageUlid = $payload['og_image_token'] ?? null;
         $proposedUlids = $ogImageUlid !== null ? [...$bodyUlids, $ogImageUlid] : $bodyUlids;
 
@@ -130,6 +145,12 @@ class RevisionService
      */
     public function editDraft(CmsContentRevision $revision, array $payload, int $expectedEditVersion): CmsContentRevision
     {
+        if (array_key_exists('body_html', $payload)) {
+            // See createDraft()'s identical note: sanitize before token
+            // extraction, and store the sanitized value, never the raw one.
+            $payload['body_html'] = $this->sanitizer->sanitize($payload['body_html']);
+        }
+
         $touchesMedia = array_key_exists('body_html', $payload) || array_key_exists('og_image_token', $payload);
         $bodyUlids = array_key_exists('body_html', $payload)
             ? $this->extractBodyTokens($payload['body_html'])
