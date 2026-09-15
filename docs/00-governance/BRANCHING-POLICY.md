@@ -5,7 +5,8 @@
 ```
 Current local baseline branch:   master
 Target canonical stable branch:  main
-Remote:                          none / not configured
+Remote:                          configured — `origin` (verified via `git remote -v`,
+                                  2026-09-16, IMP-005 finalization)
 ```
 
 During IMP-000 bootstrap, `master` temporarily acts as the local baseline. `main` does not
@@ -23,8 +24,8 @@ Transition to `main`:
 6. Update CI/document references accordingly.
 ```
 
-Remote branch protection cannot currently be verified because no remote or protection
-configuration is available locally.
+A remote (`origin`) is now configured (see "Bootstrap Repository State" above), but its branch
+protection status has not been verified from this local environment.
 
 ## Branches (Target Naming Convention)
 
