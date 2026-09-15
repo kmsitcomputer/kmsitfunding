@@ -23,6 +23,8 @@ use Illuminate\Support\Str;
  */
 class MediaService
 {
+    public function __construct(private readonly ContentAuditLogger $auditLogger) {}
+
     /**
      * @param  array{alt_text?:?string,caption?:?string}  $metadata
      */
@@ -68,28 +70,55 @@ class MediaService
         $storedFilename = "{$ulid}.{$extension}";
         $directory = 'content/'.now()->format('Y/m');
 
+        // Bytes are written BEFORE the row/audit transaction, deliberately
+        // (section 26 flow 6): the insert must be atomic with the audit
+        // append, while the filesystem is not transactional. A crashed
+        // insert after this point leaves an orphan file, reclaimed by the
+        // (not-yet-built) cleanup job's CASE A — a bounded, documented
+        // consequence, not a bug.
         Storage::disk(config('media.disk'))->putFileAs($directory, $file, $storedFilename);
 
-        $asset = new CmsMediaAsset;
-        $asset->forceFill([
-            'ulid' => $ulid,
-            'disk' => config('media.disk'),
-            'stored_filename' => $storedFilename,
-            'original_filename' => $this->sanitizeOriginalFilename($file->getClientOriginalName()),
-            'mime_type' => $mimeType,
-            'extension' => $extension,
-            'size_bytes' => $file->getSize(),
-            'width' => $width,
-            'height' => $height,
-            'alt_text' => $metadata['alt_text'] ?? null,
-            'caption' => $metadata['caption'] ?? null,
-            'sha256' => $sha256,
-            'status' => 'ACTIVE',
-            'uploaded_by_principal_id' => $uploader->id,
-        ]);
-        $asset->save();
+        $duplicate = $this->findActiveDuplicate($sha256);
 
-        return $asset;
+        return DB::transaction(function () use (
+            $ulid, $storedFilename, $file, $mimeType, $extension, $width, $height,
+            $metadata, $sha256, $uploader, $duplicate
+        ) {
+            $asset = new CmsMediaAsset;
+            $asset->forceFill([
+                'ulid' => $ulid,
+                'disk' => config('media.disk'),
+                'stored_filename' => $storedFilename,
+                'original_filename' => $this->sanitizeOriginalFilename($file->getClientOriginalName()),
+                'mime_type' => $mimeType,
+                'extension' => $extension,
+                'size_bytes' => $file->getSize(),
+                'width' => $width,
+                'height' => $height,
+                'alt_text' => $metadata['alt_text'] ?? null,
+                'caption' => $metadata['caption'] ?? null,
+                'sha256' => $sha256,
+                'status' => 'ACTIVE',
+                'uploaded_by_principal_id' => $uploader->id,
+            ]);
+            $asset->save();
+
+            $auditMetadata = [
+                'asset_ulid' => $asset->ulid,
+                'mime_type' => $mimeType,
+                'extension' => $extension,
+                'size_bytes' => $asset->size_bytes,
+                'sha256' => $sha256,
+            ];
+
+            if ($duplicate !== null) {
+                $auditMetadata['duplicate_asset_ulid'] = $duplicate->ulid;
+            }
+
+            $this->auditLogger->recordMediaUploaded($asset->id, $auditMetadata, $uploader);
+
+            return $asset;
+        });
     }
 
     /**
@@ -105,8 +134,8 @@ class MediaService
      * Logical archive (section 19 "Media ARCHIVE"): NEVER blocked by
      * references — archiving ends attachability, it does not withdraw an
      * asset from content that already renders it. Idempotent on an
-     * already-ARCHIVED asset (no re-transition, no duplicate audit event
-     * once audit is wired).
+     * already-ARCHIVED asset (returns before the transition/audit block,
+     * so no re-transition and no duplicate audit event).
      */
     public function archive(CmsMediaAsset $asset, Principal $actor): CmsMediaAsset
     {
@@ -141,9 +170,11 @@ class MediaService
                 'archived_by_principal_id' => $actor->id,
             ])->save();
 
-            // $hasActiveReferences becomes the audit event's prior_references
-            // (HAS_ACTIVE|NONE) once the audit slice lands — computed now so
-            // that step is additive, not a redesign.
+            $this->auditLogger->recordMediaArchived($locked->id, [
+                'asset_ulid' => $locked->ulid,
+                'prior_references' => $hasActiveReferences ? 'HAS_ACTIVE' : 'NONE',
+            ], $actor);
+
             return $locked;
         });
     }

@@ -26,7 +26,20 @@ use Illuminate\Support\Facades\DB;
  */
 class PageService
 {
-    public function __construct(private readonly RevisionService $revisionService) {}
+    /**
+     * The closed fields_changed vocabulary (section 12 "Derived-key
+     * definitions") — exactly section 13's revision payload columns minus
+     * the identity/structural ones that are never edited.
+     */
+    private const TRACKED_PAYLOAD_FIELDS = [
+        'title', 'excerpt', 'body_html', 'meta_title', 'meta_description',
+        'og_title', 'og_description', 'og_image_asset_id', 'no_index', 'slug_snapshot',
+    ];
+
+    public function __construct(
+        private readonly RevisionService $revisionService,
+        private readonly ContentAuditLogger $auditLogger,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $revisionPayload  see RevisionService::createDraft()
@@ -43,7 +56,9 @@ class PageService
             ]);
             $page->save();
 
-            $this->revisionService->createDraft($page, $revisionPayload, $actor);
+            $revision = $this->revisionService->createDraft($page, $revisionPayload, $actor);
+
+            $this->auditLogger->recordPageCreated($page->id, ['revision_id' => $revision->id], $actor);
 
             return $page->fresh();
         });
@@ -69,6 +84,15 @@ class PageService
             $updated = $this->revisionService->editDraft($draft, $revisionPayload, $expectedEditVersion);
 
             $page->forceFill(['updated_by_principal_id' => $actor->id])->save();
+
+            $fieldsChanged = array_values(array_intersect(array_keys($revisionPayload), self::TRACKED_PAYLOAD_FIELDS));
+            $metadata = ['revision_id' => $updated->id, 'fields_changed' => $fieldsChanged];
+
+            if ($updated->slug_snapshot !== null) {
+                $metadata['slug_snapshot'] = $updated->slug_snapshot;
+            }
+
+            $this->auditLogger->recordPageUpdated($page->id, $metadata, $actor);
 
             return $updated;
         });

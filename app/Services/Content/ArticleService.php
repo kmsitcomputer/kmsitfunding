@@ -19,7 +19,15 @@ use Illuminate\Support\Facades\DB;
  */
 class ArticleService
 {
-    public function __construct(private readonly RevisionService $revisionService) {}
+    private const TRACKED_PAYLOAD_FIELDS = [
+        'title', 'excerpt', 'body_html', 'meta_title', 'meta_description',
+        'og_title', 'og_description', 'og_image_asset_id', 'no_index', 'slug_snapshot', 'article_type',
+    ];
+
+    public function __construct(
+        private readonly RevisionService $revisionService,
+        private readonly ContentAuditLogger $auditLogger,
+    ) {}
 
     public function create(array $revisionPayload, Principal $actor): CmsArticle
     {
@@ -33,7 +41,13 @@ class ArticleService
             ]);
             $article->save();
 
-            $this->revisionService->createDraft($article, $revisionPayload, $actor);
+            $revision = $this->revisionService->createDraft($article, $revisionPayload, $actor);
+
+            $this->auditLogger->recordArticleCreated(
+                $article->id,
+                ['revision_id' => $revision->id, 'article_type' => $revision->article_type],
+                $actor
+            );
 
             return $article->fresh();
         });
@@ -54,6 +68,19 @@ class ArticleService
             $updated = $this->revisionService->editDraft($draft, $revisionPayload, $expectedEditVersion);
 
             $article->forceFill(['updated_by_principal_id' => $actor->id])->save();
+
+            $fieldsChanged = array_values(array_intersect(array_keys($revisionPayload), self::TRACKED_PAYLOAD_FIELDS));
+            $metadata = [
+                'revision_id' => $updated->id,
+                'fields_changed' => $fieldsChanged,
+                'article_type' => $updated->article_type,
+            ];
+
+            if ($updated->slug_snapshot !== null) {
+                $metadata['slug_snapshot'] = $updated->slug_snapshot;
+            }
+
+            $this->auditLogger->recordArticleUpdated($article->id, $metadata, $actor);
 
             return $updated;
         });
