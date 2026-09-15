@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Cms;
 
+use App\Models\Audit\AuditRecord;
 use App\Models\Cms\CmsMediaAsset;
 use App\Services\Content\Exceptions\MediaValidationException;
 use App\Services\Content\MediaService;
@@ -144,5 +145,33 @@ class MediaServiceTest extends TestCase
         $second = $this->service()->archive($asset->fresh(), $uploader);
 
         $this->assertSame($first->archived_at->toDateTimeString(), $second->archived_at->toDateTimeString());
+    }
+
+    public function test_update_metadata_edits_only_the_three_mutable_columns_and_emits_updated(): void
+    {
+        $uploader = $this->makeUnauthorizedActor();
+        $asset = $this->service()->upload(UploadedFile::fake()->image('a.jpg', 10, 10), $uploader);
+        $originalStoredFilename = $asset->stored_filename;
+
+        $updated = $this->service()->updateMetadata($asset, ['alt_text' => 'New alt', 'caption' => 'New caption'], $uploader);
+
+        $this->assertSame('New alt', $updated->alt_text);
+        $this->assertSame('New caption', $updated->caption);
+        $this->assertSame($originalStoredFilename, $updated->stored_filename, 'stored_filename is never mutable metadata');
+
+        $event = AuditRecord::where('event_type', 'content.media.updated')->latest('id')->firstOrFail();
+        $this->assertSame($asset->ulid, $event->metadata['asset_ulid']);
+        $this->assertEqualsCanonicalizing(['alt_text', 'caption'], $event->metadata['fields_changed']);
+    }
+
+    public function test_update_metadata_only_reports_the_keys_actually_supplied(): void
+    {
+        $uploader = $this->makeUnauthorizedActor();
+        $asset = $this->service()->upload(UploadedFile::fake()->image('a.jpg', 10, 10), $uploader);
+
+        $this->service()->updateMetadata($asset, ['caption' => 'Only caption'], $uploader);
+
+        $event = AuditRecord::where('event_type', 'content.media.updated')->latest('id')->firstOrFail();
+        $this->assertSame(['caption'], $event->metadata['fields_changed']);
     }
 }

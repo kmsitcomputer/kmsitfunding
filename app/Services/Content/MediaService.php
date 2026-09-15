@@ -12,14 +12,12 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 /**
- * IMP-005 — upload intake (section 19 validation pipeline) and logical
- * archive (section 19/26 flow 4). Physical purge belongs to
- * MediaCleanupService (a later slice, System-Principal-only per section 19
- * "cleanup actor / authority"). The section 19 attachment protocol (writing
- * cms_media_references rows when content embeds an asset) is NOT part of
- * this slice — it is wired into RevisionService/PublicationService in a
- * follow-on slice; this documented gap is the same one recorded in
- * RevisionService's own doc comment.
+ * IMP-005 — upload intake (section 19 validation pipeline), metadata
+ * update, and logical archive (section 19/26 flow 4). Physical purge
+ * belongs to MediaCleanupService, System-Principal-only per section 19
+ * "cleanup actor / authority". The section 19 attachment protocol (writing
+ * cms_media_references rows when content embeds an asset) lives in
+ * RevisionService, not here — see that class's own doc comment.
  */
 class MediaService
 {
@@ -128,6 +126,42 @@ class MediaService
     public function findActiveDuplicate(string $sha256): ?CmsMediaAsset
     {
         return CmsMediaAsset::query()->where('sha256', $sha256)->where('status', 'ACTIVE')->first();
+    }
+
+    /**
+     * Edits the only three mutable columns on cms_media_assets (section 13):
+     * alt_text, caption, original_filename. Never touches status/bytes/
+     * disk/stored_filename — those are lifecycle-owned, not metadata.
+     *
+     * @param  array{alt_text?:?string,caption?:?string,original_filename?:string}  $metadata
+     */
+    public function updateMetadata(CmsMediaAsset $asset, array $metadata, Principal $actor): CmsMediaAsset
+    {
+        return DB::transaction(function () use ($asset, $metadata, $actor) {
+            $locked = CmsMediaAsset::query()->whereKey($asset->id)->lockForUpdate()->firstOrFail();
+
+            $mutableColumns = ['alt_text', 'caption', 'original_filename'];
+            $fieldsChanged = [];
+
+            foreach ($mutableColumns as $column) {
+                if (array_key_exists($column, $metadata)) {
+                    $value = $column === 'original_filename'
+                        ? $this->sanitizeOriginalFilename($metadata[$column])
+                        : $metadata[$column];
+                    $locked->setAttribute($column, $value);
+                    $fieldsChanged[] = $column;
+                }
+            }
+
+            $locked->save();
+
+            $this->auditLogger->recordMediaUpdated($locked->id, [
+                'asset_ulid' => $locked->ulid,
+                'fields_changed' => $fieldsChanged,
+            ], $actor);
+
+            return $locked;
+        });
     }
 
     /**
