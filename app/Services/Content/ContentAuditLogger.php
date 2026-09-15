@@ -17,10 +17,10 @@ use App\Services\Audit\AuditWriter;
  * never rolls back the business mutation — that guarantee lives in
  * AuditWriter itself, not here).
  *
- * One method per content.* event this slice wires (13 of the 20 registered
- * in ContentAuditEventRegistrar — the remaining 7 need pieces not yet built:
- * scheduler, media.updated's metadata-edit call site, media.purged's
- * cleanup job, path.released's standalone release endpoint).
+ * One method per content.* event this slice wires (14 of the 20 registered
+ * in ContentAuditEventRegistrar — the remaining 6 need pieces not yet built:
+ * scheduler (the four schedule_updated/schedule_expired events) and
+ * media.updated's metadata-edit call site / media.purged's cleanup job).
  */
 class ContentAuditLogger
 {
@@ -84,6 +84,11 @@ class ContentAuditLogger
     public function recordMediaArchived(int $assetId, array $metadata, Principal $actor): void
     {
         $this->emit('content.media.archived', 'cms_media_asset', $assetId, $metadata, $actor);
+    }
+
+    public function recordPathReleased(int $pathId, array $metadata, Principal $actor): void
+    {
+        $this->emit('content.path.released', 'cms_path', $pathId, $metadata, $actor);
     }
 
     public function recordHomepageAssigned(array $metadata, Principal $actor): void

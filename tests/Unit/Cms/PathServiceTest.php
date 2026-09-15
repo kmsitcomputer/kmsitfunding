@@ -17,7 +17,7 @@ class PathServiceTest extends TestCase
 {
     private function service(): PathService
     {
-        return new PathService;
+        return app(PathService::class);
     }
 
     public function test_nested_segments_are_preserved_not_flattened(): void

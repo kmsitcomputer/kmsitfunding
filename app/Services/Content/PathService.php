@@ -8,6 +8,7 @@ use App\Models\Cms\CmsPage;
 use App\Models\Cms\CmsPath;
 use App\Models\Rbac\Principal;
 use App\Services\Content\Exceptions\PathValidationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -49,6 +50,8 @@ class PathService
 
     /** @var array<string, bool>|null memoized per-instance; routes don't change mid-request */
     private ?array $reservedPrefixCache = null;
+
+    public function __construct(private readonly ContentAuditLogger $auditLogger) {}
 
     /**
      * normalize -> bounds -> reserved, in that order (section 14 "Validation
@@ -253,10 +256,22 @@ class PathService
      */
     public function release(CmsPath $claim, Principal $principal): void
     {
-        $claim->forceFill([
-            'status' => 'RELEASED',
-            'released_at' => now(),
-        ])->save();
+        DB::transaction(function () use ($claim, $principal) {
+            $locked = CmsPath::query()->whereKey($claim->id)->lockForUpdate()->firstOrFail();
+
+            $locked->forceFill([
+                'status' => 'RELEASED',
+                'released_at' => now(),
+            ])->save();
+
+            $this->auditLogger->recordPathReleased($locked->id, [
+                'path' => $locked->path,
+                'purpose' => $locked->purpose,
+                'owner_type' => $locked->page_id !== null ? 'page' : 'article',
+                'owner_id' => $locked->page_id ?? $locked->article_id,
+                'reason' => 'GOVERNED_RELEASE',
+            ], $principal);
+        });
     }
 
     private function normalizeSegment(string $rawSegment): string
