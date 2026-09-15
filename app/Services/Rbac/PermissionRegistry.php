@@ -55,6 +55,22 @@ class PermissionRegistry
 
     public const CONTENT_MEDIA_UPLOAD = 'content.media.upload';
 
+    // IMP-006 Theme Engine permission family (docs/implementation/
+    // IMP-006-theme-engine.md section 18). Included in the super_admin bulk
+    // grant below like every other non-audit permission — no bypass, no
+    // role-name check.
+    public const THEME_VIEW = 'theme.view';
+
+    public const THEME_CREATE = 'theme.create';
+
+    public const THEME_UPDATE = 'theme.update';
+
+    public const THEME_PUBLISH = 'theme.publish';
+
+    public const THEME_ARCHIVE = 'theme.archive';
+
+    public const THEME_MEDIA_UPLOAD = 'theme.media.upload';
+
     /**
      * @return array<string, array{description: string, module: string}>
      */
@@ -133,6 +149,30 @@ class PermissionRegistry
             self::CONTENT_MEDIA_UPLOAD => [
                 'description' => 'Upload intake of content media — the security-sensitive write, kept separate from content.update.',
                 'module' => 'content',
+            ],
+            self::THEME_VIEW => [
+                'description' => 'Read/manage-list themes, templates, sections, components, navigation, branding, theme assets.',
+                'module' => 'theme',
+            ],
+            self::THEME_CREATE => [
+                'description' => 'Create a new theme/template/section/component/navigation menu.',
+                'module' => 'theme',
+            ],
+            self::THEME_UPDATE => [
+                'description' => 'Edit an existing theme/template/section/component/navigation/branding configuration.',
+                'module' => 'theme',
+            ],
+            self::THEME_PUBLISH => [
+                'description' => 'Activate/deactivate a theme.',
+                'module' => 'theme',
+            ],
+            self::THEME_ARCHIVE => [
+                'description' => 'Permanently retire a draft/inactive theme.',
+                'module' => 'theme',
+            ],
+            self::THEME_MEDIA_UPLOAD => [
+                'description' => 'Upload intake of theme assets — the security-sensitive write, kept separate from theme.update.',
+                'module' => 'theme',
             ],
         ];
     }

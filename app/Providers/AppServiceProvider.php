@@ -9,6 +9,8 @@ use App\Services\Content\ContentAuditEventRegistrar;
 use App\Services\Content\ContentScopeResolver;
 use App\Services\Rbac\OwnUserScopeResolver;
 use App\Services\Rbac\ScopeResolverRegistry;
+use App\Services\Theme\ThemeAuditEventRegistrar;
+use App\Services\Theme\ThemeScopeResolver;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Support\Facades\Event;
@@ -36,6 +38,9 @@ class AppServiceProvider extends ServiceProvider
             // IMP-005: CMS content scoping — organization-owned, single-org
             // platform, scope_id always NULL.
             new ContentScopeResolver,
+            // IMP-006: Theme Engine scoping — identical shape to
+            // ContentScopeResolver.
+            new ThemeScopeResolver,
         ]));
 
         // IMP-004: canonical audit event registry + correlation foundation,
@@ -43,9 +48,11 @@ class AppServiceProvider extends ServiceProvider
         // IMP-005: the 20 content.* events are registered here via the
         // registry's own public register() method — AuditEventRegistry's
         // own file (its registerCanonicalEvents()) is never touched.
+        // IMP-006: the 12 theme.* events are registered the same way.
         $this->app->singleton(AuditEventRegistry::class, function () {
             $registry = new AuditEventRegistry;
             (new ContentAuditEventRegistrar)->register($registry);
+            (new ThemeAuditEventRegistrar)->register($registry);
 
             return $registry;
         });

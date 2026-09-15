@@ -15,14 +15,15 @@ use App\Http\Controllers\Cms\ArticleController;
 use App\Http\Controllers\Cms\HomepageController;
 use App\Http\Controllers\Cms\MediaController;
 use App\Http\Controllers\Cms\PageController;
+use App\Http\Controllers\PublicContentController;
+use App\Http\Controllers\Theme\ThemeController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
-Route::get('/', function () {
-    return Inertia::render('Foundation', [
-        'appName' => config('app.name'),
-    ]);
-});
+// IMP-006 — the homepage entry point (docs/implementation/
+// IMP-006-theme-engine.md section 13). Distinct, first-registered route,
+// never shadowed by the catch-all below.
+Route::get('/', [PublicContentController::class, 'home'])->name('home');
 
 // IMP-002 — Identity + Authentication. Same-origin, single root domain — no
 // separate auth subdomain. See
@@ -133,4 +134,40 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::get('/', [HomepageController::class, 'edit'])->name('edit');
         Route::patch('/', [HomepageController::class, 'update'])->name('update');
     });
+
+    // IMP-006 — Theme Engine admin UI (docs/implementation/
+    // IMP-006-theme-engine.md). {theme}/{template}/{section}/{component}/
+    // {menu}/{item}/{asset} are bound by ULID, never the internal BIGINT id.
+    Route::prefix('admin/theme')->name('theme.')->group(function () {
+        Route::get('/', [ThemeController::class, 'index'])->name('index');
+        Route::post('/', [ThemeController::class, 'store'])->name('store');
+        Route::get('/{theme}', [ThemeController::class, 'show'])->name('show');
+        Route::patch('/{theme}', [ThemeController::class, 'update'])->name('update');
+        Route::post('/{theme}/activate', [ThemeController::class, 'activate'])->name('activate');
+        Route::post('/{theme}/archive', [ThemeController::class, 'archive'])->name('archive');
+
+        Route::post('/{theme}/templates', [ThemeController::class, 'storeTemplate'])->name('templates.store');
+        Route::post('/templates/{template}/sections', [ThemeController::class, 'createSection'])->name('sections.create');
+        Route::post('/sections/{section}/components', [ThemeController::class, 'createComponent'])->name('components.create');
+        Route::patch('/components/{component}', [ThemeController::class, 'updateComponent'])->name('components.update');
+        Route::delete('/components/{component}', [ThemeController::class, 'deleteComponent'])->name('components.delete');
+        Route::post('/templates/{template}/sections/reorder', [ThemeController::class, 'reorderSections'])->name('sections.reorder');
+
+        Route::post('/{theme}/navigation-menus', [ThemeController::class, 'createMenu'])->name('navigation.menus.create');
+        Route::post('/navigation-menus/{menu}/items', [ThemeController::class, 'createNavigationItem'])->name('navigation.items.create');
+        Route::delete('/navigation-items/{item}', [ThemeController::class, 'deleteNavigationItem'])->name('navigation.items.delete');
+
+        Route::post('/{theme}/branding', [ThemeController::class, 'saveBranding'])->name('branding.save');
+
+        Route::post('/{theme}/assets', [ThemeController::class, 'uploadAsset'])->name('assets.upload');
+        Route::post('/assets/{asset}/archive', [ThemeController::class, 'archiveAsset'])->name('assets.archive');
+    });
 });
+
+// IMP-006 — the public content catch-all (docs/implementation/
+// IMP-006-theme-engine.md section 13), registered LAST so every
+// already-registered system route above always matches first — no
+// maintained exclusion list.
+Route::get('/{any}', [PublicContentController::class, 'show'])
+    ->where('any', '.*')
+    ->name('public.show');
