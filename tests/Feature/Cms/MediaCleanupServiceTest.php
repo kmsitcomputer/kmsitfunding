@@ -199,4 +199,21 @@ class MediaCleanupServiceTest extends TestCase
         $this->assertSame(0, $summary['purged'], 'already PURGED, no longer a candidate');
         $this->assertSame($countAfterFirst, AuditRecord::where('event_type', 'content.media.purged')->count());
     }
+
+    /**
+     * Exercises the actual Artisan command, not just the service — the
+     * class this session's own history shows string-interpolation syntax
+     * errors can hide from until a command is actually invoked.
+     */
+    public function test_the_console_command_runs_both_cases_successfully(): void
+    {
+        $this->artisan('content:cleanup-media')->assertSuccessful();
+    }
+
+    public function test_the_console_command_fails_cleanly_when_the_cleanup_principal_is_not_seeded(): void
+    {
+        SystemPrincipal::where('code', 'content.media_cleanup')->update(['code' => 'content.media_cleanup.renamed']);
+
+        $this->artisan('content:cleanup-media')->assertFailed();
+    }
 }

@@ -14,3 +14,8 @@ Artisan::command('inspire', function () {
 // runs safe by construction (each identity serializes on its own row
 // lock), this just avoids piling up redundant processes.
 Schedule::command('content:run-scheduled-transitions')->everyMinute()->withoutOverlapping();
+
+// IMP-005 section 19 — cleanup is bounded/operational, not time-critical
+// like publication; hourly is a defensible cadence against the default
+// 24h orphan grace / 7-day purge grace windows (config/media.php).
+Schedule::command('content:cleanup-media')->hourly()->withoutOverlapping();
