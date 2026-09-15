@@ -189,13 +189,16 @@ final class AuditEventRegistry
             // IMP004-IMPL-M03: the pre-principal actor catalog is NOT
             // expanded to cover invitation issue/revoke — Human is the only
             // approved actor kind for these events (matching every other
-            // ordinary Human-initiated identity event). A null issuer/
-            // revoker (IMP-002 "Invitation Boundary": "records who revoked
-            // it, where available") has no approved canonical attribution
-            // and is REJECTED fail-closed by IdentityAuditLogger — see that
-            // class and docs/audits/IMP-004-OWNERSHIP-HANDOFF.md for the
-            // resulting, explicitly-flagged IMP-002/IMP-004 conflict this
-            // creates (Human Decision Required).
+            // ordinary Human-initiated identity event). Ordinary invitation
+            // issuance requires canonical Human attribution; a null issuer/
+            // revoker has no approved canonical attribution and is REJECTED
+            // fail-closed by IdentityAuditLogger — see that class and
+            // InvitationService::issue()/revoke() (non-nullable $issuer/
+            // $revoker parameters). The existing approved actor model is
+            // sufficient for this; no Human Decision is required — see
+            // docs/audits/IMP-004-OWNERSHIP-HANDOFF.md "Remediation Pass 2"
+            // for the independent audit disposition (invalid fixture/caller
+            // assumption, not a specification contradiction).
             new AuditEventDefinition('identity.invitation.issued', 1, $C, $MA, $GENERAL, 'invitation', false, [
                 'invitation_public_id' => 'string',
                 'invited_actor' => 'string',

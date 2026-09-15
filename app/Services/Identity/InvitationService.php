@@ -31,9 +31,21 @@ class InvitationService
     ) {}
 
     /**
+     * IMP004-REAUDIT-R1-01: $issuer is intentionally NON-nullable — ordinary
+     * invitation issuance requires canonical Human attribution (fail-closed
+     * at the IdentityAuditLogger seam; see that class), so a caller can never
+     * legitimately supply null here. This is a type-level correction only:
+     * `invitations.issuer_user_id` itself remains a nullable FK (historical/
+     * reference-only concerns — e.g. a referenced User row later deleted —
+     * are unrelated to what a NEW issuance call may supply). Tightening this
+     * signature does not by itself resolve, reopen, or reinterpret IMP-002's
+     * "Invitation Boundary" — it only reflects that no null-issuer call site
+     * has ever been a legitimate ordinary flow under the approved actor
+     * model. See docs/audits/IMP-004-OWNERSHIP-HANDOFF.md "Remediation Pass 2".
+     *
      * @return array{invitation: Invitation, plain_token: string}
      */
-    public function issue(string $invitedActor, string $intendedEmail, ?User $issuer): array
+    public function issue(string $invitedActor, string $intendedEmail, User $issuer): array
     {
         $normalized = $this->normalizer->normalize($intendedEmail);
         $plainToken = Str::random(64);
@@ -48,7 +60,7 @@ class InvitationService
                 'invited_actor' => $invitedActor,
                 'issued_at' => now(),
                 'expires_at' => now()->addDays((int) config('identity.invitation_ttl_days')),
-                'issuer_user_id' => $issuer?->id,
+                'issuer_user_id' => $issuer->id,
             ]);
 
             $this->audit->record('invitation_issued', $issuer, [
@@ -63,7 +75,12 @@ class InvitationService
         return ['invitation' => $invitation, 'plain_token' => $plainToken];
     }
 
-    public function revoke(Invitation $invitation, ?User $revoker): bool
+    /**
+     * IMP004-REAUDIT-R1-01: $revoker is non-nullable for the same reason as
+     * $issuer above — see issue()'s docblock. `invitations.revoker_user_id`
+     * remains a nullable FK.
+     */
+    public function revoke(Invitation $invitation, User $revoker): bool
     {
         return DB::transaction(function () use ($invitation, $revoker) {
             // IMP002-IMPL-M08: lock the row exactly like accept() does, so
@@ -80,7 +97,7 @@ class InvitationService
 
             $locked->forceFill([
                 'revoked_at' => now(),
-                'revoker_user_id' => $revoker?->id,
+                'revoker_user_id' => $revoker->id,
             ])->save();
 
             $this->audit->record('invitation_revoked', $revoker, [
