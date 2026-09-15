@@ -2,15 +2,32 @@
 
 namespace App\Services\Content;
 
+use App\Models\Cms\CmsArticle;
+use App\Models\Cms\CmsContentRevision;
+use App\Models\Cms\CmsPage;
+use App\Models\Cms\CmsPath;
+use App\Models\Rbac\Principal;
 use App\Services\Content\Exceptions\PathValidationException;
 use Illuminate\Support\Facades\Route;
 
 /**
  * IMP-005 — THE single path authority (docs/implementation/IMP-005-cms.md
- * section 14). This slice implements the READ/VALIDATE side only:
- * normalize() + bounds + reserved-registry membership. claim()/rename()/
- * release() are a later slice, wired into the publish transaction (section
- * 26 flow 1/2) once RevisionService/PublicationService exist.
+ * section 14). normalize()/bounds/reserved-registry (read/validate) plus
+ * claim()/retainAndUpdateRevision()/convertToRedirect()/release() (write).
+ *
+ * claim()/retainAndUpdateRevision()/convertToRedirect() are NOT safe to call
+ * standalone — section 14: "CLAIM and RENAME occur ONLY inside the
+ * publication transaction that also moves the identity pointer". They are
+ * building blocks PublicationService::publish() composes under its own
+ * locks, in the exact branch order section 14/26 require; this class does
+ * not open its own transaction or take its own locks for them, and does not
+ * itself decide the branch (A/B/C) — the caller must have already locked the
+ * owner and its existing CURRENT claim (if any) and decided the branch
+ * before calling one of these.
+ *
+ * release() IS independently callable — it is explicitly "a separate,
+ * explicitly authorized mutation" (section 14), not part of the publish
+ * flow.
  *
  * Reject-only: an invalid path is never silently sanitized into a claimable
  * one (section 14 "Reject-only"). Normalization is deterministic and PER
@@ -162,6 +179,84 @@ class PathService
         $firstSegment = explode('/', trim($normalized, '/'))[0] ?? '';
 
         return isset($this->reservedPrefixes()[strtolower($firstSegment)]);
+    }
+
+    /**
+     * The owner's ACTIVE CURRENT claim, if any (section 14 branch selection
+     * predicate). Caller is expected to have already locked the owner row;
+     * this additionally locks the claim row itself (FOR UPDATE) since branch
+     * selection must be decided from locked rows, never a pre-lock read.
+     */
+    public function lockCurrentClaim(CmsPage|CmsArticle $owner): ?CmsPath
+    {
+        $ownerColumn = $owner instanceof CmsPage ? 'page_id' : 'article_id';
+
+        return CmsPath::query()
+            ->where($ownerColumn, $owner->id)
+            ->where('purpose', 'CURRENT')
+            ->where('status', 'ACTIVE')
+            ->lockForUpdate()
+            ->first();
+    }
+
+    /**
+     * Branch A (first publication): INSERT one ACTIVE CURRENT row. The
+     * UNIQUE(active_path)/UNIQUE(active_current_owner) indexes are the race
+     * authority — a duplicate-key failure here is the caller's 409
+     * path_conflict, not something this method pre-checks and cannot
+     * guarantee (section 14 "Availability is decided by the constraint").
+     */
+    public function claim(CmsPage|CmsArticle $owner, string $normalizedPath, CmsContentRevision $revision): CmsPath
+    {
+        $claim = new CmsPath;
+        $claim->forceFill([
+            'path' => $normalizedPath,
+            'purpose' => 'CURRENT',
+            $owner instanceof CmsPage ? 'page_id' : 'article_id' => $owner->id,
+            'revision_id' => $revision->id,
+            'status' => 'ACTIVE',
+        ]);
+        $claim->save();
+
+        return $claim;
+    }
+
+    /**
+     * Branch B (same-path replacement / re-publication of RETIRED content):
+     * retain the SAME row, UPDATE its revision_id only — never an INSERT
+     * (section 14 branch B: "no key race... has no insert to race").
+     */
+    public function retainAndUpdateRevision(CmsPath $currentClaim, CmsContentRevision $revision): void
+    {
+        $currentClaim->forceFill(['revision_id' => $revision->id])->save();
+    }
+
+    /**
+     * Branch C rename, step 4: CONVERT purpose CURRENT -> REDIRECT. revision_id
+     * is left untouched — it is already the revision that was holding this
+     * path, which becomes its FROZEN historical value the instant purpose
+     * flips (section 14: "A REDIRECT claim's revision_id is FROZEN"). MUST be
+     * called, and committed, BEFORE claim() inserts the new CURRENT row for
+     * the same owner — reversing the order collides with
+     * UNIQUE(active_current_owner) (section 14 "the ONLY branch... ordering
+     * is FORCED").
+     */
+    public function convertToRedirect(CmsPath $currentClaim): void
+    {
+        $currentClaim->forceFill(['purpose' => 'REDIRECT'])->save();
+    }
+
+    /**
+     * The ONLY operation that un-reserves a path (section 13 RESERVATION
+     * POLICY) — never a side effect of retire/archive/any lifecycle
+     * transition. Independently callable, NOT part of the publish flow.
+     */
+    public function release(CmsPath $claim, Principal $principal): void
+    {
+        $claim->forceFill([
+            'status' => 'RELEASED',
+            'released_at' => now(),
+        ])->save();
     }
 
     private function normalizeSegment(string $rawSegment): string
