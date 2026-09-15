@@ -17,10 +17,9 @@ use App\Services\Audit\AuditWriter;
  * never rolls back the business mutation — that guarantee lives in
  * AuditWriter itself, not here).
  *
- * One method per content.* event this slice wires (14 of the 20 registered
- * in ContentAuditEventRegistrar — the remaining 6 need pieces not yet built:
- * scheduler (the four schedule_updated/schedule_expired events) and
- * media.updated's metadata-edit call site / media.purged's cleanup job).
+ * One method per content.* event this slice wires (18 of the 20 registered
+ * in ContentAuditEventRegistrar — the remaining 2 need pieces not yet built:
+ * media.updated's metadata-edit call site and media.purged's cleanup job).
  */
 class ContentAuditLogger
 {
@@ -89,6 +88,26 @@ class ContentAuditLogger
     public function recordPathReleased(int $pathId, array $metadata, Principal $actor): void
     {
         $this->emit('content.path.released', 'cms_path', $pathId, $metadata, $actor);
+    }
+
+    public function recordPageScheduleUpdated(int $pageId, array $metadata, Principal $actor): void
+    {
+        $this->emit('content.page.schedule_updated', 'cms_page', $pageId, $metadata, $actor);
+    }
+
+    public function recordArticleScheduleUpdated(int $articleId, array $metadata, Principal $actor): void
+    {
+        $this->emit('content.article.schedule_updated', 'cms_article', $articleId, $metadata, $actor);
+    }
+
+    public function recordPageScheduleExpired(int $pageId, array $metadata, Principal $actor): void
+    {
+        $this->emit('content.page.schedule_expired', 'cms_page', $pageId, $metadata, $actor);
+    }
+
+    public function recordArticleScheduleExpired(int $articleId, array $metadata, Principal $actor): void
+    {
+        $this->emit('content.article.schedule_expired', 'cms_article', $articleId, $metadata, $actor);
     }
 
     public function recordHomepageAssigned(array $metadata, Principal $actor): void
