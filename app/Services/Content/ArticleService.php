@@ -69,7 +69,10 @@ class ArticleService
 
             $article->forceFill(['updated_by_principal_id' => $actor->id])->save();
 
-            $fieldsChanged = array_values(array_intersect(array_keys($revisionPayload), self::TRACKED_PAYLOAD_FIELDS));
+            // See PageService::update()'s identical note: og_image_token is the
+            // payload key, og_image_asset_id is the audited column name.
+            $payloadKeys = array_map(fn ($key) => $key === 'og_image_token' ? 'og_image_asset_id' : $key, array_keys($revisionPayload));
+            $fieldsChanged = array_values(array_intersect($payloadKeys, self::TRACKED_PAYLOAD_FIELDS));
             $metadata = [
                 'revision_id' => $updated->id,
                 'fields_changed' => $fieldsChanged,

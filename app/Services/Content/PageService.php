@@ -85,7 +85,11 @@ class PageService
 
             $page->forceFill(['updated_by_principal_id' => $actor->id])->save();
 
-            $fieldsChanged = array_values(array_intersect(array_keys($revisionPayload), self::TRACKED_PAYLOAD_FIELDS));
+            // og_image_token is the payload INPUT key (a ULID string, never a raw
+            // internal id — RevisionService); the audit vocabulary names the
+            // underlying COLUMN, og_image_asset_id, so it is normalized here.
+            $payloadKeys = array_map(fn ($key) => $key === 'og_image_token' ? 'og_image_asset_id' : $key, array_keys($revisionPayload));
+            $fieldsChanged = array_values(array_intersect($payloadKeys, self::TRACKED_PAYLOAD_FIELDS));
             $metadata = ['revision_id' => $updated->id, 'fields_changed' => $fieldsChanged];
 
             if ($updated->slug_snapshot !== null) {
