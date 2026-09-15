@@ -20,6 +20,11 @@ export default defineConfig({
         tailwindcss(),
     ],
     server: {
+        // Bind IPv4 explicitly — on this machine "localhost" was resolving
+        // to the IPv6 loopback ([::1]) only, so a browser preferring IPv4
+        // for localhost could never reach the dev server (connection
+        // refused), surfacing as Laravel's Vite-unreachable error overlay.
+        host: '127.0.0.1',
         watch: {
             ignored: ['**/storage/framework/views/**'],
         },
