@@ -182,6 +182,47 @@ class PublicationService
     }
 
     /**
+     * Terminal lifecycle transition (DRAFT|RETIRED -> ARCHIVED). Releases
+     * NOTHING — path claims and media references are unaffected (section
+     * 27 item 1); only the identity's status changes. If the owner is the
+     * current homepage designee, the designation is CLEARED in the SAME
+     * transaction (an archived page can never be silently left as a
+     * dangling designation, section 27).
+     */
+    public function archive(CmsPage|CmsArticle $owner, Principal $actor): CmsPage|CmsArticle
+    {
+        return DB::transaction(function () use ($owner, $actor) {
+            $lockedOwner = $owner::query()->whereKey($owner->id)->lockForUpdate()->firstOrFail();
+
+            if (! in_array($lockedOwner->status, ['DRAFT', 'RETIRED'], true)) {
+                throw new PublicationValidationException(
+                    'invalid_archive_state',
+                    "Owner {$lockedOwner->id} is status={$lockedOwner->status}; only DRAFT or RETIRED may be archived."
+                );
+            }
+
+            $lockedOwner->forceFill([
+                'status' => 'ARCHIVED',
+                'updated_by_principal_id' => $actor->id,
+            ])->save();
+
+            if ($lockedOwner instanceof CmsPage) {
+                $assignment = CmsHomepageAssignment::query()->whereKey(1)->lockForUpdate()->first();
+
+                if ($assignment !== null && $assignment->page_id === $lockedOwner->id) {
+                    $assignment->update([
+                        'page_id' => null,
+                        'assigned_by_principal_id' => $actor->id,
+                        'assigned_at' => now(),
+                    ]);
+                }
+            }
+
+            return $lockedOwner->fresh();
+        });
+    }
+
+    /**
      * Assign, replace, or clear the singleton homepage designation (section
      * 26 flow 7). Pass $page = null to clear. The singleton row (id=1)
      * always exists (seeded by its migration), so there is never an empty
