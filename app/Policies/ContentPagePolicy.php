@@ -78,6 +78,20 @@ class ContentPagePolicy
         );
     }
 
+    /**
+     * Section 23: "content.publish ... homepage assignment" — the same
+     * PUBLICATION-plane permission, GLOBAL (no single page resource to
+     * scope against; PublicationService::setHomepage() itself rejects an
+     * ARCHIVED target).
+     */
+    public function assignHomepage(Principal $actingPrincipal): bool
+    {
+        return $this->authorizeRbac(
+            principal: $actingPrincipal,
+            permissionCode: PermissionRegistry::CONTENT_PUBLISH,
+        );
+    }
+
     public function archive(Principal $actingPrincipal, CmsPage $page): bool
     {
         return $this->authorizeRbac(

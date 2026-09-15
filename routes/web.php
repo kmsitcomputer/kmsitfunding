@@ -12,6 +12,7 @@ use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Cms\ArticleController;
+use App\Http\Controllers\Cms\HomepageController;
 use App\Http\Controllers\Cms\MediaController;
 use App\Http\Controllers\Cms\PageController;
 use Illuminate\Support\Facades\Route;
@@ -124,5 +125,12 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::post('/', [MediaController::class, 'store'])->name('store');
         Route::patch('/{asset}', [MediaController::class, 'update'])->name('update');
         Route::post('/{asset}/archive', [MediaController::class, 'archive'])->name('archive');
+    });
+
+    // IMP-005 — homepage designation admin UI (slice 24). Singleton, no
+    // {page} in the URL — see HomepageController's own doc comment.
+    Route::prefix('admin/content/homepage')->name('cms.homepage.')->group(function () {
+        Route::get('/', [HomepageController::class, 'edit'])->name('edit');
+        Route::patch('/', [HomepageController::class, 'update'])->name('update');
     });
 });
