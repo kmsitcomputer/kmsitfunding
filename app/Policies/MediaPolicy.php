@@ -39,4 +39,36 @@ class MediaPolicy
             requestedScopeId: null,
         );
     }
+
+    /**
+     * Section 23: "media metadata" rides content.update, the same EDIT-plane
+     * permission that gates draft edits — not a separate media.* code.
+     */
+    public function update(Principal $actingPrincipal, CmsMediaAsset $asset): bool
+    {
+        return $this->authorizeRbac(
+            principal: $actingPrincipal,
+            permissionCode: PermissionRegistry::CONTENT_UPDATE,
+            resource: $asset,
+            scopeResolver: new ContentScopeResolver,
+            requestedScopeType: ScopeType::Organization,
+            requestedScopeId: null,
+        );
+    }
+
+    /**
+     * Section 23: "content.archive ... + media LOGICAL archive" — the same
+     * DESTRUCTIVE-plane permission that gates Page/Article archive.
+     */
+    public function archive(Principal $actingPrincipal, CmsMediaAsset $asset): bool
+    {
+        return $this->authorizeRbac(
+            principal: $actingPrincipal,
+            permissionCode: PermissionRegistry::CONTENT_ARCHIVE,
+            resource: $asset,
+            scopeResolver: new ContentScopeResolver,
+            requestedScopeType: ScopeType::Organization,
+            requestedScopeId: null,
+        );
+    }
 }

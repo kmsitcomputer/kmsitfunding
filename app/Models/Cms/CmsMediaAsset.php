@@ -56,4 +56,13 @@ class CmsMediaAsset extends Model
     {
         return $this->belongsTo(Principal::class, 'archived_by_principal_id');
     }
+
+    /**
+     * Route-model binding by public ULID, never the internal BIGINT id —
+     * see CmsPage::getRouteKeyName()'s identical note.
+     */
+    public function getRouteKeyName(): string
+    {
+        return 'ulid';
+    }
 }

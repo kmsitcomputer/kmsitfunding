@@ -12,6 +12,7 @@ use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Cms\ArticleController;
+use App\Http\Controllers\Cms\MediaController;
 use App\Http\Controllers\Cms\PageController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -115,5 +116,13 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::post('/{article}/publish', [ArticleController::class, 'publish'])->name('publish');
         Route::post('/{article}/unpublish', [ArticleController::class, 'unpublish'])->name('unpublish');
         Route::post('/{article}/archive', [ArticleController::class, 'archive'])->name('archive');
+    });
+
+    // IMP-005 — Media library admin UI (slice 23).
+    Route::prefix('admin/content/media')->name('cms.media.')->group(function () {
+        Route::get('/', [MediaController::class, 'index'])->name('index');
+        Route::post('/', [MediaController::class, 'store'])->name('store');
+        Route::patch('/{asset}', [MediaController::class, 'update'])->name('update');
+        Route::post('/{asset}/archive', [MediaController::class, 'archive'])->name('archive');
     });
 });
