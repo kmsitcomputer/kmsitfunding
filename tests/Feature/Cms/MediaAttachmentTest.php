@@ -160,6 +160,34 @@ class MediaAttachmentTest extends TestCase
         $this->assertSame('ACTIVE', $v1Reference->status, "v1's (now PUBLISHED) reference must stay ACTIVE forever");
     }
 
+    public function test_removing_the_last_reference_to_an_already_archived_asset_still_succeeds(): void
+    {
+        // IMP005-FINAL-GATE-02 (section 19 step 0 "removal to zero"): the
+        // lock set is EXISTING UNION PROPOSED, not proposed-only — an edit
+        // that drops the only reference to an asset must still take that
+        // asset's tier-1 lock even though the new payload names no media at
+        // all, and dropping a reference to an already-ARCHIVED asset must
+        // never be rejected (only ATTACHING requires status=ACTIVE).
+        $actor = $this->makeUnauthorizedActor();
+        $mediaService = app(MediaService::class);
+        $asset = $mediaService->upload(UploadedFile::fake()->image('a.jpg', 10, 10), $actor);
+        $page = $this->makePage();
+        $revisionService = app(RevisionService::class);
+
+        $draft = $revisionService->createDraft($page, [
+            'title' => 'x',
+            'body_html' => "<p><img data-media=\"{$asset->ulid}\" alt=\"x\"></p>",
+        ], $actor);
+        $mediaService->archive($asset->fresh(), $actor);
+
+        $updated = $revisionService->editDraft($draft, ['body_html' => '<p>no image anymore</p>'], expectedEditVersion: 0);
+
+        $reference = CmsMediaReference::where('media_asset_id', $asset->id)
+            ->where('owner_revision_id', $updated->id)
+            ->first();
+        $this->assertSame('RELEASED', $reference->status);
+    }
+
     public function test_media_free_edit_touches_no_media_locks_or_references(): void
     {
         $actor = $this->makeUnauthorizedActor();

@@ -162,13 +162,49 @@ class RevisionService
                 : null);
         $proposedUlids = $ogImageUlid !== null ? [...$bodyUlids, $ogImageUlid] : $bodyUlids;
 
-        return DB::transaction(function () use ($revision, $payload, $expectedEditVersion, $touchesMedia, $bodyUlids, $ogImageUlid, $proposedUlids) {
+        // Section 19 step 0: LOCKED_ASSETS = EXISTING (this revision's current
+        // reference rows, ACTIVE or RELEASED, any field_path) UNION PROPOSED.
+        // Locking only $proposedUlids would miss the "removal to zero" case
+        // (existing non-empty, proposed empty) — NOT a media-free edit, and
+        // the one case the union rule exists specifically to cover (IMP005-
+        // FINAL-GATE-02: this union was previously proposed-only).
+        $existingUlids = [];
+
+        if ($touchesMedia) {
+            $existingAssetIds = CmsMediaReference::query()
+                ->where('owner_revision_id', $revision->id)
+                ->pluck('media_asset_id')
+                ->unique();
+
+            $existingUlids = $existingAssetIds->isEmpty()
+                ? []
+                : CmsMediaAsset::query()->whereIn('id', $existingAssetIds)->pluck('ulid')->all();
+        }
+
+        $lockSetUlids = array_values(array_unique([...$existingUlids, ...$proposedUlids]));
+
+        return DB::transaction(function () use ($revision, $payload, $expectedEditVersion, $touchesMedia, $bodyUlids, $ogImageUlid, $proposedUlids, $lockSetUlids) {
             $lockedAssets = collect();
 
-            if ($touchesMedia && $proposedUlids !== []) {
-                // Tier 1, before the revision lock.
-                $lockedAssets = $this->lockAssetsByUlid($proposedUlids);
+            if ($touchesMedia && $lockSetUlids !== []) {
+                // Tier 1, before the revision lock — the FULL union, not just
+                // the proposed subset (section 19 step 0).
+                $lockedAssets = $this->lockAssetsByUlid($lockSetUlids);
+                // Attachability (status=ACTIVE) is verified for the PROPOSED
+                // subset only — an asset being DROPPED need not be ACTIVE
+                // (section 19 step 2).
                 $this->assertAttachable($lockedAssets, $proposedUlids);
+
+                // Tier 2 — the existing reference rows for this lock set AND
+                // this revision, ids ASCENDING (section 19 step 3): taken,
+                // not merely read, so a concurrent reconcile of the same rows
+                // cannot interleave with this one.
+                CmsMediaReference::query()
+                    ->where('owner_revision_id', $revision->id)
+                    ->whereIn('media_asset_id', $lockedAssets->pluck('id'))
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get();
             }
 
             $locked = CmsContentRevision::query()->whereKey($revision->id)->lockForUpdate()->firstOrFail();

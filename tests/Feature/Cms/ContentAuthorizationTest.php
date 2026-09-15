@@ -2,12 +2,19 @@
 
 namespace Tests\Feature\Cms;
 
+use App\Enums\IdentityLifecycle;
+use App\Enums\ScopeType;
+use App\Enums\SecurityRestriction;
 use App\Models\Cms\CmsArticle;
 use App\Models\Cms\CmsMediaAsset;
 use App\Models\Cms\CmsPage;
+use App\Models\Rbac\Permission;
+use App\Models\Rbac\PrincipalRoleAssignment;
+use App\Models\Rbac\Role;
 use App\Policies\ContentArticlePolicy;
 use App\Policies\ContentPagePolicy;
 use App\Policies\MediaPolicy;
+use App\Services\Rbac\PermissionRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\Rbac\RbacTestActors;
 use Tests\TestCase;
@@ -164,5 +171,102 @@ class ContentAuthorizationTest extends TestCase
 
         $this->assertTrue($policy->manage($authorized, $asset));
         $this->assertFalse($policy->manage($unauthorized, $asset));
+    }
+
+    // --- IMP005-FINAL-GATE re-audit of the MediaPolicy::update()/archive()
+    // fix (section 23; IMP-003 canonical AuthorizationEvaluator semantics) ---
+
+    public function test_media_policy_update_and_archive_allow_authorized_and_deny_unauthorized_actor(): void
+    {
+        $authorized = $this->makeAuthorizedActor();
+        $unauthorized = $this->makeUnauthorizedActor();
+        $policy = new MediaPolicy;
+        $asset = $this->makeMediaAsset();
+
+        $this->assertTrue($policy->update($authorized, $asset));
+        $this->assertFalse($policy->update($unauthorized, $asset));
+
+        $this->assertTrue($policy->archive($authorized, $asset));
+        $this->assertFalse($policy->archive($unauthorized, $asset));
+    }
+
+    public function test_media_policy_update_denies_content_view_only_actor(): void
+    {
+        // A viewer holds content.view (and, via makeMediaAsset()'s own
+        // fixture setup, nothing else) but never content.update — proves
+        // update() is gated on the EDIT-plane permission specifically, not
+        // merely on being able to see the asset (the bug this pass fixed:
+        // the old manage() checked content.view for what section 23 assigns
+        // to content.update).
+        $viewer = $this->makeUnauthorizedActor();
+        $role = Role::create(['code' => 'media_viewer_only', 'name' => 'Media Viewer Only']);
+        $permission = Permission::firstOrCreate(['code' => PermissionRegistry::CONTENT_VIEW], ['description' => 'test']);
+        $role->permissions()->attach($permission->id, ['granted_at' => now()]);
+        PrincipalRoleAssignment::create([
+            'principal_id' => $viewer->id,
+            'role_id' => $role->id,
+            'scope_type' => ScopeType::GlobalPlatform->value,
+            'scope_id' => null,
+            'starts_at' => now(),
+            'assigned_by_principal_id' => null,
+        ]);
+        $asset = $this->makeMediaAsset();
+
+        $this->assertFalse((new MediaPolicy)->update($viewer, $asset));
+        $this->assertFalse((new MediaPolicy)->archive($viewer, $asset));
+    }
+
+    public function test_media_policy_update_and_archive_deny_a_grant_at_a_scope_type_content_never_requests(): void
+    {
+        // The analog of a "cross-scope attempt" in this single-organization
+        // baseline (ContentScopeResolver: "no OWN/FUNDRAISER/PARTNER/CAMPAIGN
+        // scope exists for CMS resources... no further discrimination is
+        // possible or needed" — there is exactly one scope dimension,
+        // ORGANIZATION, so the only meaningful negative case is a grant that
+        // lives entirely outside it). A grant at OWN scope (a real, populated
+        // ScopeType — never ORGANIZATION or GLOBAL_PLATFORM, which are the
+        // only two scope types content.* checks accept) must not satisfy
+        // MediaPolicy::update()/archive()'s requested ORGANIZATION scope.
+        $actor = $this->makeUnauthorizedActor();
+        $role = Role::create(['code' => 'media_wrong_scope', 'name' => 'Media Wrong Scope']);
+        foreach ([PermissionRegistry::CONTENT_UPDATE, PermissionRegistry::CONTENT_ARCHIVE] as $code) {
+            $permission = Permission::firstOrCreate(['code' => $code], ['description' => 'test']);
+            $role->permissions()->attach($permission->id, ['granted_at' => now()]);
+        }
+        PrincipalRoleAssignment::create([
+            'principal_id' => $actor->id,
+            'role_id' => $role->id,
+            'scope_type' => ScopeType::Own->value,
+            'scope_id' => null,
+            'starts_at' => now(),
+            'assigned_by_principal_id' => null,
+        ]);
+        $asset = $this->makeMediaAsset();
+
+        $this->assertFalse((new MediaPolicy)->update($actor, $asset));
+        $this->assertFalse((new MediaPolicy)->archive($actor, $asset));
+    }
+
+    public function test_media_policy_update_and_archive_deny_a_security_restricted_principal_even_with_valid_permission(): void
+    {
+        $authorized = $this->makeAuthorizedActor();
+        $asset = $this->makeMediaAsset();
+        $this->assertTrue((new MediaPolicy)->update($authorized, $asset), 'sanity: grant works before restriction');
+
+        $authorized->humanUser->forceFill(['security_restriction' => SecurityRestriction::Suspended])->save();
+
+        $this->assertFalse((new MediaPolicy)->update($authorized, $asset));
+        $this->assertFalse((new MediaPolicy)->archive($authorized, $asset));
+    }
+
+    public function test_media_policy_update_and_archive_deny_a_disabled_identity_even_with_valid_permission(): void
+    {
+        $authorized = $this->makeAuthorizedActor();
+        $asset = $this->makeMediaAsset();
+
+        $authorized->humanUser->forceFill(['lifecycle_state' => IdentityLifecycle::Disabled])->save();
+
+        $this->assertFalse((new MediaPolicy)->update($authorized, $asset));
+        $this->assertFalse((new MediaPolicy)->archive($authorized, $asset));
     }
 }

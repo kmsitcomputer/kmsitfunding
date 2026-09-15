@@ -5,12 +5,15 @@ namespace App\Services\Content;
 use App\Models\Cms\CmsArticle;
 use App\Models\Cms\CmsContentRevision;
 use App\Models\Cms\CmsHomepageAssignment;
+use App\Models\Cms\CmsMediaAsset;
+use App\Models\Cms\CmsMediaReference;
 use App\Models\Cms\CmsPage;
 use App\Models\Cms\CmsPath;
 use App\Models\Rbac\Principal;
 use App\Policies\ContentArticlePolicy;
 use App\Policies\ContentPagePolicy;
 use App\Services\Content\Exceptions\HomepageAssignmentConflictException;
+use App\Services\Content\Exceptions\MediaValidationException;
 use App\Services\Content\Exceptions\PathConflictException;
 use App\Services\Content\Exceptions\PublicationValidationException;
 use Illuminate\Database\QueryException;
@@ -38,9 +41,16 @@ use Illuminate\Support\Facades\DB;
  * the four schedule-provenance keys present) — never the other way
  * around.
  *
- * NOT YET IN THIS SLICE (documented, not silently dropped): the media
- * asset/reference tiers (section 19/26 tiers 1-2) — publish() does not lock
- * or verify media attachability.
+ * MEDIA TIERS 1-2 (IMP005-FINAL-GATE-01, section 19 "Shared lock order" /
+ * section 26 flow 1): publish() locks the candidate revision's referenced
+ * media assets (tier 1, ids ASCENDING) and their reference rows (tier 2)
+ * BEFORE locking the content identity/revision (tier 3), and re-verifies
+ * every referenced asset is still status=ACTIVE under those locks —
+ * exactly the same shared order attachment/archive/purge use, so publish
+ * can never deadlock against them and can never publish a revision whose
+ * media was archived/purged out from under it after its draft was last
+ * saved. Tiers 1-2 are skipped when the candidate has no ACTIVE
+ * references (section 26 "PUBLISH WITH NO MEDIA").
  */
 class PublicationService
 {
@@ -67,7 +77,21 @@ class PublicationService
         ?string $rawTargetPath = null,
         ?array $scheduleContext = null,
     ): CmsPage|CmsArticle {
-        return DB::transaction(function () use ($owner, $candidateRevision, $actor, $rawTargetPath, $scheduleContext) {
+        // Pre-read (UNLOCKED, hint only — section 19 step 0 / section 26 flow 1):
+        // publish() proposes no payload change, so the "proposed" set is simply
+        // the candidate's own current ACTIVE reference set.
+        $hintAssetIds = CmsMediaReference::query()
+            ->where('owner_revision_id', $candidateRevision->id)
+            ->where('status', 'ACTIVE')
+            ->pluck('media_asset_id')
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        return DB::transaction(function () use ($owner, $candidateRevision, $actor, $rawTargetPath, $scheduleContext, $hintAssetIds) {
+            $this->lockAndVerifyMediaTiers($candidateRevision, $hintAssetIds);
+
             $lockedOwner = $owner::query()->whereKey($owner->id)->lockForUpdate()->firstOrFail();
             $fromStatus = $lockedOwner->status;
             $lockedCandidate = CmsContentRevision::query()->whereKey($candidateRevision->id)->lockForUpdate()->firstOrFail();
@@ -381,6 +405,50 @@ class PublicationService
 
             return $assignment->fresh();
         });
+    }
+
+    /**
+     * Tiers 1-2 of the shared lock order (section 19 "Shared lock order" /
+     * section 26 flow 1), taken BEFORE this transaction's tier-3 identity/
+     * revision lock. $hintAssetIds is the unlocked pre-read (may be stale by
+     * a race that itself needs the same asset's tier-1 lock to resolve — see
+     * this method's caller-side doc comment); an empty hint means no media
+     * is involved and both tiers are skipped entirely, matching "PUBLISH
+     * WITH NO MEDIA" (section 26).
+     *
+     * @param  array<int, int>  $hintAssetIds
+     */
+    private function lockAndVerifyMediaTiers(CmsContentRevision $candidateRevision, array $hintAssetIds): void
+    {
+        if ($hintAssetIds === []) {
+            return;
+        }
+
+        $lockedAssets = CmsMediaAsset::query()
+            ->whereIn('id', $hintAssetIds)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        // Tier 2: the reference rows themselves, ids ASCENDING — taken (not
+        // merely read) so a concurrent reconcile of this same revision's
+        // references cannot interleave with this re-verification.
+        CmsMediaReference::query()
+            ->where('owner_revision_id', $candidateRevision->id)
+            ->whereIn('media_asset_id', $hintAssetIds)
+            ->where('status', 'ACTIVE')
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($lockedAssets as $asset) {
+            if ($asset->status !== 'ACTIVE') {
+                throw new MediaValidationException(
+                    'media_asset_not_attachable',
+                    "Media asset '{$asset->ulid}' is not attachable (status={$asset->status}); this revision cannot be published while it references a non-ACTIVE asset."
+                );
+            }
+        }
     }
 
     /**

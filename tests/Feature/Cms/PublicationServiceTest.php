@@ -3,14 +3,19 @@
 namespace Tests\Feature\Cms;
 
 use App\Models\Cms\CmsArticle;
+use App\Models\Cms\CmsMediaReference;
 use App\Models\Cms\CmsPage;
 use App\Models\Cms\CmsPath;
 use App\Models\Rbac\Principal;
+use App\Services\Content\Exceptions\MediaValidationException;
 use App\Services\Content\Exceptions\PathConflictException;
 use App\Services\Content\Exceptions\PublicationValidationException;
+use App\Services\Content\MediaService;
 use App\Services\Content\PublicationService;
 use App\Services\Content\RevisionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\Support\Rbac\RbacTestActors;
 use Tests\TestCase;
 
@@ -26,6 +31,12 @@ class PublicationServiceTest extends TestCase
 {
     use RbacTestActors;
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Storage::fake(config('media.disk'));
+    }
 
     private function publicationService(): PublicationService
     {
@@ -249,5 +260,145 @@ class PublicationServiceTest extends TestCase
 
         $this->expectException(PublicationValidationException::class);
         $this->publicationService()->unpublish($page, $actor);
+    }
+
+    // --- IMP005-FINAL-GATE-01: media tier-1/2 lock + attachability re-check
+    // at publish time (docs/implementation/IMP-005-cms.md section 19 "Shared
+    // lock order" / section 26 flow 1). These are sequential simulations of
+    // the pre-condition a real race would produce (asset already ARCHIVED/
+    // PURGED by the time publish() takes its locks) — SQLite cannot
+    // demonstrate true concurrent interleaving (section 26 "SQLite test
+    // parity"), so these assert the DETERMINISTIC OUTCOME the spec requires
+    // for that interleaving, not the interleaving itself.
+
+    public function test_publish_succeeds_when_the_referenced_media_asset_is_still_active(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $asset = app(MediaService::class)->upload(UploadedFile::fake()->image('a.jpg', 10, 10), $actor);
+        $page = $this->makePage($actor);
+        $draft = $this->revisionService()->createDraft($page, [
+            'title' => 'v1',
+            'body_html' => "<p><img data-media=\"{$asset->ulid}\" alt=\"x\"></p>",
+        ], $actor);
+
+        $published = $this->publicationService()->publish($page, $draft, $actor, '/with-media');
+
+        $this->assertSame('PUBLISHED', $published->status);
+    }
+
+    public function test_publish_rejects_when_the_referenced_media_asset_was_archived_after_the_draft_was_saved(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $mediaService = app(MediaService::class);
+        $asset = $mediaService->upload(UploadedFile::fake()->image('a.jpg', 10, 10), $actor);
+        $page = $this->makePage($actor);
+        $draft = $this->revisionService()->createDraft($page, [
+            'title' => 'v1',
+            'body_html' => "<p><img data-media=\"{$asset->ulid}\" alt=\"x\"></p>",
+        ], $actor);
+
+        // Simulates a concurrent archive winning the race for the asset's
+        // tier-1 lock before this publish reaches it.
+        $mediaService->archive($asset->fresh(), $actor);
+
+        $this->expectException(MediaValidationException::class);
+        $this->publicationService()->publish($page, $draft->fresh(), $actor, '/with-media');
+    }
+
+    public function test_publish_rejecting_a_stale_media_reference_leaves_the_owner_and_path_untouched(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $mediaService = app(MediaService::class);
+        $asset = $mediaService->upload(UploadedFile::fake()->image('a.jpg', 10, 10), $actor);
+        $page = $this->makePage($actor);
+        $draft = $this->revisionService()->createDraft($page, [
+            'title' => 'v1',
+            'body_html' => "<p><img data-media=\"{$asset->ulid}\" alt=\"x\"></p>",
+        ], $actor);
+        $mediaService->archive($asset->fresh(), $actor);
+
+        try {
+            $this->publicationService()->publish($page, $draft->fresh(), $actor, '/with-media');
+            $this->fail('expected MediaValidationException');
+        } catch (MediaValidationException) {
+            // expected
+        }
+
+        $this->assertSame('DRAFT', $page->fresh()->status, 'the whole transaction must roll back, not just the media check');
+        $this->assertSame(0, CmsPath::where('page_id', $page->id)->count(), 'no path claim may survive a rolled-back publish');
+        $this->assertSame('DRAFT', $draft->fresh()->state);
+    }
+
+    public function test_publish_rejects_when_the_referenced_media_asset_was_purged_after_the_draft_was_saved(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $mediaService = app(MediaService::class);
+        $asset = $mediaService->upload(UploadedFile::fake()->image('a.jpg', 10, 10), $actor);
+        $page = $this->makePage($actor);
+        $draft = $this->revisionService()->createDraft($page, [
+            'title' => 'v1',
+            'body_html' => "<p><img data-media=\"{$asset->ulid}\" alt=\"x\"></p>",
+        ], $actor);
+
+        // A real purge can never reach a referenced asset (it rechecks ACTIVE
+        // references under its own tier-1/2 lock first) — this forces the row
+        // to simulate what publish must still defend against if that
+        // invariant were ever violated elsewhere, per this finding's remit
+        // to patch the LOCK, not merely trust the invariant.
+        $asset->fresh()->forceFill(['status' => 'PURGED', 'purged_at' => now()])->save();
+
+        $this->expectException(MediaValidationException::class);
+        $this->publicationService()->publish($page, $draft->fresh(), $actor, '/with-media');
+    }
+
+    public function test_publish_with_no_media_reference_takes_no_media_locks_and_still_succeeds(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $page = $this->makePage($actor);
+        $draft = $this->revisionService()->createDraft($page, ['title' => 'v1', 'body_html' => '<p>plain</p>'], $actor);
+
+        $published = $this->publicationService()->publish($page, $draft, $actor, '/plain');
+
+        $this->assertSame('PUBLISHED', $published->status);
+        $this->assertSame(0, CmsMediaReference::query()->count());
+    }
+
+    public function test_republishing_after_a_dropped_media_reference_succeeds_even_though_the_asset_is_now_archived(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $mediaService = app(MediaService::class);
+        $asset = $mediaService->upload(UploadedFile::fake()->image('a.jpg', 10, 10), $actor);
+        $page = $this->makePage($actor);
+        $draft = $this->revisionService()->createDraft($page, [
+            'title' => 'v1',
+            'body_html' => "<p><img data-media=\"{$asset->ulid}\" alt=\"x\"></p>",
+        ], $actor);
+        // Drop the reference before publishing — the revision no longer
+        // names the asset, so its later archival must not block publish.
+        $this->revisionService()->editDraft($draft, ['body_html' => '<p>no image anymore</p>'], expectedEditVersion: 0);
+        $mediaService->archive($asset->fresh(), $actor);
+
+        $published = $this->publicationService()->publish($page, $draft->fresh(), $actor, '/dropped-media');
+
+        $this->assertSame('PUBLISHED', $published->status);
+    }
+
+    public function test_rename_publish_still_re_verifies_media_attachability(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $mediaService = app(MediaService::class);
+        $asset = $mediaService->upload(UploadedFile::fake()->image('a.jpg', 10, 10), $actor);
+        $page = $this->makePage($actor);
+        $v1 = $this->revisionService()->createDraft($page, ['title' => 'v1', 'body_html' => '<p>1</p>'], $actor);
+        $this->publicationService()->publish($page, $v1, $actor, '/old-path');
+
+        $v2 = $this->revisionService()->createDraft($page->fresh(), [
+            'title' => 'v2',
+            'body_html' => "<p><img data-media=\"{$asset->ulid}\" alt=\"x\"></p>",
+        ], $actor);
+        $mediaService->archive($asset->fresh(), $actor);
+
+        $this->expectException(MediaValidationException::class);
+        $this->publicationService()->publish($page->fresh(), $v2->fresh(), $actor, '/new-path');
     }
 }
