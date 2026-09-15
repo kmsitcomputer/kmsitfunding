@@ -11,6 +11,7 @@ use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
+use App\Http\Controllers\Cms\ArticleController;
 use App\Http\Controllers\Cms\PageController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -100,5 +101,19 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::post('/{page}/publish', [PageController::class, 'publish'])->name('publish');
         Route::post('/{page}/unpublish', [PageController::class, 'unpublish'])->name('unpublish');
         Route::post('/{page}/archive', [PageController::class, 'archive'])->name('archive');
+    });
+
+    // IMP-005 — Article admin UI (slice 22), mirroring the Page routes above.
+    // News is Article classification (Q33/HD-IMP005-05), not a separate route
+    // group.
+    Route::prefix('admin/content/articles')->name('cms.articles.')->group(function () {
+        Route::get('/', [ArticleController::class, 'index'])->name('index');
+        Route::get('/create', [ArticleController::class, 'create'])->name('create');
+        Route::post('/', [ArticleController::class, 'store'])->name('store');
+        Route::get('/{article}', [ArticleController::class, 'edit'])->name('edit');
+        Route::patch('/{article}', [ArticleController::class, 'update'])->name('update');
+        Route::post('/{article}/publish', [ArticleController::class, 'publish'])->name('publish');
+        Route::post('/{article}/unpublish', [ArticleController::class, 'unpublish'])->name('unpublish');
+        Route::post('/{article}/archive', [ArticleController::class, 'archive'])->name('archive');
     });
 });
