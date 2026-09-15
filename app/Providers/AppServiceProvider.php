@@ -5,6 +5,8 @@ namespace App\Providers;
 use App\Services\Audit\AuditEventRegistry;
 use App\Services\Audit\AuditScopeResolver;
 use App\Services\Audit\CorrelationContext;
+use App\Services\Content\ContentAuditEventRegistrar;
+use App\Services\Content\ContentScopeResolver;
 use App\Services\Rbac\OwnUserScopeResolver;
 use App\Services\Rbac\ScopeResolverRegistry;
 use Illuminate\Auth\Events\Registered;
@@ -31,11 +33,22 @@ class AppServiceProvider extends ServiceProvider
             // IMP-004: audit-read scoping — every current canonical audit
             // event is registry-classified at GLOBAL_PLATFORM scope.
             new AuditScopeResolver,
+            // IMP-005: CMS content scoping — organization-owned, single-org
+            // platform, scope_id always NULL.
+            new ContentScopeResolver,
         ]));
 
         // IMP-004: canonical audit event registry + correlation foundation,
         // request-scoped singletons (mirroring AssuranceService resolution).
-        $this->app->singleton(AuditEventRegistry::class);
+        // IMP-005: the 20 content.* events are registered here via the
+        // registry's own public register() method — AuditEventRegistry's
+        // own file (its registerCanonicalEvents()) is never touched.
+        $this->app->singleton(AuditEventRegistry::class, function () {
+            $registry = new AuditEventRegistry;
+            (new ContentAuditEventRegistrar)->register($registry);
+
+            return $registry;
+        });
         $this->app->singleton(CorrelationContext::class);
     }
 

@@ -39,6 +39,22 @@ class PermissionRegistry
 
     public const AUDIT_READ_FINANCIAL_REFERENCE = 'audit.read.financial_reference';
 
+    // IMP-005 CMS content permission family (docs/implementation/IMP-005-cms.md
+    // section 23 "Permissions (smallest coherent set)"). Included in the
+    // super_admin bulk grant below like every other non-audit permission —
+    // no bypass, no role-name check (section 22).
+    public const CONTENT_VIEW = 'content.view';
+
+    public const CONTENT_CREATE = 'content.create';
+
+    public const CONTENT_UPDATE = 'content.update';
+
+    public const CONTENT_PUBLISH = 'content.publish';
+
+    public const CONTENT_ARCHIVE = 'content.archive';
+
+    public const CONTENT_MEDIA_UPLOAD = 'content.media.upload';
+
     /**
      * @return array<string, array{description: string, module: string}>
      */
@@ -93,6 +109,30 @@ class PermissionRegistry
                     'financial references — grants NO financial-domain business authority, Payment/Ledger/'.
                     'Withdrawal/Refund/Reconciliation access, or scope bypass.',
                 'module' => 'audit',
+            ],
+            self::CONTENT_VIEW => [
+                'description' => 'Read/manage-list pages, articles, revisions, history, media (read/edit browse plane).',
+                'module' => 'content',
+            ],
+            self::CONTENT_CREATE => [
+                'description' => 'Create pages/articles (and their initial drafts).',
+                'module' => 'content',
+            ],
+            self::CONTENT_UPDATE => [
+                'description' => 'Edit drafts, replace a draft revision, slug/title changes on non-published content, media metadata.',
+                'module' => 'content',
+            ],
+            self::CONTENT_PUBLISH => [
+                'description' => 'Publish/unpublish/re-publish; schedule configuration/change/cancellation; homepage assignment.',
+                'module' => 'content',
+            ],
+            self::CONTENT_ARCHIVE => [
+                'description' => 'Archive a page/article (terminal lifecycle) and media logical archive; governed path/redirect release.',
+                'module' => 'content',
+            ],
+            self::CONTENT_MEDIA_UPLOAD => [
+                'description' => 'Upload intake of content media — the security-sensitive write, kept separate from content.update.',
+                'module' => 'content',
             ],
         ];
     }

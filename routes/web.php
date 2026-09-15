@@ -11,6 +11,10 @@ use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
+use App\Http\Controllers\Cms\ArticleController;
+use App\Http\Controllers\Cms\HomepageController;
+use App\Http\Controllers\Cms\MediaController;
+use App\Http\Controllers\Cms\PageController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -85,5 +89,48 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::delete('/account/mfa', [MfaController::class, 'disable'])->name('mfa.disable');
         Route::post('/account/mfa/reset', [MfaController::class, 'reset'])->name('mfa.reset');
         Route::post('/account/mfa/recovery-codes', [MfaController::class, 'regenerateRecoveryCodes'])->name('mfa.recovery-codes.regenerate');
+    });
+
+    // IMP-005 — CMS admin UI (section 24: CMS admin routes live under
+    // /admin/content/*). {page} is bound by ULID (CmsPage::getRouteKeyName()),
+    // never the internal BIGINT id.
+    Route::prefix('admin/content/pages')->name('cms.pages.')->group(function () {
+        Route::get('/', [PageController::class, 'index'])->name('index');
+        Route::get('/create', [PageController::class, 'create'])->name('create');
+        Route::post('/', [PageController::class, 'store'])->name('store');
+        Route::get('/{page}', [PageController::class, 'edit'])->name('edit');
+        Route::patch('/{page}', [PageController::class, 'update'])->name('update');
+        Route::post('/{page}/publish', [PageController::class, 'publish'])->name('publish');
+        Route::post('/{page}/unpublish', [PageController::class, 'unpublish'])->name('unpublish');
+        Route::post('/{page}/archive', [PageController::class, 'archive'])->name('archive');
+    });
+
+    // IMP-005 — Article admin UI (slice 22), mirroring the Page routes above.
+    // News is Article classification (Q33/HD-IMP005-05), not a separate route
+    // group.
+    Route::prefix('admin/content/articles')->name('cms.articles.')->group(function () {
+        Route::get('/', [ArticleController::class, 'index'])->name('index');
+        Route::get('/create', [ArticleController::class, 'create'])->name('create');
+        Route::post('/', [ArticleController::class, 'store'])->name('store');
+        Route::get('/{article}', [ArticleController::class, 'edit'])->name('edit');
+        Route::patch('/{article}', [ArticleController::class, 'update'])->name('update');
+        Route::post('/{article}/publish', [ArticleController::class, 'publish'])->name('publish');
+        Route::post('/{article}/unpublish', [ArticleController::class, 'unpublish'])->name('unpublish');
+        Route::post('/{article}/archive', [ArticleController::class, 'archive'])->name('archive');
+    });
+
+    // IMP-005 — Media library admin UI (slice 23).
+    Route::prefix('admin/content/media')->name('cms.media.')->group(function () {
+        Route::get('/', [MediaController::class, 'index'])->name('index');
+        Route::post('/', [MediaController::class, 'store'])->name('store');
+        Route::patch('/{asset}', [MediaController::class, 'update'])->name('update');
+        Route::post('/{asset}/archive', [MediaController::class, 'archive'])->name('archive');
+    });
+
+    // IMP-005 — homepage designation admin UI (slice 24). Singleton, no
+    // {page} in the URL — see HomepageController's own doc comment.
+    Route::prefix('admin/content/homepage')->name('cms.homepage.')->group(function () {
+        Route::get('/', [HomepageController::class, 'edit'])->name('edit');
+        Route::patch('/', [HomepageController::class, 'update'])->name('update');
     });
 });
