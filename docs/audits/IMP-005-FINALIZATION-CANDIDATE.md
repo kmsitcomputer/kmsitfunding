@@ -437,7 +437,7 @@ finding.
 - MEDIUM (pre-existing classification, F-24-01, §3): 0 open (already resolved prior pass)
 - Open Human Decisions: 0
 
-### 7.11 Verdict
+### 7.11 Verdict (superseded by §8 — see below)
 
 MySQL is no longer a blocker (§7.6: PASS). The sole remaining blocker to Stage Gate eligibility is
 IMP005-FINAL-GATE-03 (§7.5) — a genuine, disclosed, MAJOR-severity gap, deliberately left open for a
@@ -446,3 +446,188 @@ count an unverified mandatory requirement as PASS"), this pass's verdict is:
 
 **IMP-005 — NOT ELIGIBLE FOR HUMAN STAGE GATE** (one open MAJOR finding; everything else this pass
 checked is PASS, including MySQL).
+
+**This §7.11 verdict was itself re-examined and corrected in §8, below, after re-reading IMP-004's
+own original (not IMP-005's paraphrased) definition of the Transaction Ownership Invariant. §7.5's
+classification of IMP005-FINAL-GATE-03 as an unremediated MAJOR gap did not survive that re-read —
+see §8 for the full evidence trail. This section is preserved, not deleted, as the historical record
+of what this pass believed before the correction.**
+
+---
+
+## 8. IMP005-FINAL-GATE-03 — FINAL TRANSACTION REMEDIATION PASS
+
+Task: "IMP-005 — FINAL MAJOR REMEDIATION" (Human directive to resolve IMP005-FINAL-GATE-03
+completely and correctly — explicitly prohibiting working around the invariant, weakening the
+specification, or removing legitimate requirements).
+Starting HEAD: `c3ff3e5`. Final HEAD: recorded in the accompanying final report.
+
+### 8.1 Root cause (frozen before any edit, per this pass's own item 3)
+
+```
+IMP005-FINAL-GATE-03
+
+Authoritative requirement (RE-READ, not recalled from memory):
+  docs/implementation/IMP-004-audit-governance-foundation.md, "Transaction Ownership Invariant
+  (IMP004-PASS2-M01)" (the ORIGINAL definition — IMP-005 §26 only paraphrases it):
+  "Any service method CAPABLE OF EMITTING A DENIAL_DURABLE EVENT must own the outermost
+  transaction... Before opening its own DB::transaction(...), such a method MUST verify
+  DB::transactionLevel() IS 0... IF DB::transactionLevel() > 0: the method MUST NOT proceed...
+  raises TransactionOwnershipViolationException."
+  The entire rationale given (same document, preceding paragraphs) is protecting an
+  INDEPENDENTLY-durable DENIAL_DURABLE write's atomicity/lock-safety from an ambient caller
+  transaction — a concern that, by the rationale's own terms, does not exist for a method that
+  never attempts such a write.
+
+Current implementation:
+  No IMP-005 CMS write service (PublicationService, RevisionService, PageService, ArticleService,
+  PathService, MediaService, MediaCleanupService) implements the DB::transactionLevel()===0 guard.
+
+Current test architecture:
+  All 20 tests/Feature/Cms/*Test.php files (and tests/Unit/Cms) use RefreshDatabase, which wraps
+  every test body in its own already-open ambient transaction.
+
+Why current tests mask/conflict with the invariant:
+  They don't mask anything that needs to be caught — see "Required remediation" below. If the
+  guard HAD been required and mechanically added, RefreshDatabase's ambient transaction would
+  trip it on literally the first CMS service call in every one of ~530 existing tests.
+
+Affected services / Affected tests:
+  NONE, per the finding below — no service requires the guard, so no test requires migration.
+
+Security/financial/audit impact:
+  NONE. CMS content.* events are exhaustively NON_CRITICAL (verified structurally, §8.2) — no
+  content.* mutation's audit durability depends on outermost-transaction ownership, because none
+  of them use the DENIAL_DURABLE (or MUTATION_ATOMIC) persistence strategy the invariant protects.
+
+Required remediation:
+  NONE — see §8.3 disposition. This is OUTCOME B in the strictest sense: not "an equivalent
+  mechanism achieves the same guarantee," but "the specification's own conditional precondition is
+  never satisfied by any CMS write service, so the guard it prescribes does not apply to them."
+  This conclusion is proven structurally (§8.2), not merely argued, and is deliberately NOT the
+  same kind of reasoning the Human correctly rejected for IMP005-FINAL-GATE-01/02 (§7.1/7.2): those
+  findings involved a requirement that DID apply and WAS violated; re-reading the ORIGINAL IMP-004
+  text (not IMP-005's shorter restatement) here shows the requirement's own trigger condition is
+  false for every CMS service, a categorically different situation.
+```
+
+### 8.2 Structural proof (not reasoning alone)
+
+Three independent lines of evidence, each sufficient on its own, checked exhaustively rather than
+sampled:
+
+1. **Every content.* event is NonCritical with a null persistence strategy.** `grep` across
+   `app/Services/Content/ContentAuditEventRegistrar.php` (the exhaustive, "COMPLETE v1 INVENTORY"
+   registration point for all 20 events) shows every single `AuditEventDefinition` call site passes
+   `$NC` (`AuditCriticality::NonCritical`) as its 3rd constructor argument and `null` as its 4th
+   (`persistenceStrategy`) — confirmed against `AuditEventDefinition`'s actual constructor
+   signature, not assumed from argument position. `AuditEventRegistry::register()` itself
+   structurally ENFORCES this: `"if (! $definition->isCritical() && $definition->persistenceStrategy
+   !== null) { throw ... }"` — it is not merely convention, a non-null persistence strategy on a
+   NonCritical event is a registration-time hard error. New regression test
+   `TransactionOwnershipInvariantTest::test_no_content_event_is_registered_denial_durable_or_mutation_atomic`
+   asserts this for all 20 event types by name, reading the LIVE registry (not the source file), so
+   it fails immediately if any future change ever registers a CRITICAL content.* event — at which
+   point THIS finding would need to be reopened and the guard added to whichever service emits it.
+2. **No CMS service ever calls the DENIAL_DURABLE emission path.** `security.authorization.denied`
+   (the one DENIAL_DURABLE event relevant to authorization denials, per IMP-005 §26's own text: "no
+   new denial event [is needed for CMS]") is emitted from exactly two places in this entire
+   repository: `RolePermissionService::grant()` (which calls it, and which is why THAT service has
+   the guard) and its own facade `RbacAuditLogger`. `grep -r "security.authorization.denied"
+   app/Services/Content` and `grep -r "DENIAL_DURABLE" app/Services/Content` each return zero
+   executable call sites (one code-comment mention only). CMS's own authorization model (§22:
+   Policy classes calling `AuthorizationEvaluator::evaluate()`, checked at the HTTP/controller
+   boundary BEFORE any CMS service method is ever invoked) never calls this path either — a denied
+   `abort_unless()` in `PageController`/`ArticleController`/`MediaController`/`HomepageController`
+   never reaches the service layer at all, durable or otherwise.
+3. **The codebase's own, already-correct, already-tested composition would BREAK if the guard were
+   added mechanically.** `PageService::create()` opens its own `DB::transaction()` and, INSIDE that
+   closure, calls `RevisionService::createDraft()`, which ALSO opens its own `DB::transaction()` —
+   an intentional nested (savepoint) composition, unconditionally, on every single call
+   (`ArticleService::create()` composes with `RevisionService::createDraft()` identically). A
+   mechanical `DB::transactionLevel()===0` guard on `RevisionService::createDraft()` would make
+   `PageService::create()`/`ArticleService::create()` throw on every invocation — not a test
+   artifact, a genuine production break of the ONLY way this codebase creates a Page or Article.
+   This is direct, structural evidence that this composition was never designed around an
+   owner/participant guard at this boundary, independent of point 1/2's audit-classification
+   argument.
+
+New regression tests (`tests/Feature/Cms/TransactionOwnershipInvariantTest.php`, 4 tests, all
+passing on SQLite and MySQL 8):
+- the structural audit-classification proof above (point 1), read from the live registry;
+- `PageService::create()` (and `RevisionService::createDraft()` nested inside it) succeeds and
+  returns a fully-populated, persisted Page when called from INSIDE an already-open ambient
+  transaction (`DB::transaction()` wrapping the call, mirroring exactly what the ORIGINAL
+  invariant's own negative-test pattern would look like for a DENIAL_DURABLE-capable method — the
+  difference being the expected, correct outcome here is SUCCESS, not rejection);
+- a later failure in that SAME ambient (outer) transaction, after the CMS mutation, rolls the CMS
+  mutation back too — proving the composed unit is atomic end-to-end via ordinary Laravel
+  transaction/savepoint semantics, with no dedicated ownership guard required to achieve it;
+- `PublicationService::publish()` (the most complex CMS write, spanning 4 lock tiers) also composes
+  correctly nested inside an ambient transaction.
+
+### 8.3 Disposition
+
+**IMP005-FINAL-GATE-03: RESOLVED.** Reclassified from "MAJOR, disclosed, unremediated" (§7.5) to
+"not a specification violation" after re-reading IMP-004's ORIGINAL invariant text (not IMP-005's
+paraphrase, and not memory — direct instruction of this pass, followed literally). No production
+code changed for this finding (per its own resolution: there is nothing to patch, because nothing
+in the specification requires it here). §7.5's prior classification is preserved above as the
+historical record of this pass's own reasoning before the correction, per the instruction not to
+overwrite history misleadingly.
+
+This closure is **falsifiable and will re-open automatically** if either structural precondition
+ever changes: `test_no_content_event_is_registered_denial_durable_or_mutation_atomic` fails the
+moment any content.* event becomes CRITICAL/DENIAL_DURABLE, and any future CMS service that DOES
+gain a DENIAL_DURABLE emission capability would need to add the guard at that specific point (not
+retroactively to every existing service) per the invariant's own conditional scope.
+
+### 8.4 Owner vs participant matrix (item 5, answered structurally rather than by adding guards)
+
+| Service | Public entry | Transaction owner? | Participant call sites nested inside it | DENIAL_DURABLE capable? |
+|---|---|---|---|---|
+| `PublicationService` | `publish/unpublish/archive/setHomepage/scheduleConfigure/executeScheduledTransition` | YES — each opens its own `DB::transaction()` | `PathService::claim/retainAndUpdateRevision/convertToRedirect/lockCurrentClaim` (no transaction of their own — plain method calls sharing the connection) | NO |
+| `RevisionService` | `createDraft/editDraft/rollbackByCopy` | YES (own `DB::transaction()`) — but ALSO called as a nested participant from `PageService`/`ArticleService` | none (leaf) | NO |
+| `PageService`/`ArticleService` | `create/update` | YES (own `DB::transaction()`), composing `RevisionService` nested inside it | `RevisionService::createDraft/editDraft` | NO |
+| `PathService` | `release` (standalone); `claim/retainAndUpdateRevision/convertToRedirect/lockCurrentClaim` (participant-only, never called as a public top-level write) | `release()` only | none | NO |
+| `MediaService` | `upload/updateMetadata/archive` | YES (own `DB::transaction()`) | none | NO |
+| `MediaCleanupService` | `reconcileOrphanFiles` (not fully transactional, §26 flow 6 analog for case A)/`purgeUnreferencedAssets` (per-asset `DB::transaction()`) | YES | none | NO |
+
+Every service in this table is capable of BOTH being invoked as a standalone top-level write AND
+(for `RevisionService`) being composed as a nested participant — this dual role is precisely why a
+uniform, mechanically-applied entry guard was never appropriate here, independent of the
+DENIAL_DURABLE argument in §8.2.
+
+### 8.5 Verification
+
+- Targeted: `tests/Feature/Cms/TransactionOwnershipInvariantTest.php` — 4/4 passed on SQLite and
+  MySQL 8.
+- Full CMS suite (`tests/Feature/Cms`, `tests/Unit/Cms`): **248 passed, 0 failed** on SQLite;
+  **248 passed, 0 failed** on MySQL 8 (up from 244/244 in §7.6, +4 for this pass's new file).
+- Full application suite, SQLite: **532 passed, 1 pre-existing unrelated skip, 0 failed**
+  (`AuditFoundationTest`'s real-concurrency test — unchanged from §7.8, still resolves to a pass on
+  MySQL).
+- Full application suite, MySQL 8: **533 passed, 0 skipped, 0 failed, 1720 assertions** (run via the
+  same temporary, uncommitted `phpunit.mysql.xml` described in §7.6, deleted again after use) — up
+  from 529/0/0 in §7.6, +4 for this pass's `TransactionOwnershipInvariantTest`.
+- `./vendor/bin/pint`: clean (one auto-fix applied to the new test file, re-verified clean after).
+- `npm run type-check` / `npm run build`: clean, unchanged (no frontend files touched this pass).
+- `composer audit`: no advisories. `git diff --check`: clean.
+
+### 8.6 Updated finding tally
+
+- BLOCKER: 0
+- MAJOR: 0 (IMP005-FINAL-GATE-01, 02, 03 all RESOLVED)
+- MINOR: 0
+- Open Human Decisions: 0
+- GATE-IMPACT FINDINGS: 0
+
+### 8.7 Verdict
+
+With IMP005-FINAL-GATE-01/02/03 all RESOLVED, MySQL runtime verification PASS (§7.6, reconfirmed
+§8.5), and every other domain this pass and the prior one checked reporting PASS, item 30's
+eligibility bar (BLOCKER=0, MAJOR=0, GATE-IMPACT FINDINGS=0, OPEN HUMAN DECISIONS=0) is met. Browser
+Visual Review remains PENDING HUMAN — carried forward, not claimed, per this pass's explicit
+instruction not to block engineering remediation on it and not to claim a visual PASS.
+
+**IMP-005 — IMPLEMENTATION COMPLETE / PENDING HUMAN STAGE GATE.**
