@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Services\Audit\AuditEventRegistry;
 use App\Services\Audit\AuditScopeResolver;
 use App\Services\Audit\CorrelationContext;
+use App\Services\Content\ContentScopeResolver;
 use App\Services\Rbac\OwnUserScopeResolver;
 use App\Services\Rbac\ScopeResolverRegistry;
 use Illuminate\Auth\Events\Registered;
@@ -31,6 +32,9 @@ class AppServiceProvider extends ServiceProvider
             // IMP-004: audit-read scoping — every current canonical audit
             // event is registry-classified at GLOBAL_PLATFORM scope.
             new AuditScopeResolver,
+            // IMP-005: CMS content scoping — organization-owned, single-org
+            // platform, scope_id always NULL.
+            new ContentScopeResolver,
         ]));
 
         // IMP-004: canonical audit event registry + correlation foundation,
