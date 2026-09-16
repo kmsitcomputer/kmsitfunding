@@ -7,6 +7,8 @@ use App\Models\Cms\CmsPage;
 use App\Models\Theme\Theme;
 use App\Models\Theme\ThemeActivation;
 use App\Models\Theme\ThemeComponent;
+use App\Models\Theme\ThemeNavigationItem;
+use App\Models\Theme\ThemeNavigationMenu;
 use App\Models\Theme\ThemeTemplate;
 use App\Services\Content\MediaTokenResolver;
 use App\Services\Content\PublishedContent;
@@ -111,7 +113,7 @@ class PublicRenderer
 
         return [
             'template_slug' => $template?->slug,
-            'sections' => $template !== null ? $this->buildSections($template, $content) : [],
+            'sections' => $template !== null ? $this->buildSections($template, $content, $theme) : [],
             'branding' => $this->buildBranding($theme),
         ];
     }
@@ -119,7 +121,7 @@ class PublicRenderer
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function buildSections(ThemeTemplate $template, ?PublishedContent $content): array
+    private function buildSections(ThemeTemplate $template, ?PublishedContent $content, ?Theme $theme): array
     {
         $sections = [];
 
@@ -131,7 +133,7 @@ class PublicRenderer
             $components = [];
 
             foreach ($section->components as $component) {
-                $rendered = $this->renderComponent($component, $content);
+                $rendered = $this->renderComponent($component, $content, $theme);
 
                 if ($rendered !== null) {
                     $components[] = $rendered;
@@ -152,7 +154,7 @@ class PublicRenderer
      * @return array<string, mixed>|null null means "skip this component"
      *                                   (section 22 fallback).
      */
-    private function renderComponent(ThemeComponent $component, ?PublishedContent $content): ?array
+    private function renderComponent(ThemeComponent $component, ?PublishedContent $content, ?Theme $theme = null): ?array
     {
         $config = $component->config ?? [];
 
@@ -166,7 +168,7 @@ class PublicRenderer
                 'stats' => $config['items'] ?? [],
                 'banner' => $this->renderBanner($config),
                 'card_grid' => $this->renderCardGrid($config),
-                'navigation_menu_slot' => ['menu_code' => $config['menu_code'] ?? null],
+                'navigation_menu_slot' => $this->renderNavigationMenuSlot($config, $theme),
                 default => null,
             };
         } catch (\Throwable $e) {
@@ -292,6 +294,77 @@ class PublicRenderer
                 'url' => $url,
             ];
         }, $cards);
+    }
+
+    /**
+     * IMP-006's own doc comment on the original stub read: "menu items are
+     * resolved server-side per menu_code at a future slice; this slot is a
+     * placeholder position." Completes that already-designed, already
+     * schema-validated extension point — the closed component-type set,
+     * ComponentConfigValidator's schema, and the navigation_menu_slot
+     * config shape are unchanged; only the previously-stubbed rendering is
+     * filled in, using ThemeNavigationMenu/ThemeNavigationItem/
+     * NavigationDestinationResolver exactly as IMP-006 itself built them
+     * for this purpose (section 14). An item whose destination resolves to
+     * null is hidden, never a broken link (same rule
+     * NavigationDestinationResolver's own doc comment states). One level
+     * of nesting only, matching the locked schema.
+     *
+     * @return array{menu_code: ?string, items: array<int, array<string, mixed>>}
+     */
+    private function renderNavigationMenuSlot(array $config, ?Theme $theme): array
+    {
+        $menuCode = $config['menu_code'] ?? null;
+
+        if ($menuCode === null || $theme === null) {
+            return ['menu_code' => $menuCode, 'items' => []];
+        }
+
+        $menu = ThemeNavigationMenu::where('theme_id', $theme->id)
+            ->where('code', $menuCode)
+            ->first();
+
+        if ($menu === null) {
+            return ['menu_code' => $menuCode, 'items' => []];
+        }
+
+        $items = $menu->topLevelItems()
+            ->with('children')
+            ->get()
+            ->filter(fn ($item) => $item->visible)
+            ->map(fn ($item) => $this->renderNavigationItem($item))
+            ->filter(fn (?array $rendered) => $rendered !== null)
+            ->values()
+            ->all();
+
+        return ['menu_code' => $menuCode, 'items' => $items];
+    }
+
+    /**
+     * @return array{label: string, url: string, children: array<int, array<string, mixed>>}|null
+     */
+    private function renderNavigationItem(ThemeNavigationItem $item): ?array
+    {
+        $url = $this->destinationResolver->resolve([
+            'destination_type' => $item->destination_type,
+            'destination_route' => $item->destination_route,
+            'destination_content_kind' => $item->destination_content_kind,
+            'destination_content_ulid' => $item->destination_content_ulid,
+            'destination_external_url' => $item->destination_external_url,
+        ]);
+
+        if ($url === null) {
+            return null;
+        }
+
+        $children = $item->children
+            ->filter(fn ($child) => $child->visible)
+            ->map(fn ($child) => $this->renderNavigationItem($child))
+            ->filter(fn (?array $rendered) => $rendered !== null)
+            ->values()
+            ->all();
+
+        return ['label' => $item->label, 'url' => $url, 'children' => $children];
     }
 
     private function resolveMediaTokens(string $bodyHtml): string
