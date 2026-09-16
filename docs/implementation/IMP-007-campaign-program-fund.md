@@ -1348,9 +1348,29 @@ Required action: Disclosed here as a machine/environment-level finding for the H
                 information_schema behavior). No code change made. GATE-IMPACT: NONE, since it
                 affects zero IMP-007-scoped acceptance criteria or tests.
 
+ID              SPEC-007-AUDIT-10
+Severity:       MINOR (disclosed test-depth limitation, mirrors IMP-006 precedent)
+Evidence:       CampaignLifecycleServiceTest::test_concurrent_publish_attempts_yield_exactly_one_success
+                (AC-007-014) runs against real MySQL and proves the lockForUpdate() +
+                status-predicate-recheck guard rejects a stale second attempt, but does so via
+                two SEQUENTIAL calls within one PHP process/connection, not two genuinely
+                concurrent OS processes/connections racing each other (unlike
+                AuditFoundationTest's dedicated `proc_open`-based idempotency race test).
+Impact:         The guard logic itself (lock-then-recheck) is proven correct and is the same
+                idiom PublicationService/ThemeActivationService already rely on in production;
+                what is not separately re-proven here is genuine cross-connection lock
+                contention timing. This exact limitation was already disclosed and accepted as
+                non-gate-impacting for IMP-006's own ThemeActivationService (see
+                docs/audits/IMP-006-FINALIZATION.md MINOR finding #2) — the same disposition
+                applies here by the same reasoning.
+Required action: Disclosed here; not fixed in this pass. A future increment could add a
+                dedicated `proc_open`-based dual-process test mirroring
+                tests/Support/scripts/audit_idempotency_probe_race.php's pattern if stronger
+                evidence is later required.
+
 BLOCKER: 0
 MAJOR:   0
-MINOR:   4 (SPEC-007-AUDIT-06 patched, 07/08 disclosed-not-fixed, 09 environmental-disclosed)
+MINOR:   5 (SPEC-007-AUDIT-06 patched, 07/08/10 disclosed-not-fixed, 09 environmental-disclosed)
 EDITORIAL: 0
 OPEN HUMAN DECISIONS: 0
 GATE-IMPACT FINDINGS: 0
