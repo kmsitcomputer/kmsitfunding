@@ -6,11 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Models\Campaign\Campaign;
 use App\Models\Campaign\CampaignMediaAsset;
 use App\Models\Campaign\Fund;
+use App\Models\Campaign\Program;
 use App\Models\Rbac\Principal;
 use App\Policies\CampaignPolicy;
 use App\Services\Campaign\CampaignEligibilityResolver;
 use App\Services\Campaign\CampaignLifecycleService;
 use App\Services\Campaign\CampaignMediaService;
+use App\Services\Campaign\CampaignMediaTokenResolver;
 use App\Services\Campaign\CampaignService;
 use App\Services\Campaign\Exceptions\CampaignMediaValidationException;
 use App\Services\Campaign\Exceptions\CampaignTransitionConflictException;
@@ -47,7 +49,7 @@ class CampaignController extends Controller
         abort_unless($policy->create($actor), 403);
 
         return Inertia::render('Campaign/Campaigns/Create', [
-            'funds' => Fund::query()->where('status', 'ACTIVE')->get(),
+            'programs' => Program::query()->where('status', 'PUBLISHED')->get(['ulid', 'name']),
         ]);
     }
 
@@ -78,7 +80,7 @@ class CampaignController extends Controller
         return redirect()->route('campaign.campaigns.show', $campaign)->with('status', 'campaign-created');
     }
 
-    public function show(Request $request, CampaignPolicy $policy, Campaign $campaign, CampaignEligibilityResolver $eligibility): Response
+    public function show(Request $request, CampaignPolicy $policy, Campaign $campaign, CampaignEligibilityResolver $eligibility, CampaignMediaTokenResolver $tokenResolver): Response
     {
         $actor = $this->resolveActingPrincipal($request);
         abort_unless($policy->viewCampaign($actor, $campaign), 403);
@@ -86,7 +88,11 @@ class CampaignController extends Controller
         return Inertia::render('Campaign/Campaigns/Show', [
             'campaign' => $campaign,
             'is_donation_eligible' => $eligibility->isDonationEligible($campaign),
-            'mediaAssets' => $campaign->mediaAssets()->where('status', 'ACTIVE')->get(),
+            'mediaAssets' => $campaign->mediaAssets()->where('status', 'ACTIVE')->get()->map(fn ($asset) => [
+                'ulid' => $asset->ulid,
+                'original_filename' => $asset->original_filename,
+                'url' => $tokenResolver->resolveUrl($asset->ulid),
+            ]),
             'funds' => Fund::query()->where('status', 'ACTIVE')->get(['ulid', 'name']),
             'currentFund' => $campaign->fund()->first(['ulid', 'name']),
         ]);

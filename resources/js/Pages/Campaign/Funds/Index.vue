@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { useForm } from '@inertiajs/vue3';
+import { Link, useForm } from '@inertiajs/vue3';
+import AdminLayout from '../../../Components/Admin/AdminLayout.vue';
+import Breadcrumb from '../../../Components/UI/Breadcrumb.vue';
+import Button from '../../../Components/UI/Button.vue';
+import Card from '../../../Components/UI/Card.vue';
+import EmptyState from '../../../Components/UI/EmptyState.vue';
+import PageHeader from '../../../Components/UI/PageHeader.vue';
+import StatusBadge from '../../../Components/UI/StatusBadge.vue';
 
 interface FundRow {
     ulid: string;
     name: string;
     code: string;
     status: string;
+    restriction_note: string | null;
 }
 
 interface Paginated<T> {
@@ -13,12 +21,6 @@ interface Paginated<T> {
 }
 
 defineProps<{ funds: Paginated<FundRow> }>();
-
-const createForm = useForm({ name: '', code: '', restriction_note: '' });
-
-const submit = () => {
-    createForm.post('/admin/campaign/funds', { onSuccess: () => createForm.reset() });
-};
 
 const archive = (ulid: string) => {
     if (confirm('Archive this fund?')) {
@@ -28,54 +30,43 @@ const archive = (ulid: string) => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-neutral-50 px-4 py-8">
-        <div class="mx-auto max-w-3xl space-y-8">
-            <h1 class="text-xl font-semibold text-neutral-800">Funds</h1>
+    <AdminLayout>
+        <template #breadcrumb>
+            <Breadcrumb :items="[{ label: 'Funds' }]" />
+        </template>
+        <template #header>
+            <PageHeader title="Funds" description="Designation/restriction contexts a Campaign can be attached to.">
+                <template #actions>
+                    <Button as="a" href="/admin/campaign/funds/create">Create fund</Button>
+                </template>
+            </PageHeader>
+        </template>
 
-            <form class="space-y-4 rounded border bg-white p-4" @submit.prevent="submit">
-                <h2 class="text-sm font-semibold text-neutral-600">New Fund</h2>
-                <div>
-                    <label class="block text-sm text-neutral-600">Name</label>
-                    <input v-model="createForm.name" type="text" class="mt-1 w-full rounded border px-3 py-2" required />
-                    <p v-if="createForm.errors.name" class="mt-1 text-sm text-red-600">{{ createForm.errors.name }}</p>
-                </div>
-                <div>
-                    <label class="block text-sm text-neutral-600">Code</label>
-                    <input v-model="createForm.code" type="text" class="mt-1 w-full rounded border px-3 py-2" required />
-                    <p v-if="createForm.errors.code" class="mt-1 text-sm text-red-600">{{ createForm.errors.code }}</p>
-                </div>
-                <div>
-                    <label class="block text-sm text-neutral-600">Restriction note</label>
-                    <textarea v-model="createForm.restriction_note" class="mt-1 w-full rounded border px-3 py-2"></textarea>
-                </div>
-                <button type="submit" class="rounded bg-neutral-800 px-3 py-2 text-sm text-white" :disabled="createForm.processing">
-                    Create
-                </button>
-            </form>
+        <Card :padded="false">
+            <EmptyState v-if="funds.data.length === 0" icon="wallet" title="No funds yet" description="Create a fund before publishing a campaign against it.">
+                <template #action>
+                    <Button as="a" href="/admin/campaign/funds/create">Create fund</Button>
+                </template>
+            </EmptyState>
 
-            <table class="w-full rounded border bg-white text-sm">
-                <thead>
-                    <tr class="border-b text-left text-neutral-500">
-                        <th class="px-3 py-2">Name</th>
-                        <th class="px-3 py-2">Code</th>
-                        <th class="px-3 py-2">Status</th>
-                        <th class="px-3 py-2"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="fund in funds.data" :key="fund.ulid" class="border-b last:border-0">
-                        <td class="px-3 py-2 text-neutral-800">{{ fund.name }}</td>
-                        <td class="px-3 py-2 text-neutral-600">{{ fund.code }}</td>
-                        <td class="px-3 py-2 text-neutral-600">{{ fund.status }}</td>
-                        <td class="px-3 py-2 text-right">
-                            <button v-if="fund.status === 'ACTIVE'" class="text-sm text-red-600 underline" @click="archive(fund.ulid)">Archive</button>
-                        </td>
-                    </tr>
-                    <tr v-if="funds.data.length === 0">
-                        <td class="px-3 py-6 text-center text-neutral-500" colspan="4">No funds yet.</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+            <ul v-else class="divide-y divide-slate-100">
+                <li v-for="fund in funds.data" :key="fund.ulid" class="flex items-center justify-between gap-4 px-5 py-4">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                            <p class="truncate text-sm font-medium text-slate-800">{{ fund.name }}</p>
+                            <span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-500">{{ fund.code }}</span>
+                        </div>
+                        <p v-if="fund.restriction_note" class="mt-0.5 truncate text-sm text-slate-500">{{ fund.restriction_note }}</p>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-3">
+                        <StatusBadge :status="fund.status" />
+                        <Link :href="`/admin/campaign/funds/${fund.ulid}`" class="text-sm font-medium text-emerald-700 hover:text-emerald-800">Edit</Link>
+                        <button v-if="fund.status === 'ACTIVE'" type="button" class="text-sm font-medium text-slate-400 hover:text-red-600" @click="archive(fund.ulid)">
+                            Archive
+                        </button>
+                    </div>
+                </li>
+            </ul>
+        </Card>
+    </AdminLayout>
 </template>

@@ -10,6 +10,7 @@ use App\Policies\ProgramPolicy;
 use App\Services\Campaign\Exceptions\CampaignMediaValidationException;
 use App\Services\Campaign\Exceptions\CampaignValidationException;
 use App\Services\Campaign\ProgramMediaService;
+use App\Services\Campaign\ProgramMediaTokenResolver;
 use App\Services\Campaign\ProgramService;
 use App\Services\Rbac\PrincipalService;
 use Illuminate\Http\RedirectResponse;
@@ -65,7 +66,7 @@ class ProgramController extends Controller
         return redirect()->route('campaign.programs.show', $program)->with('status', 'program-created');
     }
 
-    public function show(Request $request, ProgramPolicy $policy, Program $program): Response
+    public function show(Request $request, ProgramPolicy $policy, Program $program, ProgramMediaTokenResolver $tokenResolver): Response
     {
         $actor = $this->resolveActingPrincipal($request);
         abort_unless($policy->viewProgram($actor, $program), 403);
@@ -73,7 +74,11 @@ class ProgramController extends Controller
         return Inertia::render('Campaign/Programs/Show', [
             'program' => $program,
             'campaigns' => $program->campaigns()->latest('updated_at')->get(),
-            'mediaAssets' => $program->mediaAssets()->where('status', 'ACTIVE')->get(),
+            'mediaAssets' => $program->mediaAssets()->where('status', 'ACTIVE')->get()->map(fn ($asset) => [
+                'ulid' => $asset->ulid,
+                'original_filename' => $asset->original_filename,
+                'url' => $tokenResolver->resolveUrl($asset->ulid),
+            ]),
         ]);
     }
 

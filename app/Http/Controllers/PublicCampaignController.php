@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Campaign\Campaign;
 use App\Services\Campaign\CampaignEligibilityResolver;
+use App\Services\Campaign\CampaignMediaTokenResolver;
 use App\Services\Theme\PublicRenderer;
 use App\Support\Money\Money;
 use Illuminate\Http\Request;
@@ -19,12 +20,13 @@ use Inertia\Inertia;
  */
 class PublicCampaignController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request, CampaignEligibilityResolver $eligibility, CampaignMediaTokenResolver $tokenResolver)
     {
         $campaigns = Campaign::query()
             ->where('status', 'PUBLISHED')
+            ->with('program:id,name')
             ->orderByDesc('published_at')
-            ->paginate(20);
+            ->paginate(12);
 
         // through() maps each row to a safe field allow-list before
         // serialization — the internal BIGINT id never reaches this public
@@ -34,6 +36,10 @@ class PublicCampaignController extends Controller
             'slug' => $campaign->slug,
             'name' => $campaign->name,
             'summary' => $campaign->summary,
+            'program_name' => $campaign->program?->name,
+            'formatted_target_amount' => $this->formattedTargetAmount($campaign),
+            'is_donation_eligible' => $eligibility->isDonationEligible($campaign),
+            'cover_image_url' => $this->coverImageUrl($campaign, $tokenResolver),
         ]);
 
         return Inertia::render('Public/CampaignIndex', [
@@ -41,7 +47,7 @@ class PublicCampaignController extends Controller
         ]);
     }
 
-    public function show(Request $request, Campaign $campaign, PublicRenderer $renderer, CampaignEligibilityResolver $eligibility)
+    public function show(Request $request, Campaign $campaign, PublicRenderer $renderer, CampaignEligibilityResolver $eligibility, CampaignMediaTokenResolver $tokenResolver)
     {
         abort_unless($campaign->status === 'PUBLISHED', 404);
 
@@ -60,11 +66,20 @@ class PublicCampaignController extends Controller
                 'purpose' => $campaign->purpose,
                 'starts_at' => $campaign->starts_at,
                 'ends_at' => $campaign->ends_at,
+                'program_name' => $campaign->program?->name,
+                'cover_image_url' => $this->coverImageUrl($campaign, $tokenResolver),
             ],
             'is_donation_eligible' => $eligibility->isDonationEligible($campaign),
             'formatted_target_amount' => $this->formattedTargetAmount($campaign),
             'branding' => $this->brandingPayload($theme),
         ]);
+    }
+
+    private function coverImageUrl(Campaign $campaign, CampaignMediaTokenResolver $tokenResolver): ?string
+    {
+        $asset = $campaign->mediaAssets()->where('status', 'ACTIVE')->oldest('id')->first();
+
+        return $asset !== null ? $tokenResolver->resolveUrl($asset->ulid) : null;
     }
 
     private function formattedTargetAmount(Campaign $campaign): ?string

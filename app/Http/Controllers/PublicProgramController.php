@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Campaign\Program;
+use App\Services\Campaign\ProgramMediaTokenResolver;
 use App\Services\Theme\PublicRenderer;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -17,11 +18,12 @@ use Inertia\Inertia;
  */
 class PublicProgramController extends Controller
 {
-    public function show(Request $request, Program $program, PublicRenderer $renderer)
+    public function show(Request $request, Program $program, PublicRenderer $renderer, ProgramMediaTokenResolver $tokenResolver)
     {
         abort_unless($program->status === 'PUBLISHED', 404);
 
         $theme = $renderer->activeTheme();
+        $coverAsset = $program->mediaAssets()->where('status', 'ACTIVE')->oldest('id')->first();
 
         return Inertia::render('Public/ProgramShow', [
             // Explicit field allow-list, not the raw model — the internal
@@ -32,6 +34,7 @@ class PublicProgramController extends Controller
                 'slug' => $program->slug,
                 'summary' => $program->summary,
                 'description_html' => $program->description_html,
+                'cover_image_url' => $coverAsset !== null ? $tokenResolver->resolveUrl($coverAsset->ulid) : null,
             ],
             'branding' => $this->brandingPayload($theme),
         ]);

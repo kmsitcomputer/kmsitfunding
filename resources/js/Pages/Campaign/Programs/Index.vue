@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { Link, useForm } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
+import AdminLayout from '../../../Components/Admin/AdminLayout.vue';
+import Breadcrumb from '../../../Components/UI/Breadcrumb.vue';
+import Button from '../../../Components/UI/Button.vue';
+import Card from '../../../Components/UI/Card.vue';
+import EmptyState from '../../../Components/UI/EmptyState.vue';
+import PageHeader from '../../../Components/UI/PageHeader.vue';
+import StatusBadge from '../../../Components/UI/StatusBadge.vue';
 
 interface ProgramRow {
     ulid: string;
@@ -14,54 +21,40 @@ interface Paginated<T> {
 }
 
 defineProps<{ programs: Paginated<ProgramRow> }>();
-
-const createForm = useForm({ name: '', slug: '', summary: '' });
-
-const submit = () => {
-    createForm.post('/admin/campaign/programs', { onSuccess: () => createForm.reset() });
-};
 </script>
 
 <template>
-    <div class="min-h-screen bg-neutral-50 px-4 py-8">
-        <div class="mx-auto max-w-3xl space-y-8">
-            <h1 class="text-xl font-semibold text-neutral-800">Programs</h1>
+    <AdminLayout>
+        <template #breadcrumb>
+            <Breadcrumb :items="[{ label: 'Programs' }]" />
+        </template>
+        <template #header>
+            <PageHeader title="Programs" description="Higher-level organizational context a Campaign may belong to.">
+                <template #actions>
+                    <Button as="a" href="/admin/campaign/programs/create">Create program</Button>
+                </template>
+            </PageHeader>
+        </template>
 
-            <form class="space-y-4 rounded border bg-white p-4" @submit.prevent="submit">
-                <h2 class="text-sm font-semibold text-neutral-600">New Program</h2>
-                <div>
-                    <label class="block text-sm text-neutral-600">Name</label>
-                    <input v-model="createForm.name" type="text" class="mt-1 w-full rounded border px-3 py-2" required />
-                    <p v-if="createForm.errors.name" class="mt-1 text-sm text-red-600">{{ createForm.errors.name }}</p>
-                </div>
-                <button type="submit" class="rounded bg-neutral-800 px-3 py-2 text-sm text-white" :disabled="createForm.processing">
-                    Create
-                </button>
-            </form>
+        <Card :padded="false">
+            <EmptyState v-if="programs.data.length === 0" icon="megaphone" title="No programs yet" description="Programs group related campaigns under one initiative.">
+                <template #action>
+                    <Button as="a" href="/admin/campaign/programs/create">Create program</Button>
+                </template>
+            </EmptyState>
 
-            <table class="w-full rounded border bg-white text-sm">
-                <thead>
-                    <tr class="border-b text-left text-neutral-500">
-                        <th class="px-3 py-2">Name</th>
-                        <th class="px-3 py-2">Status</th>
-                        <th class="px-3 py-2">Updated</th>
-                        <th class="px-3 py-2"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="program in programs.data" :key="program.ulid" class="border-b last:border-0">
-                        <td class="px-3 py-2 text-neutral-800">{{ program.name }}</td>
-                        <td class="px-3 py-2 text-neutral-600">{{ program.status }}</td>
-                        <td class="px-3 py-2 text-neutral-600">{{ program.updated_at }}</td>
-                        <td class="px-3 py-2 text-right">
-                            <Link :href="`/admin/campaign/programs/${program.ulid}`" class="text-neutral-800 underline">Manage</Link>
-                        </td>
-                    </tr>
-                    <tr v-if="programs.data.length === 0">
-                        <td class="px-3 py-6 text-center text-neutral-500" colspan="4">No programs yet.</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+            <ul v-else class="divide-y divide-slate-100">
+                <li v-for="program in programs.data" :key="program.ulid" class="flex items-center justify-between gap-4 px-5 py-4">
+                    <div class="min-w-0">
+                        <p class="truncate text-sm font-medium text-slate-800">{{ program.name }}</p>
+                        <p class="mt-0.5 text-xs text-slate-500">Updated {{ program.updated_at }}</p>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-3">
+                        <StatusBadge :status="program.status" />
+                        <Link :href="`/admin/campaign/programs/${program.ulid}`" class="text-sm font-medium text-emerald-700 hover:text-emerald-800">Manage</Link>
+                    </div>
+                </li>
+            </ul>
+        </Card>
+    </AdminLayout>
 </template>

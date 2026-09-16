@@ -59,6 +59,14 @@ class FundController extends Controller
         return redirect()->route('campaign.funds.index')->with('status', 'fund-created')->with('fund_ulid', $fund->ulid);
     }
 
+    public function edit(Request $request, FundPolicy $policy, Fund $fund): Response
+    {
+        $actor = $this->resolveActingPrincipal($request);
+        abort_unless($policy->update($actor, $fund), 403);
+
+        return Inertia::render('Campaign/Funds/Edit', ['fund' => $fund]);
+    }
+
     public function update(Request $request, FundPolicy $policy, Fund $fund, FundService $service): RedirectResponse
     {
         $actor = $this->resolveActingPrincipal($request);
@@ -71,7 +79,7 @@ class FundController extends Controller
 
         $service->update($fund, $validated, $actor);
 
-        return redirect()->route('campaign.funds.index')->with('status', 'fund-updated');
+        return redirect()->route('campaign.funds.edit', $fund)->with('status', 'fund-updated');
     }
 
     public function archive(Request $request, FundPolicy $policy, Fund $fund, FundService $service): RedirectResponse

@@ -188,6 +188,7 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::get('/', [FundController::class, 'index'])->name('index');
         Route::get('/create', [FundController::class, 'create'])->name('create');
         Route::post('/', [FundController::class, 'store'])->name('store');
+        Route::get('/{fund}', [FundController::class, 'edit'])->name('edit');
         Route::patch('/{fund}', [FundController::class, 'update'])->name('update');
         Route::post('/{fund}/archive', [FundController::class, 'archive'])->name('archive');
     });
