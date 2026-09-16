@@ -1,7 +1,8 @@
 # IMP-007 — Campaign + Program + Fund
 
 ```
-Status:                 SPECIFICATION IN PROGRESS
+Status:                 SPECIFICATION PASS (patched per HD-IMP007-01..04; self-audited, Round 1
+                         and Round 2, 0 BLOCKER / 0 MAJOR / 0 OPEN HUMAN DECISIONS)
 Authority:               Human Decision — "HUMAN DECISION — IMP-007" (external approved business
                          baseline), applied against existing repository architecture (IMP-001..006,
                          all FINAL/LOCKED).
@@ -21,6 +22,44 @@ This override applies to IMP-007 ONLY and does not alter
 there as `IMP-007/008/013/018/019/020/023 -> Kimi K2.7 Code`). The standing document is left
 unmodified, mirroring the IMP-006 precedent of recording a stage-specific override in the spec's
 own ownership section rather than editing the governance matrix.
+
+## Human Decisions Applied (HD-IMP007-01 .. HD-IMP007-04)
+
+Recorded here as this specification's own evidence, mirroring the IMP-005 precedent (Human
+Decisions were first recorded in `IMP-005-cms.md`'s own specification text, and only later
+transcribed into `docs/01-requirements/HUMAN-DECISION-REGISTER.md` under a separate, explicit
+Human authorization for that transcription specifically). No edit is made to
+`HUMAN-DECISION-REGISTER.md` by this patch — that register's own Change Control section requires
+its own distinct authorization, not yet given for IMP-007.
+
+```
+HD-IMP007-01  CAMPAIGN APPROVAL / PUBLICATION — Option B selected. APPROVED is a distinct
+              persisted lifecycle state (DRAFT -> REVIEW -> APPROVED -> PUBLISHED -> CLOSED).
+              CAMPAIGN_APPROVE (REVIEW -> APPROVED) and CAMPAIGN_PUBLISH (APPROVED -> PUBLISHED)
+              are independently enforceable permissions and independent service transitions.
+              Distinct audit events per transition. No automatic expiry/unapproval of APPROVED
+              Campaigns. IMP-008 must treat only PUBLISHED Campaigns satisfying the canonical
+              eligibility contract (HD-IMP007-03) as donation-eligible.
+HD-IMP007-02  MONEY REPRESENTATION — Option C selected. A canonical Money value object is
+              established from IMP-007 onward. Persisted representation: amount_minor (integer
+              minor-unit) + currency (ISO 4217 code). Floating-point is never the authoritative
+              monetary representation. Minor-unit digit count per currency is centralized, not
+              assumed to be 2 for every currency. IMP-007 implements only the minimum Money
+              foundation needed for Campaign.target_amount_minor — no Donation/Payment/Ledger/
+              Financial Consequence Posting logic is implemented here.
+HD-IMP007-03  CAMPAIGN PERIOD / ELIGIBILITY — Option B selected. Campaign donation-availability
+              requires BOTH status = PUBLISHED AND satisfaction of starts_at/ends_at period
+              constraints, evaluated through one canonical, reusable eligibility contract (not
+              duplicated per-caller). No automatic status mutation occurs from time passing alone
+              (no scheduler introduced in IMP-007). Administrative status (PUBLISHED) and
+              effective donation-availability are distinguishable concepts.
+HD-IMP007-04  DEFAULT BUSINESS DATA — Option A selected (confirmed, unchanged from the
+              specification's original assumption). No default Program/Campaign/Fund is seeded.
+              No implicit "General Fund" or equivalent placeholder is created. IMP-006's
+              ThemeSystemDefaultSeeder is a technical rendering-fallback precedent only, not a
+              precedent for seeding business-domain records. Every Fund reference must be
+              explicit; no code may depend on a hard-coded seeded Fund name or id.
+```
 
 ---
 
@@ -48,8 +87,13 @@ prior IMP-007 Stage-Gate discovery report).
 
 ```
 Establish Program, Campaign, Fund as first-class, ULID-identified, audited domain entities.
-Establish a Campaign lifecycle (DRAFT -> REVIEW -> PUBLISHED -> CLOSED) with a rejection path
-  back to DRAFT, enforced authoritatively at the backend.
+Establish a Campaign lifecycle (DRAFT -> REVIEW -> APPROVED -> PUBLISHED -> CLOSED, per
+  HD-IMP007-01) with a rejection path back to DRAFT, enforced authoritatively at the backend.
+Establish a canonical Money value object (integer minor-unit + currency code, per HD-IMP007-02)
+  as the first monetary representation convention in this codebase.
+Establish one canonical, reusable Campaign donation-eligibility contract (per HD-IMP007-03) that
+  distinguishes administrative status from effective donation-availability, for IMP-008 to
+  consume later without re-deriving the formula.
 Establish Program <-> Campaign (one-to-many, optional) and Campaign <-> Fund (many-to-one,
   mandatory before publish) relationships with data-integrity guarantees.
 Reuse IMP-003 RBAC (permissions, policies, PrincipalService) — no second authorization system.
@@ -101,8 +145,9 @@ Campaign:        identity, title/name, description/story/content, fundraising pu
 Fund:            designation/restriction context for money; conceptually separate from
                  Donation/Payment/Payment Attempt/Gateway Transaction/Settlement/Refund/
                  Disbursement; a Campaign needs an unambiguous Fund before accepting Donations.
-Lifecycle:       DRAFT -> REVIEW -> PUBLISHED -> CLOSED, with a non-public/rejected path back to
-                 DRAFT during approval.
+Lifecycle:       DRAFT -> REVIEW -> APPROVED -> PUBLISHED -> CLOSED (HD-IMP007-01), with a
+                 non-public/rejected path back to DRAFT during REVIEW. Approve and publish are
+                 independent transitions gated by independent permissions.
 Authorization:   reuse IMP-003; SUPER_ADMIN full management; ADMIN scope/permissions derived
                  from existing permission architecture, not invented; DONOR/public users get
                  read-only access to published information only; backend policy is authoritative,
@@ -209,10 +254,11 @@ Models/migrations conventions:
     codebase; IMP-007 controllers do the same.
 
 Money/currency:
-  NOTHING like a Money value object, decimal-currency column, or integer-cents convention exists
-  anywhere in the repository today. IMP-007's `target_amount` establishes the FIRST money
-  representation in this codebase — see section 8, documented explicitly as a new convention,
-  not inferred from non-existent precedent.
+  NOTHING like a Money value object, decimal-currency column, or integer-cents convention existed
+  anywhere in the repository prior to this specification. Per HD-IMP007-02, IMP-007 establishes
+  the FIRST money representation in this codebase: a canonical `Money` value object over an
+  integer minor-unit amount + ISO 4217 currency code, with per-currency minor-unit digit counts
+  centralized in one registry rather than assumed — see section 8a.
 
 Test infrastructure:
   tests/Support/TruncatesInMemorySqlite.php and the temporary, uncommitted phpunit.mysql.xml
@@ -228,11 +274,19 @@ app/Models/Campaign/
     Concerns/GeneratesUlid.php            (own copy — module-boundary discipline, per IMP-006's
                                             own precedent of NOT importing another domain's trait)
     ProgramMediaAsset.php, CampaignMediaAsset.php
+app/Support/Money/
+    Money.php                             (immutable VO — amount_minor + currency; HD-IMP007-02)
+    CurrencyMinorUnits.php                (centralized per-currency minor-unit digit registry)
+    Exceptions/UnknownCurrencyException.php
 app/Services/Campaign/
     ProgramService.php, CampaignService.php, FundService.php
-    CampaignLifecycleService.php          (submit/approve/reject/publish/close — kept SEPARATE
+    CampaignLifecycleService.php          (submit/approve/reject/publish/close — five distinct
+                                            transition methods per HD-IMP007-01, kept SEPARATE
                                             from CampaignService's plain field CRUD, mirroring
                                             IMP-005's PageService/PublicationService split)
+    CampaignEligibilityResolver.php       (the canonical donation-eligibility contract,
+                                            HD-IMP007-03 — status + period evaluation, consumed
+                                            later by IMP-008 without re-deriving the formula)
     ProgramScopeResolver.php, CampaignScopeResolver.php, FundScopeResolver.php
                                             (ORGANIZATION-only, mirroring ContentScopeResolver)
     CampaignAuditEventRegistrar.php / CampaignAuditLogger.php
@@ -251,8 +305,9 @@ app/Http/Controllers/
     PublicProgramController.php, PublicCampaignController.php            (public)
 resources/js/Pages/Campaign/       (admin UI, mirrors Theme/Cms admin page shape)
 resources/js/Pages/Public/ProgramShow.vue, CampaignShow.vue, CampaignIndex.vue
+config/money.php                   (per-currency minor-unit registry data — HD-IMP007-02)
 database/migrations/0001_07_01_NNNNNN_create_*_table.php
-database/seeders/ (no new seeded business data — see section 26, no system-default Campaign)
+database/seeders/ (NONE add business data — HD-IMP007-04, no system-default Campaign/Fund)
 ```
 
 Dependency map:
@@ -264,6 +319,8 @@ IMP-007
 ├── authorization:        PermissionRegistry, AuthorizesUsingRbac, ScopeResolver, ScopeType (IMP-003)
 ├── services:              new, module-scoped; no reuse of ContentResolverService/MediaService
 │                          internals (only the PATTERN is mirrored, per the locked-file boundary)
+├── money:                new, IMP-007-owned foundation (app/Support/Money) — no existing
+│                          precedent reused, since none existed (HD-IMP007-02)
 ├── frontend:              new Vue pages; reads Theme::branding (IMP-006) read-only
 ├── audit:                AuditEventRegistry, AuditWriter, AuditEventDefinition (IMP-004)
 └── tests:                TruncatesInMemorySqlite (test infra, additive change — see section 27)
@@ -292,13 +349,18 @@ Campaign
   name (string 150), slug (string 150, unique)
   summary (string 500, nullable), description_html (text, nullable, sanitized)
   purpose (string 500, nullable — "fundraising purpose", distinct free-text field per Human §5)
-  target_amount (decimal(15,2), unsigned, nullable — "where applicable")
+  target_amount_minor (bigint, unsigned, nullable — integer minor-unit amount; "where applicable";
+    see section 8a — HD-IMP007-02, no decimal/float column)
   currency (char 3, default from config('campaign.default_currency'), ISO-4217 — see section 8a)
-  starts_at / ends_at (datetime, nullable — "campaign period where applicable")
-  status (string 16: DRAFT|REVIEW|PUBLISHED|CLOSED)
+  starts_at / ends_at (datetime, nullable — "campaign period where applicable"; see section 8b for
+    the eligibility contract these two columns feed, per HD-IMP007-03)
+  status (string 16: DRAFT|REVIEW|APPROVED|PUBLISHED|CLOSED — HD-IMP007-01 adds APPROVED)
   edit_version (unsigned int, default 0)
   submitted_at / approved_at / published_at / closed_at (datetime, nullable — audit-adjacent
-    timestamps, mirrors CMS's own published_at-style bookkeeping)
+    timestamps, mirrors CMS's own published_at-style bookkeeping; approved_at now marks entry to
+    APPROVED and published_at separately marks entry to PUBLISHED — these were already modeled as
+    distinct columns even before HD-IMP007-01, so no schema addition was needed to support the
+    now-independent transitions, only a semantic clarification of when each is set)
   created_by_principal_id / updated_by_principal_id (FK principals, restrict, NOT nullable)
   submitted_by_principal_id / approved_by_principal_id / published_by_principal_id /
     closed_by_principal_id (FK principals, restrict, nullable — populated only once that
@@ -323,19 +385,74 @@ ProgramMediaAsset / CampaignMediaAsset  (mirrors ThemeAsset's shape exactly, sco
   timestamps
 ```
 
-### 8a. Money representation (new convention — flagged explicitly)
+### 8a. Money representation (HD-IMP007-02 — canonical Money value object)
 
-No money/currency convention exists anywhere in this repository (confirmed by exhaustive grep).
-IMP-007 establishes the first one: `decimal(15,2) unsigned` for `target_amount`, plus a
-`currency char(3)` column (ISO-4217 code, e.g. `IDR`), defaulted from a new `config/campaign.php`
-`default_currency` key (not hardcoded). `target_amount`/`currency` are explicitly **non-authoritative
-display/goal figures**, not ledger entries — consistent with Human Decision §6 ("Fund... NOT an
-authoritative mutable balance") and MODULE-OWNERSHIP.md §3 ("Campaign progress is not an accounting
-balance"). No currency-conversion logic is implemented; multi-currency handling beyond storing a
-code is out of scope (Master Requirements lists "Multi-Currency" as a distinct future domain, not
-an IMP-007 obligation). **This decimal(15,2)+currency-code convention is proposed here for Human
-review since no precedent existed to derive it from — flagged in Open Questions (section 30), not
-silently assumed as pre-approved.**
+Per HD-IMP007-02, no money/currency convention existed anywhere in this repository, and IMP-007
+now establishes the canonical one: `app/Support/Money/Money.php`, an immutable value object
+constructed as `Money::ofMinorUnits(int $amountMinor, string $currency): self`, exposing
+`amountMinor(): int`, `currency(): string`, and `format(): string` (a display-only formatted
+string — e.g. `"Rp 10.000"` — computed by dividing `amountMinor` by `10 ** minorUnitDigits`, never
+exposing a float as the authoritative value). Two Money instances are equal iff both `amountMinor`
+and `currency` are equal; no arithmetic operations (`add`/`subtract`/`multiply`) are implemented in
+IMP-007 — the minimum foundation needed for `Campaign.target_amount_minor` display and storage,
+per HD-IMP007-02's explicit "minimum canonical Money foundation" instruction. No arithmetic means
+no rounding-mode decision is needed yet; that remains a later stage's (IMP-009/010/011) concern
+once real computation over Money values is required.
+
+`app/Support/Money/CurrencyMinorUnits.php` centralizes the per-currency minor-unit digit count in
+one place (`config/money.php`, an array of `ISO4217_CODE => digits`, sourced from the published
+ISO 4217 standard minor-unit table — not invented business data), with a
+`digitsFor(string $currency): int` lookup that throws `UnknownCurrencyException` for any currency
+code not present in the registry, rather than silently defaulting to 2 digits (HD-IMP007-02:
+"Do NOT assume every currency has exactly two decimal/minor-unit digits"). `config/money.php` is
+seeded with entries for the currencies actually referenced elsewhere in this project's
+documentation (at minimum `IDR`, `USD`) plus any other currency an implementer adds explicitly —
+the registry is deliberately NOT exhaustive of all ~180 ISO 4217 currencies at v1 to avoid
+importing unverified digit-count data wholesale; it is designed to be extended additively.
+
+`campaigns.target_amount_minor` (bigint unsigned, nullable) + `campaigns.currency` (char 3,
+defaulted from `config('campaign.default_currency')`) are the persisted columns (section 8).
+These remain explicitly **non-authoritative display/goal figures**, not ledger entries —
+consistent with Human Decision §6 ("Fund... NOT an authoritative mutable balance") and
+MODULE-OWNERSHIP.md §3 ("Campaign progress is not an accounting balance"). No currency-conversion
+logic is implemented; multi-currency handling beyond storing a code and its registered minor-unit
+count is out of scope (Master Requirements lists "Multi-Currency" as a distinct future domain).
+IMP-007 does NOT implement Donation, Payment, Ledger, or Financial Consequence Posting logic —
+this section establishes only the representation contract those later stages will consume
+(HD-IMP007-02).
+
+### 8b. Campaign donation-eligibility contract (HD-IMP007-03)
+
+`app/Services/Campaign/CampaignEligibilityResolver.php` — the ONE canonical, reusable contract
+answering "is this Campaign currently donation-eligible", so IMP-008 never re-derives this formula
+independently. Public method: `isDonationEligible(Campaign $campaign, ?DateTimeInterface $at =
+null): bool` (defaults `$at` to `now()`).
+
+```
+isDonationEligible(campaign, at) :=
+    campaign.status === PUBLISHED
+    AND (campaign.starts_at IS NULL OR at >= campaign.starts_at)   -- inclusive lower bound
+    AND (campaign.ends_at   IS NULL OR at <= campaign.ends_at)     -- inclusive upper bound
+```
+
+Null semantics (explicit, per HD-IMP007-03's instruction to define exact null/boundary
+semantics): a null `starts_at` means no lower bound (eligible immediately upon PUBLISHED); a null
+`ends_at` means no upper bound (eligible indefinitely once started); both null means eligible for
+the entire time the Campaign remains PUBLISHED. Boundary semantics: both comparisons are
+inclusive (`at == starts_at` and `at == ends_at` are both within the eligible window) — chosen for
+simplicity and symmetry; there is no authoritative source requiring exclusive bounds.
+
+This resolver does **not** mutate `status` — "no automatic status mutation is required merely
+because time passes" (HD-IMP007-03) is satisfied structurally: the resolver is a pure read/query
+function, never a writer. Administrative status (what an admin/actor set via
+`CampaignLifecycleService`) and effective donation-availability (what
+`CampaignEligibilityResolver` computes at query time) are therefore fully distinguishable: a
+Campaign can be persisted as `PUBLISHED` while `isDonationEligible()` returns `false` (before
+`starts_at`, or after `ends_at`). No scheduler is introduced to reconcile the two (HD-IMP007-03
+explicitly forbids one in IMP-007). `PublicCampaignController`/`ProgramShow.vue`-equivalent pages
+use this resolver's result only to decide DISPLAY (e.g. "opens on {date}" / "campaign has ended"
+messaging) — it does NOT gate whether the page itself is publicly reachable (that remains
+status-based, section 14).
 
 ## 9. Data Ownership
 
@@ -360,12 +477,14 @@ Branding read: IMP-007 reads Theme::branding (public Eloquent relation) and
 
 ```
 Admin creates Program (optional) -> Admin creates Campaign (optionally attached to Program) ->
-Admin assigns/creates Fund -> Campaign authored in DRAFT -> submitted for REVIEW ->
-approved (-> PUBLISHED) or rejected (-> back to DRAFT, with reason recorded in audit metadata) ->
-published Campaign is publicly visible at /campaigns/{slug} -> Campaign closed when the
-fundraising period ends (manually, by an authorized actor — no automatic time-based closure in
-v1, since Human Decision did not request a scheduler and IMP-006's precedent for scheduled
-transitions is CMS-specific machinery not requested here).
+Admin assigns/creates Fund -> Campaign authored in DRAFT -> submitted for REVIEW -> approved
+(-> APPROVED, via CAMPAIGN_APPROVE) or rejected (-> back to DRAFT, with reason recorded in audit
+metadata) -> published (APPROVED -> PUBLISHED, via CAMPAIGN_PUBLISH, requiring a valid ACTIVE
+fund_id; see HD-IMP007-01) -> published Campaign is publicly visible at /campaigns/{slug}
+regardless of its period, though its donation-eligibility (section 8b) may independently be
+false before starts_at or after ends_at -> Campaign closed when the fundraising period ends
+(manually, by an authorized actor — no automatic time-based closure in v1; HD-IMP007-03
+explicitly forbids introducing a scheduler for this in IMP-007).
 ```
 
 ## 11. State / Lifecycle
@@ -375,26 +494,25 @@ Program:   DRAFT --publish--> PUBLISHED --archive--> ARCHIVED
            DRAFT --archive--> ARCHIVED   (a Program can be archived without ever publishing)
            PUBLISHED --unpublish--> DRAFT  (mirrors CMS's publish/unpublish symmetry)
 
-Campaign:  DRAFT --submit--> REVIEW
-           REVIEW --reject--> DRAFT           (rejection reason recorded, no new persisted state)
-           REVIEW --approve--> PUBLISHED      ("approve" and "publish" are COMBINED into one
-                                                transition per Human §9's own listing order
-                                                CREATE/EDIT -> SUBMIT -> APPROVE -> PUBLISH -> CLOSE,
-                                                but Human §7's lifecycle diagram shows only
-                                                REVIEW/APPROVAL -> PUBLISHED as one arrow — see
-                                                section 30 Open Question OQ-007-01 resolving this
-                                                as: APPROVE and PUBLISH are distinct PERMISSIONS
-                                                (so a future role split remains possible) but a
-                                                SINGLE service transition in v1, since Human's own
-                                                lifecycle diagram has no separate "APPROVED"
-                                                persisted state between REVIEW and PUBLISHED)
-           PUBLISHED --close--> CLOSED        (terminal — no reopen path in v1, section 4 Non-Goals)
-           PUBLISHED --update--> PUBLISHED    (content edits, via CAMPAIGN_UPDATE, do not force
-                                                a state change; see section 12 for what triggers
-                                                re-review, if anything — v1 answer: nothing does,
-                                                content edits stay CAMPAIGN_UPDATE-gated + audited,
-                                                no forced re-approval loop, matching CMS's own
-                                                "edit-while-published" precedent)
+Campaign:  DRAFT --submit (CAMPAIGN_SUBMIT)--> REVIEW
+           REVIEW --reject (CAMPAIGN_APPROVE)--> DRAFT
+                          (rejection reason recorded in audit metadata, no new persisted state)
+           REVIEW --approve (CAMPAIGN_APPROVE)--> APPROVED
+                          (HD-IMP007-01: a distinct persisted state, independent of publish; does
+                          NOT require a valid Fund — content/story approval is separable from
+                          go-live readiness)
+           APPROVED --publish (CAMPAIGN_PUBLISH)--> PUBLISHED
+                          (requires a valid, ACTIVE fund_id — BR-1; independently permissioned
+                          from approve — an actor holding only CAMPAIGN_APPROVE cannot perform
+                          this transition, and vice versa)
+           PUBLISHED --close (CAMPAIGN_CLOSE)--> CLOSED
+                          (terminal — no reopen path in v1, section 4 Non-Goals)
+           DRAFT/REVIEW/APPROVED/PUBLISHED --update (CAMPAIGN_UPDATE)--> (same status)
+                          (content edits do not force a state change at any pre-CLOSED status;
+                          editing an APPROVED Campaign does NOT automatically revert it to REVIEW
+                          or DRAFT — HD-IMP007-01 explicitly forbids inventing an automatic
+                          expiry/unapproval policy; matching CMS's own "edit-while-published"
+                          precedent, extended here to "edit-while-approved" by the same logic)
 
 Fund:      ACTIVE --archive--> ARCHIVED
            ARCHIVED cannot be assigned to a new Campaign (validated at assignment time); an
@@ -415,10 +533,15 @@ BR-3  A Campaign's program_id is optional at every status. Detaching a Campaign 
       (setting program_id to null) is allowed via CAMPAIGN_UPDATE; deleting a Program while any
       Campaign still references it is rejected at the DATABASE level (RESTRICT), not only by
       application pre-check (mirrors IMP-006's ThemeSchemaConstraintsTest discipline).
-BR-4  Only DRAFT campaigns may be edited freely without any lifecycle permission beyond
-      CAMPAIGN_UPDATE. REVIEW-state campaigns may still be edited by CAMPAIGN_UPDATE holders
-      (typos etc.) but this does NOT reset the review — a reviewer-approver evaluates the
-      content as it stands at approval time (locked-row read at that moment).
+BR-4  DRAFT, REVIEW, and APPROVED campaigns may all be edited via CAMPAIGN_UPDATE alone (no
+      further lifecycle permission required). Editing a REVIEW or APPROVED campaign does NOT
+      reset it to an earlier state and does NOT require re-approval — a reviewer/approver
+      evaluates the content as it stands at the moment they act (locked-row read at that moment);
+      an APPROVED campaign edited after approval stays APPROVED until an actor with
+      CAMPAIGN_PUBLISH explicitly publishes it or an actor with CAMPAIGN_APPROVE explicitly
+      rejects it back to DRAFT (rejection is only reachable from REVIEW in v1 — there is no
+      "un-approve" transition from APPROVED, since HD-IMP007-01 forbids inventing an automatic
+      unapproval policy and no manual one was requested either).
 CLOSED campaigns reject ALL field mutation (CAMPAIGN_UPDATE included) — CLOSED is
       content-frozen, historical record only. Enforced in the service layer AND as a
       resourceStatePredicate in CampaignPolicy::update() (defense-in-depth, mirrors
@@ -434,6 +557,17 @@ BR-6  Program/Campaign/Fund slugs are NOT frozen at any lifecycle status in v1 (
 BR-7  Two simultaneous "publish" or "approve" requests for the same Campaign must not both
       succeed — enforced by `lockForUpdate()` + a status-predicate re-check inside the
       transaction (identical shape to PublicationService).
+BR-8  Public page visibility (can this Campaign's page be reached at all) and donation
+      eligibility (can it currently receive a donation) are two distinct concepts and must never
+      be conflated (HD-IMP007-03). Visibility is governed by `status = PUBLISHED` alone (section
+      14/21). Eligibility is governed exclusively by `CampaignEligibilityResolver` (section 8b).
+      No code path may re-implement the eligibility date-window formula independently — every
+      caller (including the future IMP-008) must call the resolver.
+BR-9  All Campaign monetary values are stored and manipulated exclusively via the `Money` value
+      object over an integer minor-unit amount (HD-IMP007-02). No float/double arithmetic is
+      performed on `target_amount_minor` at any layer (validation, service, or presentation) —
+      display formatting divides by the currency's registered minor-unit factor only at the
+      final render step, never earlier, and never for storage or comparison.
 ```
 
 ## 13. Validation Rules
@@ -445,8 +579,15 @@ Program.description_html: nullable, string, max 200KB (mirrors ContentSanitizer'
                           sanitized before persistence (own sanitizer instance, same allow-list
                           approach as ContentSanitizer — no shared class dependency on IMP-005)
 Campaign.name/slug:       same shape as Program
-Campaign.target_amount:   nullable, numeric, min 0, max 999999999999.99 (decimal(15,2) ceiling)
-Campaign.currency:        nullable (defaults from config), exactly 3 uppercase letters
+Campaign.target_amount_minor: nullable, integer, min 0, max PHP_INT_MAX-safe bigint ceiling
+                          (no float accepted at the request-validation layer — a decimal-looking
+                          input such as "10.50" is rejected, not silently truncated; the admin UI
+                          collects a major-unit amount + currency and converts to minor units
+                          server-side via `CurrencyMinorUnits::digitsFor()`, never client-side)
+Campaign.currency:        nullable (defaults from config), exactly 3 uppercase letters, AND must
+                          exist in the `CurrencyMinorUnits` registry (config/money.php) — an
+                          unregistered currency code is rejected at validation time, never
+                          silently assumed to have 2 minor-unit digits (HD-IMP007-02)
 Campaign.starts_at/ends_at: nullable date; if both present, ends_at must be >= starts_at
 Campaign.fund_id:         must reference an existing Fund; must be ACTIVE at time of PUBLISH
                           transition (checked at transition time, not merely at save time — a
@@ -474,21 +615,20 @@ module 'campaign':  CAMPAIGN_VIEW, CAMPAIGN_CREATE, CAMPAIGN_UPDATE, CAMPAIGN_SU
 module 'fund':      FUND_VIEW, FUND_CREATE, FUND_UPDATE, FUND_ARCHIVE
 ```
 
-`CAMPAIGN_APPROVE` and `CAMPAIGN_PUBLISH` are kept as two distinct permissions even though v1's
-`CampaignLifecycleService` exposes one combined `approveAndPublish()` transition (section 11) —
-so that a future stage can split them into two real steps by adding a persisted `APPROVED` state
-without a further permission-schema change. This is forward-compatible plumbing, not speculative
-business logic: both permissions are checked by the one v1 transition (a caller needs both), which
-is a stricter (not weaker) authorization posture than a single permission would be.
+Per HD-IMP007-01, `CAMPAIGN_APPROVE` and `CAMPAIGN_PUBLISH` gate two genuinely independent
+`CampaignLifecycleService` transitions (`approve()`: REVIEW -> APPROVED, and `publish()`: APPROVED
+-> PUBLISHED) — an actor holding only one of the two permissions can perform only that one
+transition; neither permission implies or grants the other. This is a real separation-of-duties
+control, not merely forward-compatible plumbing.
 
 `ProgramPolicy`, `CampaignPolicy`, `FundPolicy` mirror `ContentPagePolicy`/`ThemePolicy` exactly:
 every method calls `authorizeRbac()` with `scopeResolver: new {Program|Campaign|Fund}ScopeResolver`,
 `requestedScopeType: ScopeType::Organization`, `requestedScopeId: null` (see section 6 for why
 Organization, not the locked Campaign/Program/Fund ScopeType values, is used in v1).
 `CampaignPolicy::update()` carries a `resourceStatePredicate` rejecting CLOSED (BR-4).
-`CampaignPolicy::publish()` (mapping to the combined approve+publish transition) carries a
-predicate requiring current status REVIEW. `CampaignPolicy::submit()` requires DRAFT.
-`CampaignPolicy::close()` requires PUBLISHED.
+`CampaignPolicy::submit()` requires DRAFT. `CampaignPolicy::approve()` (gated by CAMPAIGN_APPROVE)
+requires REVIEW. `CampaignPolicy::publish()` (gated by CAMPAIGN_PUBLISH, a distinct method from
+`approve()`) requires APPROVED. `CampaignPolicy::close()` requires PUBLISHED.
 
 Only `super_admin` exists as a Role today (section 6) — in practice, for v1, one Role holds every
 new permission (RbacRoleSeeder's existing "grant all non-audit permissions" bulk loop already
@@ -500,12 +640,14 @@ holds-many-Permissions) already supports narrowing this later purely through dat
 permission from a future non-super_admin Role), no code change needed.
 
 Public/donor access: `PublicProgramController`/`PublicCampaignController` require no
-authentication and query only `status = 'PUBLISHED'` (Program) / `'PUBLISHED'`+`(now BETWEEN
-starts_at/ends_at OR both null)` semantics are NOT enforced at the query level for Campaign (a
-PUBLISHED campaign outside its stated period is still shown — period is descriptive text on the
-page, not a visibility gate, since Human §7 ties visibility only to status, not date range; a
-date-based auto-hide is not requested and would be inventing a rule) — reviewed again in Open
-Questions if this reading is wrong.
+authentication and query only `status = 'PUBLISHED'` for visibility (section 8b/BR-8: visibility
+is status-only, by design). Separately, per HD-IMP007-03, `PublicCampaignController` also calls
+`CampaignEligibilityResolver::isDonationEligible()` and passes its boolean result (plus the raw
+`starts_at`/`ends_at`) to the Vue page as display data — the page can then show "opens on
+{date}"/"campaign has ended" messaging for a PUBLISHED-but-not-currently-eligible Campaign,
+without ever hiding the page itself. `public.campaigns.index` filters to `status = 'PUBLISHED'`
+only (not eligibility) — a full, still-visible list of published campaigns, consistent with
+"administrative status and effective ... availability must be distinguishable" (HD-IMP007-03).
 
 ## 15. Scope Enforcement
 
@@ -538,10 +680,13 @@ CSRF: standard Laravel/Inertia CSRF token handling, no exception.
 Race conditions: lockForUpdate() + status-predicate re-check inside DB::transaction() on every
   lifecycle transition (BR-7); edit_version optimistic-concurrency guard on plain field updates
   (mirrors PageService::update()'s expected_edit_version).
-Duplicate submission: submit()/close()/the combined approve+publish transition all re-verify
-  current status under lock before mutating — a second concurrent identical request finds the
-  status already changed and is rejected with a typed conflict exception, not a silent no-op or
-  a double-audit-event.
+Duplicate submission: submit()/approve()/publish()/close() each re-verify current status under
+  lock before mutating — a second concurrent identical request finds the status already changed
+  and is rejected with a typed conflict exception, not a silent no-op or a double-audit-event.
+Monetary integrity: `target_amount_minor` is an integer column manipulated exclusively through
+  the `Money` value object (BR-9) — no floating-point representation exists at any layer, closing
+  off an entire class of rounding/precision-drift defects before any real financial computation
+  (IMP-008+) is built on top of it.
 Audit-log bypass: every mutating service method calls the audit logger inside the same
   transaction as the business write (mirrors IMP-004/005/006 "append-inside" discipline) — no
   code path can mutate Program/Campaign/Fund state without also writing an audit event.
@@ -560,9 +705,10 @@ all theme.* events in one registrar despite spanning 8 sub-areas):
 ```
 program.created, program.updated, program.published, program.unpublished, program.archived,
   program.media.uploaded, program.media.archived
-campaign.created, campaign.updated, campaign.submitted, campaign.rejected,
-  campaign.approved_published (single event for the combined v1 transition — see section 11),
-  campaign.closed, campaign.fund_assigned, campaign.media.uploaded, campaign.media.archived
+campaign.created, campaign.updated, campaign.submitted, campaign.rejected, campaign.approved,
+  campaign.published (HD-IMP007-01: two distinct events, one per independent transition — see
+  section 11), campaign.closed, campaign.fund_assigned, campaign.media.uploaded,
+  campaign.media.archived
 fund.created, fund.updated, fund.archived
 ```
 
@@ -586,7 +732,15 @@ Foreign keys: campaigns.program_id -> programs.id (RESTRICT), campaigns.fund_id 
 Unique constraints: programs.slug, programs.ulid, campaigns.slug, campaigns.ulid, funds.code,
   funds.ulid, and the two media tables' ulid columns.
 Indexes: campaigns(status), campaigns(program_id), campaigns(fund_id) — supporting admin list
-  filtering and the FK lookups; no other index proposed without a demonstrated query need.
+  filtering and the FK lookups; campaigns(status, starts_at, ends_at) additionally supports the
+  eligibility-window read pattern (section 8b) without a full table scan; no other index proposed
+  without a demonstrated query need.
+Money columns: campaigns.target_amount_minor is `bigint unsigned nullable` (not decimal — see
+  section 8a, HD-IMP007-02); campaigns.currency is `char(3) nullable`. Neither column has a
+  database-level CHECK against the `config/money.php` registry — currency validity against the
+  registry is an application-layer validation concern (section 13), matching how every other
+  closed-set string column in this codebase (e.g. `status`) is validated at the application layer,
+  not via a DB-level enum/check constraint.
 Nullable rules: see section 8 field list — every nullable column is nullable because the
   business rule genuinely allows absence (optional Program attachment, Fund only mandatory at
   PUBLISH, optional target/period), never nullable "just in case".
@@ -600,7 +754,8 @@ No data lifecycle/retention job is introduced (no purge, no scheduled deletion) 
 
 ## 19. Backend Impact
 
-New models, services, policies, controllers, migrations, seeders — none — per section 7. No change
+New models, services, policies, controllers, migrations, seeders — none — per section 7, plus the
+new `app/Support/Money` foundation (section 8a) and `config/money.php` (HD-IMP007-02). No change
 to `AppServiceProvider`'s existing IMP-005/006 registrations beyond ADDING the three new
 `ScopeResolverRegistry` entries and the one new `AuditEventRegistrar` registration call — additive
 lines only, same pattern as the IMP-006 additions to that file.
@@ -618,6 +773,13 @@ Public: resources/js/Pages/Public/ProgramShow.vue, CampaignShow.vue, CampaignInd
   Layout/component exists to import, per this repository's own standing convention).
 No rich-text editor library is introduced (mirrors IMP-005's own deferral — plain textarea for
   description_html, matching CMS's own "editor library itself OUT of scope/undecided" precedent).
+Money display: every Vue page receives an already-formatted display string computed server-side
+  via `Money::format()` (section 8a) — the frontend never performs minor-unit-to-major-unit
+  arithmetic itself, so currency/rounding logic is never duplicated or drifted between backend
+  and frontend.
+Eligibility display: `PublicCampaignController` passes `is_donation_eligible` (boolean) plus the
+  raw `starts_at`/`ends_at` to `CampaignShow.vue`, which renders "opens on"/"ended on" messaging
+  when `false` — computed via `CampaignEligibilityResolver` (section 8b), never re-derived in Vue.
 ```
 
 ## 21. API / Route Impact
@@ -629,7 +791,9 @@ Admin (auth + identity.active, prefix /admin/campaign):
   GET/POST   /admin/campaign/funds[/create|/{fund}]           campaign.funds.*
   POST       /admin/campaign/funds/{fund}/archive
   GET/POST   /admin/campaign/campaigns[/create|/{campaign}]   campaign.campaigns.*
-  POST       /admin/campaign/campaigns/{campaign}/submit|approve-publish|reject|close
+  POST       /admin/campaign/campaigns/{campaign}/submit|approve|publish|reject|close
+                                          (approve and publish are separate endpoints/permissions
+                                          per HD-IMP007-01 — no combined "approve-publish" action)
   POST       /admin/campaign/campaigns/{campaign}/media       (upload)
   POST       /admin/campaign/{program|campaign}/{id}/media/{asset}/archive
 
@@ -668,10 +832,12 @@ admin-driven mutation rate, no public write path in v1).
 Media upload is NOT idempotent by design (mirrors `MediaService`: duplicate uploads are detected
 via SHA-256 and surfaced to the caller as a `findActiveDuplicate()`-style hint, never silently
 deduped, never silently rejected). Lifecycle transitions are idempotent-by-rejection: a repeated
-`submit`/`approve-publish`/`close` call against an already-transitioned Campaign is rejected with
-a typed conflict exception (current status no longer matches the required predicate) rather than
-silently re-applying — this is the same "deterministic, not silently repeatable" behavior
-Phase 7's test-strategy instruction requires.
+`submit`/`approve`/`publish`/`close` call against an already-transitioned Campaign is rejected
+with a typed conflict exception (current status no longer matches the required predicate) rather
+than silently re-applying — this is the same "deterministic, not silently repeatable" behavior
+Phase 7's test-strategy instruction requires. `CampaignEligibilityResolver::isDonationEligible()`
+is a pure function with no side effects — calling it any number of times never mutates state,
+trivially idempotent.
 
 ## 25. Compatibility with IMP-001..006
 
@@ -696,10 +862,12 @@ LOCKED-CONTRACT IMPACT against IMP-006 — not exercised here.
 
 Standard additive Laravel migrations, each with a symmetric `down()`. No existing migration is
 edited (mirrors this repository's "Migration Immutability" branching policy, section on
-migrations reaching shared history). No seeder inserts default business data (no
-"system-default Campaign", unlike IMP-006's System Default Theme, since there is no analogous
-"must always have at least one" requirement here — an empty Program/Campaign/Fund set is a valid,
-normal starting state). Rollback of the whole IMP-007 migration set (`migrate:rollback` to the
+migrations reaching shared history). Per HD-IMP007-04 (confirmed, Option A), no seeder inserts
+default business data — no "system-default Campaign", no implicit "General Fund" or equivalent
+placeholder, unlike IMP-006's System Default Theme, since there is no analogous "must always have
+at least one" technical-rendering requirement here — an empty Program/Campaign/Fund set is a
+valid, normal starting state, and every Fund reference in later code must be explicit (never a
+hard-coded seeded name/id). Rollback of the whole IMP-007 migration set (`migrate:rollback` to the
 pre-IMP-007 point) is safe and non-destructive to any IMP-001..006 data, since no existing table
 is touched.
 
@@ -709,18 +877,31 @@ is touched.
 Unit:        ComponentConfigValidator-equivalent is not needed (no closed-schema JSON config in
              this domain); CampaignMediaValidator-equivalent adversarial tests (SVG rejection,
              oversized rejection, PHP-disguised-as-image rejection) mirroring
-             ThemeAssetServiceTest exactly.
+             ThemeAssetServiceTest exactly. MoneyTest (construction, equality, format() output for
+             at least one 2-digit currency and one registered non-2-digit currency if present in
+             config/money.php, rejection of an unregistered currency via
+             UnknownCurrencyException, confirmation no float ever appears in amountMinor()'s
+             return type). CampaignEligibilityResolverTest (HD-IMP007-03 — both starts_at/ends_at
+             null; only starts_at set, before/at/after boundary; only ends_at set, before/at/after
+             boundary; both set, before window/at lower boundary/inside/at upper boundary/after
+             window; non-PUBLISHED status always false regardless of dates).
 Feature:     ProgramServiceTest, CampaignServiceTest, FundServiceTest (CRUD + validation),
-             CampaignLifecycleServiceTest (every valid transition + every invalid transition
-             rejected + the stale-status/duplicate-transition race test using the corrupt-then-
-             assert-rejected pattern proven in ThemeActivationServiceTest), ProgramPolicyTest/
+             CampaignLifecycleServiceTest (every valid transition — submit, approve, publish,
+             reject, close — as independent methods per HD-IMP007-01; every invalid transition
+             rejected, including APPROVED -> PUBLISHED without a valid Fund and REVIEW ->
+             PUBLISHED skipping APPROVED; an actor holding only CAMPAIGN_APPROVE cannot call
+             publish() and vice versa; the stale-status/duplicate-transition race test using the
+             corrupt-then-assert-rejected pattern proven in ThemeActivationServiceTest, exercised
+             against both approve() and publish() independently), ProgramPolicyTest/
              CampaignPolicyTest/FundPolicyTest (mirrors ThemeAuthorizationTest exactly, including
              the AUTHORIZED/UNAUTHORIZED-ROLE/OUT-OF-SCOPE/UNAUTHENTICATED matrix required by
              Phase 7), PublicProgramControllerTest/PublicCampaignControllerTest (published-only
-             visibility, DRAFT/REVIEW/CLOSED never publicly reachable, slug-based routing,
-             branding tokens present in the Inertia payload).
-Negative:    invalid transition attempts (e.g. DRAFT -> PUBLISHED skipping REVIEW; CLOSED ->
-             anything) rejected with the typed conflict exception, not a 500.
+             visibility, DRAFT/REVIEW/APPROVED/CLOSED never publicly reachable, slug-based
+             routing, branding tokens present in the Inertia payload, is_donation_eligible
+             correctly reflects the eligibility resolver for a published-but-not-yet-open and a
+             published-but-ended Campaign, both of which remain reachable/200 per HD-IMP007-03).
+Negative:    invalid transition attempts (e.g. DRAFT -> PUBLISHED or REVIEW -> PUBLISHED skipping
+             APPROVED; CLOSED -> anything) rejected with the typed conflict exception, not a 500.
 Database:    a CampaignSchemaConstraintsTest mirroring ThemeSchemaConstraintsTest exactly — raw
              inserts/deletes proving RESTRICT on program_id/fund_id and slug/code uniqueness are
              real database invariants, not just application pre-checks.
@@ -758,16 +939,21 @@ Then the Campaign transitions to REVIEW, submitted_at and submitted_by_principal
 
 AC-007-004
 Given a Campaign in REVIEW status
-When an actor holding both CAMPAIGN_APPROVE and CAMPAIGN_PUBLISH approves-and-publishes it AND
-  it has a valid, ACTIVE fund_id
-Then the Campaign transitions to PUBLISHED, published_at/approved_at/*_by_principal_id are set,
-  and a campaign.approved_published audit event is recorded.
+When an actor holding CAMPAIGN_APPROVE approves it
+Then the Campaign transitions to APPROVED, approved_at/approved_by_principal_id are set, and a
+  campaign.approved audit event is recorded (no fund_id check at this step — HD-IMP007-01).
+
+AC-007-004B
+Given a Campaign in APPROVED status with a valid, ACTIVE fund_id
+When an actor holding CAMPAIGN_PUBLISH publishes it
+Then the Campaign transitions to PUBLISHED, published_at/published_by_principal_id are set, and a
+  campaign.published audit event is recorded.
 
 AC-007-005
-Given a Campaign in REVIEW status with no fund_id (or an ARCHIVED fund_id)
-When an actor attempts to approve-and-publish it
-Then the transition is rejected with a typed validation exception and the Campaign remains in
-  REVIEW.
+Given a Campaign in APPROVED status with no fund_id (or an ARCHIVED fund_id)
+When an actor attempts to publish it
+Then the transition is rejected with a typed validation exception and the Campaign remains
+  APPROVED.
 
 AC-007-006
 Given a Campaign in REVIEW status
@@ -776,9 +962,9 @@ Then the Campaign transitions back to DRAFT, and a campaign.rejected audit event
   with the reason in its metadata.
 
 AC-007-007
-Given a Campaign in DRAFT, REVIEW, or CLOSED status
+Given a Campaign in DRAFT, REVIEW, APPROVED, or CLOSED status
 When any actor attempts an invalid transition for that status (e.g. DRAFT -> PUBLISHED directly,
-  or any transition FROM CLOSED)
+  REVIEW -> PUBLISHED skipping APPROVED, or any transition FROM CLOSED)
 Then the transition is rejected with a typed conflict exception and no state change occurs.
 
 AC-007-008
@@ -800,13 +986,15 @@ Then the deletion is rejected at the database level (RESTRICT).
 
 AC-007-011
 Given an unauthenticated visitor
-When they request GET /campaigns/{slug} for a PUBLISHED Campaign
-Then the page renders successfully with the Campaign's public fields and the active Theme's
-  branding tokens, and internal BIGINT ids never appear in the response payload.
+When they request GET /campaigns/{slug} for a PUBLISHED Campaign (regardless of whether it is
+  currently within its starts_at/ends_at window — HD-IMP007-03)
+Then the page renders successfully with the Campaign's public fields, its
+  is_donation_eligible flag, and the active Theme's branding tokens, and internal BIGINT ids
+  never appear in the response payload.
 
 AC-007-012
 Given an unauthenticated visitor
-When they request GET /campaigns/{slug} for a DRAFT, REVIEW, or CLOSED Campaign
+When they request GET /campaigns/{slug} for a DRAFT, REVIEW, APPROVED, or CLOSED Campaign
 Then the response is a 404 (not found), never the Campaign's content.
 
 AC-007-013
@@ -839,6 +1027,33 @@ Given the full application test suite
 When run against both the default SQLite configuration and a real local MySQL 8 instance via the
   temporary phpunit.mysql.xml mechanism
 Then all tests pass on both, with zero regression to any pre-existing IMP-001..006 test.
+
+AC-007-018 (HD-IMP007-03)
+Given a PUBLISHED Campaign with starts_at in the future
+When CampaignEligibilityResolver::isDonationEligible() is evaluated at the current time
+Then it returns false; and once evaluated at a time >= starts_at (and <= ends_at, or ends_at
+  null), it returns true — with no change to the Campaign's persisted status at any point.
+
+AC-007-019 (HD-IMP007-03)
+Given a PUBLISHED Campaign with both starts_at and ends_at null
+When CampaignEligibilityResolver::isDonationEligible() is evaluated at any arbitrary time
+Then it returns true; and given the same Campaign evaluated exactly at starts_at or exactly at
+  ends_at (when set), the boundary is inclusive and eligibility is true at that exact instant.
+
+AC-007-020 (HD-IMP007-01)
+Given an actor holding CAMPAIGN_APPROVE but not CAMPAIGN_PUBLISH
+When they attempt to publish an APPROVED Campaign
+Then the request is rejected with 403; and given an actor holding CAMPAIGN_PUBLISH but not
+  CAMPAIGN_APPROVE, when they attempt to approve a REVIEW Campaign, the request is rejected with
+  403 — the two permissions never substitute for each other.
+
+AC-007-021 (HD-IMP007-02)
+Given a Campaign created with target_amount_minor = 1000000 and currency = "IDR"
+When its Money representation is formatted for display
+Then the formatting is computed via Money::format() using CurrencyMinorUnits' registered digit
+  count for IDR, with no floating-point arithmetic performed at any point in the request
+  lifecycle; and given a currency code not present in config/money.php is submitted, the request
+  is rejected at validation time with a typed exception, never silently defaulting to 2 digits.
 ```
 
 ## 29. Risks
@@ -849,10 +1064,12 @@ R-1  No REVIEW-state precedent exists anywhere in this codebase (section 6) — 
      publish/unpublish. Mitigated by close adherence to the Human's own explicit lifecycle
      diagram and by the adversarial concurrency test (AC-007-014) proving it under real MySQL
      locking before any FINAL claim.
-R-2  target_amount/currency (section 8a) establishes a first money-representation convention
-     with no existing precedent to validate against and no later IMP (Donation/Ledger) built yet
-     to confirm compatibility. If IMP-008/010/011 later choose a different representation
-     (e.g. integer-cents), a migration would be needed then — flagged, not hidden.
+R-2  (RESOLVED by HD-IMP007-02) The Money value object + centralized `CurrencyMinorUnits`
+     registry is now the ratified representation. Residual risk: `config/money.php` is
+     deliberately non-exhaustive of all ISO 4217 currencies at v1 (section 8a) — a future
+     Campaign in an unregistered currency will be rejected at validation time until an
+     implementer adds that currency's entry; this is intentional fail-closed behavior, not a
+     defect, but is worth surfacing operationally.
 R-3  No slug-rename redirect history (Non-Goals) means a renamed Campaign/Program slug silently
      breaks previously-shared links with no redirect, unlike CMS's cms_paths mechanism. Accepted
      as a documented v1 limitation per the Human baseline's silence on this requirement, not an
@@ -862,37 +1079,49 @@ R-4  ScopeType::Organization (not the locked CAMPAIGN/PROGRAM/FUND scope values)
      role restricted to specific Campaigns), IMP-007's Policies will need a resolver swap, not a
      schema change (ScopeResolver is already an injected strategy per policy call) — low
      migration cost, flagged for awareness.
-R-5  The combined approve+publish transition (section 11) narrows a Human-implied two-step
-     process into one service call gated by two permissions. If future business need requires a
-     genuinely separate "APPROVED but not yet PUBLISHED" persisted state (e.g. approved campaigns
-     queued for a scheduled launch date), this is a state-machine change, not merely a permission
-     change — flagged in Open Questions (OQ-007-01) for Human confirmation this reading is
-     correct.
+R-5  (RESOLVED by HD-IMP007-01) APPROVED is now a real, persisted, independently-permissioned
+     state. Residual risk: an APPROVED Campaign has no expiry — it can sit approved indefinitely
+     without being published, and HD-IMP007-01 explicitly forbids inventing an automatic
+     expiry/unapproval policy for this. If operational experience later shows stale-APPROVED
+     campaigns are a real problem, that would be a new, separate Human Decision, not something
+     this specification should pre-empt.
+R-6  (new, from HD-IMP007-03) A PUBLISHED-but-not-currently-eligible Campaign remains fully
+     publicly reachable (section 8b/14) — the public page's "opens on"/"ended on" messaging is a
+     UX responsibility of IMP-007's own Vue pages, not a security boundary; a missing or
+     incorrect display of this messaging would confuse donors but does not itself constitute an
+     authorization defect (donation processing does not exist yet in this stage to be bypassed).
+     Must still be covered by tests (AC-007-018/019) since it is a genuine, specified behavior.
+R-7  (new, from HD-IMP007-02) Every future amount-bearing column introduced by IMP-008+ must
+     follow the same Money/minor-unit convention established here to avoid a mixed
+     decimal-and-integer money landscape across the codebase. Enforcing this consistently across
+     future, separately-authorized stages is a code-review/governance responsibility beyond what
+     this specification alone can guarantee — flagged for future stage authors and reviewers.
 ```
 
 ## 30. Open Questions / Human Decisions
 
+All four Open Questions raised in the prior specification pass have been resolved by explicit
+Human Decision (recorded in full in "Human Decisions Applied" near the top of this document) and
+materialized throughout this patched specification:
+
 ```
-OQ-007-01  Confirm the combined approve+publish transition reading (section 11) is correct, or
-           whether a distinct persisted APPROVED state (between REVIEW and PUBLISHED) is
-           actually required — the Human lifecycle diagram (§7) shows REVIEW/APPROVAL as one box
-           feeding directly into PUBLISHED, which this spec reads as "approve and publish are one
-           transition, gated by two permissions". If wrong, this changes sections 8, 11, 14, 17,
-           28 (AC-007-004/005/006).
-OQ-007-02  Confirm the decimal(15,2)+currency-code money representation (section 8a) as the
-           project's first money convention, since no existing precedent existed to derive it
-           from and later IMP-008/010/011 stages will likely need to interoperate with whatever
-           is chosen here.
-OQ-007-03  Confirm Campaign public visibility should be gated ONLY by status = PUBLISHED, with no
-           date-range (starts_at/ends_at) auto-hide/auto-close behavior in v1 (section 14) — i.e.
-           a PUBLISHED campaign past its stated end date remains visible and open until an actor
-           explicitly closes it. This is the literal reading of the Human baseline (no scheduler
-           was requested), but is confirmed here explicitly since it affects AC-007-011/012.
-OQ-007-04  Confirm no default/system Program, Campaign, or Fund should be seeded (section 26) —
-           unlike IMP-006's System Default Theme, which existed because rendering requires SOME
-           theme to always exist; there is no equivalent "must always exist" requirement found
-           for Program/Campaign/Fund.
+OQ-007-01  RESOLVED -> HD-IMP007-01 (Option B: APPROVED is a distinct persisted state; approve
+           and publish are independent transitions/permissions). Materialized in sections 3, 5,
+           7, 8, 11, 12 (BR-4), 14, 17, 21, 24, 28 (AC-007-004/004B/005/006/007/020), 29 (R-5).
+OQ-007-02  RESOLVED -> HD-IMP007-02 (Option C: canonical Money value object, integer minor-unit +
+           currency, centralized minor-unit registry). Materialized in sections 3, 6, 7, 8, 8a,
+           12 (BR-9), 13, 16, 18, 20, 27, 28 (AC-007-021), 29 (R-2, R-7).
+OQ-007-03  RESOLVED -> HD-IMP007-03 (Option B: donation-eligibility requires PUBLISHED status AND
+           satisfying starts_at/ends_at, via one canonical reusable contract; no scheduler).
+           Materialized in sections 3, 8b (new), 10, 12 (BR-8), 14, 20, 21, 27, 28
+           (AC-007-011/012/018/019), 29 (R-6).
+OQ-007-04  RESOLVED -> HD-IMP007-04 (Option A, confirmed: no seeded Program/Campaign/Fund, no
+           implicit "General Fund"). Materialized in sections 7, 26.
 ```
+
+No further open decision was identified while applying these four patches. If a genuinely new
+ambiguity is discovered during a later implementation-phase self-audit, it will be raised as a new
+`OQ-007-NN` at that time rather than resolved speculatively.
 
 ## 31. Traceability Matrix
 
@@ -922,8 +1151,14 @@ Data integrity (orphan/ambiguous     §5 (§15), §12, §18    FK RESTRICT, serv
   Fund/destructive delete)                                                              AC-007-009/010
 Race conditions in transitions       §5 (§15), §12 (BR-7), lockForUpdate() +            AC-007-014
                                        §23                  DB::transaction()
-Money representation (new)           §8a, Risks R-2        target_amount/currency cols  (schema test only — no financial
-                                                                                        logic to test in v1)
+Money representation (HD-IMP007-02)  §8a, §12 (BR-9), §13,  Money VO, CurrencyMinorUnits, MoneyTest, AC-007-021
+                                       §16, §18, §20         target_amount_minor col
+Campaign donation-eligibility        §8b, §12 (BR-8), §14,  CampaignEligibilityResolver   CampaignEligibilityResolverTest,
+  contract (HD-IMP007-03)             §20, §21              (public, canonical)            AC-007-018/019
+Independent approve/publish          §11, §12 (BR-4), §14,  CampaignLifecycleService::    CampaignLifecycleServiceTest,
+  permissions (HD-IMP007-01)          §17, §21               approve()/publish()           AC-007-004/004B/005/020
+No seeded business data              §7, §26                (absence of seeder entries)   Manual review + git diff (no
+  (HD-IMP007-04)                                                                          seeder inserts Program/Campaign/Fund)
 MySQL + SQLite compatibility         §27                   (all of the above)           full suite run both drivers
 ```
 
@@ -983,3 +1218,45 @@ EDITORIAL: 1 (SPEC-007-AUDIT-01)
 All findings above are PATCHED in the sections they reference (this document reflects the patched
 state; the findings are preserved here per this repository's own disclosure discipline, not
 removed once fixed).
+
+## 33. Self-Audit Findings — Round 2 (After HD-IMP007-01..04 Patch)
+
+Per single-agent audit-separation discipline, re-applied after patching the specification to
+materialize HD-IMP007-01 through HD-IMP007-04: stop editing -> read-only re-read of the entire
+patched document, cross-checking every section touched by the four decisions for internal
+consistency, plus a full-text search for stale pre-decision terminology
+(`approve-publish`/`approved_published`/bare `target_amount`/`decimal(15,2)`/four-state lifecycle
+enumerations) -> freeze findings here.
+
+```
+ID              SPEC-007-AUDIT-05
+Severity:       EDITORIAL
+Evidence:       "Human Decisions Applied" (HD-IMP007-02 summary paragraph) referred to
+                "Campaign.target_amount" instead of the patched column name
+                "Campaign.target_amount_minor".
+Impact:         Cosmetic inconsistency within the document's own summary of its own decision;
+                the authoritative field definition in section 8 was already correct.
+Required action: Corrected to "Campaign.target_amount_minor". PATCHED.
+
+BLOCKER: 0
+MAJOR:   0
+MINOR:   0
+EDITORIAL: 1 (SPEC-007-AUDIT-05)
+```
+
+Full-text search confirmed no remaining references to the pre-decision combined
+`approve-publish`/`approved_published` transition/event, no remaining bare `target_amount`
+column references outside intentional historical record (the frozen Round-1 audit findings, left
+unmodified per disclosure discipline), no remaining `decimal(15,2)` schema references outside
+that same historical record, and no remaining 4-state (DRAFT/REVIEW/PUBLISHED/CLOSED, omitting
+APPROVED) Campaign status enumerations anywhere in the live (non-historical) text. HD-IMP007-01
+through HD-IMP007-04 are each traced to every section listed in their "RESOLVED ->" entries in
+section 30, cross-checked present.
+
+```
+BLOCKER: 0
+MAJOR:   0
+MINOR:   0
+EDITORIAL: 1 (cumulative with Round 1: 2 total across both rounds)
+OPEN HUMAN DECISIONS: 0
+```
