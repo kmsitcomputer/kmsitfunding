@@ -10,6 +10,8 @@ use App\Models\Theme\ThemeComponent;
 use App\Models\Theme\ThemeNavigationItem;
 use App\Models\Theme\ThemeNavigationMenu;
 use App\Models\Theme\ThemeTemplate;
+use App\Services\Campaign\CampaignProjectionResolver;
+use App\Services\Campaign\ProgramProjectionResolver;
 use App\Services\Content\MediaTokenResolver;
 use App\Services\Content\PublishedContent;
 use Illuminate\Support\Facades\Log;
@@ -245,6 +247,22 @@ class PublicRenderer
     private function renderContentList(array $config): array
     {
         $kind = $config['content_kind'] ?? 'page';
+
+        // IMP-006 amendment (Human change control, targeted/additive):
+        // 'program' and 'campaign' are IMP-007-owned domain truth, never
+        // duplicated into Theme tables — resolved here via IMP-007's own
+        // canonical read projections (ProgramProjectionResolver/
+        // CampaignProjectionResolver), consumed read-only exactly like
+        // ContentResolverService/MediaTokenResolver already are for IMP-005.
+        // The original page/article branch below is UNCHANGED.
+        if ($kind === 'program') {
+            return app(ProgramProjectionResolver::class)->latestPublished((int) ($config['limit'] ?? 6));
+        }
+
+        if ($kind === 'campaign') {
+            return app(CampaignProjectionResolver::class)->latestPublished((int) ($config['limit'] ?? 6));
+        }
+
         $limit = (int) ($config['limit'] ?? 6);
         $order = ($config['order'] ?? 'latest') === 'oldest' ? 'asc' : 'desc';
 

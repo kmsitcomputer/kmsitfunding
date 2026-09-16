@@ -16,6 +16,19 @@ interface ComponentProps {
     [key: string]: unknown;
 }
 
+interface ContentListItem {
+    ulid: string;
+    title: string;
+    summary?: string | null;
+    image_url?: string | null;
+    url: string | null;
+    metadata?: {
+        program_name?: string | null;
+        formatted_target_amount?: string | null;
+        is_donation_eligible?: boolean;
+    };
+}
+
 interface RenderedComponent {
     ulid: string;
     type: string;
@@ -172,12 +185,33 @@ function isPrimaryNav(componentUlid: string): boolean {
                             class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3"
                         >
                             <a
-                                v-for="item in (component.props as unknown as Array<{ ulid: string; title: string; url: string | null }>)"
+                                v-for="item in (component.props as unknown as Array<ContentListItem>)"
                                 :key="item.ulid"
                                 :href="item.url ?? '#'"
-                                class="block rounded-xl border border-stone-200 bg-white p-5 shadow-sm transition hover:border-emerald-300 hover:shadow-md"
+                                class="block overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm transition hover:border-emerald-300 hover:shadow-md"
                             >
-                                <h3 class="font-medium text-stone-900">{{ item.title }}</h3>
+                                <div v-if="item.image_url" class="aspect-video w-full overflow-hidden bg-stone-100">
+                                    <img :src="item.image_url" :alt="item.title" class="h-full w-full object-cover" />
+                                </div>
+                                <div class="p-5">
+                                    <p v-if="item.metadata?.program_name" class="text-xs font-semibold uppercase tracking-wide text-[var(--brand-accent,#047857)]">
+                                        {{ item.metadata.program_name }}
+                                    </p>
+                                    <h3 class="font-medium text-stone-900">{{ item.title }}</h3>
+                                    <p v-if="item.summary" class="mt-1 line-clamp-2 text-sm text-stone-600">{{ item.summary }}</p>
+                                    <div v-if="item.metadata?.formatted_target_amount || item.metadata?.is_donation_eligible !== undefined" class="mt-3 flex items-center justify-between border-t border-stone-100 pt-3">
+                                        <span v-if="item.metadata?.formatted_target_amount" class="text-sm font-medium text-stone-800">
+                                            {{ item.metadata.formatted_target_amount }}
+                                        </span>
+                                        <span
+                                            v-if="item.metadata?.is_donation_eligible !== undefined"
+                                            class="rounded-full px-2 py-0.5 text-xs font-medium"
+                                            :class="item.metadata.is_donation_eligible ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'"
+                                        >
+                                            {{ item.metadata.is_donation_eligible ? 'Open' : 'Not currently open' }}
+                                        </span>
+                                    </div>
+                                </div>
                             </a>
                         </div>
                         <p v-else class="text-center text-sm text-stone-400">Nothing published here yet.</p>

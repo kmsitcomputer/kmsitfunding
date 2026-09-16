@@ -52,7 +52,12 @@ class ComponentConfigValidator
             'destination_external_url' => ['required_if:destination_type,EXTERNAL_URL', 'nullable', 'url', 'starts_with:http://,https://', 'max:2048'],
         ],
         'content_list' => [
-            'content_kind' => ['required', 'string', 'in:page,article'],
+            // IMP-006 amendment (Human change control, targeted/additive —
+            // see docs/adr/ADR-001-theme-content-projection-amendment.md):
+            // 'program'/'campaign' added to the closed enum alongside the
+            // original 'page'/'article'. Still a fixed `in:` list — never
+            // an arbitrary string, never a model/class/service identifier.
+            'content_kind' => ['required', 'string', 'in:page,article,program,campaign'],
             'article_type' => ['nullable', 'string', 'in:ARTICLE,NEWS'],
             'limit' => ['required', 'integer', 'min:1', 'max:24'],
             'order' => ['required', 'string', 'in:latest,oldest'],
@@ -82,7 +87,9 @@ class ComponentConfigValidator
             'cards.*.destination_content_kind' => ['nullable', 'string', 'in:page,article'],
             'cards.*.destination_content_ulid' => ['nullable', 'string', 'size:26'],
             'cards.*.destination_external_url' => ['nullable', 'url', 'starts_with:http://,https://', 'max:2048'],
-            'content_kind' => ['required_if:mode,content_list', 'nullable', 'string', 'in:page,article'],
+            // IMP-006 amendment — same closed-enum extension as content_list
+            // above, for card_grid's own mode=content_list path.
+            'content_kind' => ['required_if:mode,content_list', 'nullable', 'string', 'in:page,article,program,campaign'],
             'limit' => ['required_if:mode,content_list', 'nullable', 'integer', 'min:1', 'max:24'],
         ],
         'navigation_menu_slot' => [

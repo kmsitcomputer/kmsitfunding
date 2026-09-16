@@ -67,6 +67,57 @@ class ComponentConfigValidatorTest extends TestCase
         ]);
     }
 
+    /**
+     * IMP-006 amendment (Human change control, targeted/additive — see
+     * docs/adr/ADR-001-theme-content-projection-amendment.md): content_list
+     * now accepts 'program'/'campaign' alongside the original
+     * 'page'/'article', still as a closed, fixed `in:` list.
+     */
+    public function test_accepts_content_list_with_content_kind_page(): void
+    {
+        $this->validator()->assertValid('content_list', ['content_kind' => 'page', 'limit' => 6, 'order' => 'latest']);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_accepts_content_list_with_content_kind_article(): void
+    {
+        $this->validator()->assertValid('content_list', ['content_kind' => 'article', 'limit' => 6, 'order' => 'latest']);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_accepts_content_list_with_content_kind_program(): void
+    {
+        $this->validator()->assertValid('content_list', ['content_kind' => 'program', 'limit' => 6, 'order' => 'latest']);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_accepts_content_list_with_content_kind_campaign(): void
+    {
+        $this->validator()->assertValid('content_list', ['content_kind' => 'campaign', 'limit' => 6, 'order' => 'latest']);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_rejects_content_list_with_an_unregistered_content_kind(): void
+    {
+        // The closed enum remains default-deny — 'donation' (or any other
+        // string, including a model/class/service-looking value) is never
+        // silently accepted.
+        $this->expectException(ThemeValidationException::class);
+        $this->validator()->assertValid('content_list', ['content_kind' => 'donation', 'limit' => 6, 'order' => 'latest']);
+    }
+
+    public function test_accepts_card_grid_content_list_mode_with_content_kind_campaign(): void
+    {
+        $this->validator()->assertValid('card_grid', ['mode' => 'content_list', 'content_kind' => 'campaign', 'limit' => 6]);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_rejects_card_grid_content_list_mode_with_an_unregistered_content_kind(): void
+    {
+        $this->expectException(ThemeValidationException::class);
+        $this->validator()->assertValid('card_grid', ['mode' => 'content_list', 'content_kind' => 'donation', 'limit' => 6]);
+    }
+
     public function test_rejects_an_image_config_missing_required_alt_text(): void
     {
         $this->expectException(ThemeValidationException::class);
