@@ -1,5 +1,12 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
+import AdminLayout from '../../../Components/Admin/AdminLayout.vue';
+import Breadcrumb from '../../../Components/UI/Breadcrumb.vue';
+import Button from '../../../Components/UI/Button.vue';
+import Card from '../../../Components/UI/Card.vue';
+import FormField from '../../../Components/UI/FormField.vue';
+import PageHeader from '../../../Components/UI/PageHeader.vue';
+import Select from '../../../Components/UI/Select.vue';
 
 interface Page {
     ulid: string;
@@ -22,35 +29,31 @@ const form = useForm({
     expected_page_ulid: props.assignment.page?.ulid ?? '',
 });
 
-const submit = () => {
-    form.patch('/admin/content/homepage');
-};
+const submit = () => form.patch('/admin/content/homepage');
 </script>
 
 <template>
-    <div class="min-h-screen bg-neutral-50 px-4 py-8">
-        <form class="mx-auto max-w-md space-y-4" @submit.prevent="submit">
-            <h1 class="text-xl font-semibold text-neutral-800">Homepage</h1>
+    <AdminLayout>
+        <template #breadcrumb>
+            <Breadcrumb :items="[{ label: 'Homepage' }]" />
+        </template>
+        <template #header>
+            <PageHeader title="Homepage" description="Designate which CMS page (if any) is the public homepage." />
+        </template>
 
-            <p class="text-sm text-neutral-600">
-                Current designee:
-                <span class="text-neutral-800">{{ props.assignment.page?.title ?? 'None' }}</span>
+        <Card class="max-w-lg">
+            <p class="text-sm text-slate-600">
+                Current designee: <span class="font-medium text-slate-800">{{ assignment.page?.title ?? 'None' }}</span>
             </p>
-
-            <div>
-                <label class="block text-sm text-neutral-600">Designate page</label>
-                <select v-model="form.page_ulid" class="mt-1 w-full rounded border px-3 py-2">
-                    <option value="">None (clear)</option>
-                    <option v-for="page in props.eligiblePages" :key="page.ulid" :value="page.ulid">
-                        {{ page.title }} ({{ page.status }})
-                    </option>
-                </select>
-                <p v-if="form.errors.page_ulid" class="mt-1 text-sm text-red-600">{{ form.errors.page_ulid }}</p>
-            </div>
-
-            <button type="submit" class="w-full rounded bg-neutral-800 px-3 py-2 text-white" :disabled="form.processing">
-                Save
-            </button>
-        </form>
-    </div>
+            <form class="mt-4 space-y-4" @submit.prevent="submit">
+                <FormField label="Designate page" for="homepage-page" :error="form.errors.page_ulid">
+                    <Select id="homepage-page" v-model="form.page_ulid">
+                        <option value="">None (clear)</option>
+                        <option v-for="page in eligiblePages" :key="page.ulid" :value="page.ulid">{{ page.title }} ({{ page.status }})</option>
+                    </Select>
+                </FormField>
+                <Button type="submit" :disabled="form.processing">Save</Button>
+            </form>
+        </Card>
+    </AdminLayout>
 </template>

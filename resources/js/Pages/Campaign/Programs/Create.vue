@@ -7,6 +7,7 @@ import Card from '../../../Components/UI/Card.vue';
 import FormField from '../../../Components/UI/FormField.vue';
 import Input from '../../../Components/UI/Input.vue';
 import PageHeader from '../../../Components/UI/PageHeader.vue';
+import RichTextEditor from '../../../Components/UI/RichTextEditor.vue';
 import Textarea from '../../../Components/UI/Textarea.vue';
 
 const form = useForm({ name: '', slug: '', summary: '', description_html: '' });
@@ -30,8 +31,8 @@ const submit = () => form.post('/admin/campaign/programs');
                 <FormField label="Summary" for="program-summary" help="A short one- or two-line overview.">
                     <Textarea id="program-summary" v-model="form.summary" :rows="2" />
                 </FormField>
-                <FormField label="Description" for="program-description">
-                    <Textarea id="program-description" v-model="form.description_html" :rows="6" />
+                <FormField label="Description">
+                    <RichTextEditor v-model="form.description_html" placeholder="Tell the story of this program…" />
                 </FormField>
                 <div class="flex items-center gap-2 pt-1">
                     <Button type="submit" :disabled="form.processing">Create program</Button>

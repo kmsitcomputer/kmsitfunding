@@ -1,5 +1,17 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
+import AdminLayout from '../../../Components/Admin/AdminLayout.vue';
+import Alert from '../../../Components/UI/Alert.vue';
+import Breadcrumb from '../../../Components/UI/Breadcrumb.vue';
+import Button from '../../../Components/UI/Button.vue';
+import Card from '../../../Components/UI/Card.vue';
+import FormField from '../../../Components/UI/FormField.vue';
+import Input from '../../../Components/UI/Input.vue';
+import PageHeader from '../../../Components/UI/PageHeader.vue';
+import RichTextEditor from '../../../Components/UI/RichTextEditor.vue';
+import Select from '../../../Components/UI/Select.vue';
+import StatusBadge from '../../../Components/UI/StatusBadge.vue';
+import Textarea from '../../../Components/UI/Textarea.vue';
 
 interface Revision {
     id: number;
@@ -39,125 +51,78 @@ const form = useForm({
     expected_edit_version: props.draft?.edit_version ?? 0,
 });
 
-const publishForm = useForm({
-    path: props.published?.slug_snapshot ?? '',
-});
-
+const publishForm = useForm({ path: props.published?.slug_snapshot ?? '' });
 const unpublishForm = useForm({});
 const archiveForm = useForm({});
 
-const saveDraft = () => {
-    form.patch(`/admin/content/articles/${props.article.ulid}`);
-};
-
-const publish = () => {
-    publishForm.post(`/admin/content/articles/${props.article.ulid}/publish`);
-};
-
-const unpublish = () => {
-    unpublishForm.post(`/admin/content/articles/${props.article.ulid}/unpublish`);
-};
-
+const saveDraft = () => form.patch(`/admin/content/articles/${props.article.ulid}`);
+const publish = () => publishForm.post(`/admin/content/articles/${props.article.ulid}/publish`);
+const unpublish = () => unpublishForm.post(`/admin/content/articles/${props.article.ulid}/unpublish`);
 const archive = () => {
-    if (! confirm(`Archive "${props.article.title}"? This cannot be undone.`)) {
-        return;
+    if (confirm(`Archive "${props.article.title}"? This cannot be undone.`)) {
+        archiveForm.post(`/admin/content/articles/${props.article.ulid}/archive`);
     }
-
-    archiveForm.post(`/admin/content/articles/${props.article.ulid}/archive`);
 };
 </script>
 
 <template>
-    <div class="min-h-screen bg-neutral-50 px-4 py-8">
-        <div class="mx-auto max-w-2xl space-y-8">
-            <div class="flex items-center justify-between">
-                <h1 class="text-xl font-semibold text-neutral-800">{{ props.article.title }}</h1>
-                <span class="rounded border px-2 py-1 text-xs text-neutral-600">{{ props.article.status }}</span>
-            </div>
+    <AdminLayout>
+        <template #breadcrumb>
+            <Breadcrumb :items="[{ label: 'Articles', href: '/admin/content/articles' }, { label: article.title }]" />
+        </template>
+        <template #header>
+            <PageHeader :title="article.title">
+                <template #badge>
+                    <StatusBadge :status="article.status" />
+                </template>
+            </PageHeader>
+        </template>
 
-            <section class="space-y-4 rounded border bg-white p-4">
-                <h2 class="text-sm font-semibold text-neutral-600">Actions</h2>
-
-                <div class="flex flex-wrap items-end gap-2">
-                    <div class="flex-1">
-                        <label class="block text-sm text-neutral-600">Path</label>
-                        <input v-model="publishForm.path" type="text" class="mt-1 w-full rounded border px-3 py-2" placeholder="/news/example" />
-                        <p v-if="publishForm.errors.path" class="mt-1 text-sm text-red-600">{{ publishForm.errors.path }}</p>
-                    </div>
-                    <button
-                        type="button"
-                        class="rounded bg-neutral-800 px-3 py-2 text-sm text-white"
-                        :disabled="publishForm.processing"
-                        @click="publish"
-                    >
-                        Publish
-                    </button>
-                    <button
-                        v-if="props.article.status === 'PUBLISHED'"
-                        type="button"
-                        class="rounded border px-3 py-2 text-sm text-neutral-800"
-                        :disabled="unpublishForm.processing"
-                        @click="unpublish"
-                    >
-                        Unpublish
-                    </button>
-                    <button
-                        v-if="props.article.status === 'DRAFT' || props.article.status === 'RETIRED'"
-                        type="button"
-                        class="rounded border border-red-600 px-3 py-2 text-sm text-red-600"
-                        :disabled="archiveForm.processing"
-                        @click="archive"
-                    >
+        <div class="space-y-6">
+            <Card>
+                <h2 class="text-sm font-semibold text-slate-800">Publication</h2>
+                <div class="mt-4 flex flex-wrap items-end gap-2">
+                    <FormField label="Path" for="publish-path" :error="publishForm.errors.path" class="min-w-52 flex-1">
+                        <Input id="publish-path" v-model="publishForm.path" placeholder="/news/example" />
+                    </FormField>
+                    <Button :disabled="publishForm.processing" @click="publish">Publish</Button>
+                    <Button v-if="article.status === 'PUBLISHED'" variant="secondary" :disabled="unpublishForm.processing" @click="unpublish">Unpublish</Button>
+                    <Button v-if="article.status === 'DRAFT' || article.status === 'RETIRED'" variant="danger" :disabled="archiveForm.processing" @click="archive">
                         Archive
-                    </button>
+                    </Button>
                 </div>
-            </section>
+            </Card>
 
-            <form v-if="props.draft" class="space-y-4 rounded border bg-white p-4" @submit.prevent="saveDraft">
-                <h2 class="text-sm font-semibold text-neutral-600">Draft</h2>
+            <Card v-if="draft">
+                <h2 class="text-sm font-semibold text-slate-800">Draft</h2>
+                <form class="mt-4 space-y-5" @submit.prevent="saveDraft">
+                    <FormField label="Type" for="draft-type">
+                        <Select id="draft-type" v-model="form.article_type">
+                            <option value="ARTICLE">Article</option>
+                            <option value="NEWS">News</option>
+                        </Select>
+                    </FormField>
+                    <FormField label="Title" for="draft-title" :error="form.errors.title">
+                        <Input id="draft-title" v-model="form.title" />
+                    </FormField>
+                    <FormField label="Body" :error="form.errors.body_html">
+                        <RichTextEditor v-model="form.body_html" />
+                    </FormField>
+                    <FormField label="Excerpt" for="draft-excerpt">
+                        <Textarea id="draft-excerpt" v-model="form.excerpt" :rows="3" />
+                    </FormField>
+                    <Alert v-if="form.errors.expected_edit_version" tone="warning">{{ form.errors.expected_edit_version }}</Alert>
+                    <Button type="submit" :disabled="form.processing">Save draft</Button>
+                </form>
+            </Card>
+            <p v-else class="text-sm text-slate-500">No active draft.</p>
 
-                <div>
-                    <label class="block text-sm text-neutral-600">Type</label>
-                    <select v-model="form.article_type" class="mt-1 w-full rounded border px-3 py-2">
-                        <option value="ARTICLE">Article</option>
-                        <option value="NEWS">News</option>
-                    </select>
-                    <p v-if="form.errors.article_type" class="mt-1 text-sm text-red-600">{{ form.errors.article_type }}</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">Title</label>
-                    <input v-model="form.title" type="text" class="mt-1 w-full rounded border px-3 py-2" required />
-                    <p v-if="form.errors.title" class="mt-1 text-sm text-red-600">{{ form.errors.title }}</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">Body</label>
-                    <textarea v-model="form.body_html" rows="12" class="mt-1 w-full rounded border px-3 py-2 font-mono text-sm"></textarea>
-                    <p v-if="form.errors.body_html" class="mt-1 text-sm text-red-600">{{ form.errors.body_html }}</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">Excerpt</label>
-                    <textarea v-model="form.excerpt" rows="3" class="mt-1 w-full rounded border px-3 py-2"></textarea>
-                </div>
-
-                <p v-if="form.errors.expected_edit_version" class="text-sm text-red-600">
-                    {{ form.errors.expected_edit_version }}
-                </p>
-
-                <button type="submit" class="w-full rounded bg-neutral-800 px-3 py-2 text-white" :disabled="form.processing">
-                    Save draft
-                </button>
-            </form>
-            <p v-else class="text-sm text-neutral-500">No active draft.</p>
-
-            <section v-if="props.published" class="space-y-2 rounded border bg-neutral-100 p-4">
-                <h2 class="text-sm font-semibold text-neutral-600">Published (read-only)</h2>
-                <p class="text-sm text-neutral-800">{{ props.published.title }}</p>
-                <p class="text-sm text-neutral-600">{{ props.published.slug_snapshot }}</p>
-                <div class="rounded border bg-white p-3 text-sm text-neutral-600" v-html="props.published.body_html"></div>
-            </section>
+            <Card v-if="published" class="bg-slate-50">
+                <h2 class="text-sm font-semibold text-slate-800">Published (read-only)</h2>
+                <p class="mt-2 text-sm text-slate-800">{{ published.title }}</p>
+                <p class="text-sm text-slate-500">{{ published.slug_snapshot }}</p>
+                <div class="prose prose-sm mt-3 max-w-none rounded-lg border border-slate-200 bg-white p-3" v-html="published.body_html"></div>
+            </Card>
         </div>
-    </div>
+    </AdminLayout>
 </template>

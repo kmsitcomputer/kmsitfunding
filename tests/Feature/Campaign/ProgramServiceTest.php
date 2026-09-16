@@ -27,6 +27,18 @@ class ProgramServiceTest extends TestCase
         $this->assertDatabaseHas('audit_records', ['event_type' => 'program.created', 'subject_id' => $program->id]);
     }
 
+    public function test_create_rejects_a_script_tag_in_description_html(): void
+    {
+        // Remediation: description_html was previously persisted
+        // unsanitized (real stored-XSS gap on public pages).
+        $actor = $this->makeUnauthorizedActor();
+
+        $this->expectException(CampaignValidationException::class);
+        app(ProgramService::class)->create([
+            'name' => 'P', 'description_html' => '<p>hi</p><script>alert(1)</script>',
+        ], $actor);
+    }
+
     public function test_create_rejects_a_duplicate_slug(): void
     {
         $actor = $this->makeUnauthorizedActor();

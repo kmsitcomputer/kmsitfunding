@@ -16,7 +16,10 @@ use Illuminate\Support\Str;
  */
 class ProgramService
 {
-    public function __construct(private readonly CampaignAuditLogger $auditLogger) {}
+    public function __construct(
+        private readonly CampaignAuditLogger $auditLogger,
+        private readonly CampaignContentSanitizer $sanitizer,
+    ) {}
 
     /**
      * @param  array{name:string,slug?:string,summary?:string,description_html?:string}  $payload
@@ -39,7 +42,7 @@ class ProgramService
                 'name' => $payload['name'],
                 'slug' => $slug,
                 'summary' => $payload['summary'] ?? null,
-                'description_html' => $payload['description_html'] ?? null,
+                'description_html' => isset($payload['description_html']) ? $this->sanitizer->sanitize($payload['description_html']) : null,
                 'status' => 'DRAFT',
                 'edit_version' => 0,
                 'created_by_principal_id' => $actor->id,
@@ -72,6 +75,12 @@ class ProgramService
             }
 
             $fieldsChanged = [];
+
+            if (array_key_exists('description_html', $payload)) {
+                $payload['description_html'] = $payload['description_html'] !== null
+                    ? $this->sanitizer->sanitize($payload['description_html'])
+                    : null;
+            }
 
             foreach (['name', 'summary', 'description_html'] as $field) {
                 if (array_key_exists($field, $payload) && $payload[$field] !== $locked->{$field}) {

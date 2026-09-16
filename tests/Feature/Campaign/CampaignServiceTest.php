@@ -86,6 +86,34 @@ class CampaignServiceTest extends TestCase
         app(CampaignService::class)->update($campaign, ['name' => 'D'], 0, $actor);
     }
 
+    public function test_create_rejects_a_script_tag_in_description_html(): void
+    {
+        // Remediation: description_html was previously persisted
+        // unsanitized (real stored-XSS gap on public pages).
+        $actor = $this->makeUnauthorizedActor();
+
+        $this->expectException(CampaignValidationException::class);
+        app(CampaignService::class)->create([
+            'name' => 'C', 'description_html' => '<p>hi</p><script>alert(1)</script>',
+        ], $actor);
+    }
+
+    public function test_update_sanitizes_description_html(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $campaign = app(CampaignService::class)->create(['name' => 'C'], $actor);
+
+        $updated = app(CampaignService::class)->update(
+            $campaign,
+            ['description_html' => '<p onclick="alert(1)">hello</p>'],
+            0,
+            $actor
+        );
+
+        $this->assertStringNotContainsString('onclick', $updated->description_html);
+        $this->assertStringContainsString('hello', $updated->description_html);
+    }
+
     public function test_deleting_a_program_still_referenced_by_a_campaign_is_rejected_at_database_level(): void
     {
         $actor = $this->makeUnauthorizedActor();

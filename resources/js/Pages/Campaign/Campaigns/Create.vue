@@ -8,6 +8,7 @@ import Card from '../../../Components/UI/Card.vue';
 import FormField from '../../../Components/UI/FormField.vue';
 import Input from '../../../Components/UI/Input.vue';
 import PageHeader from '../../../Components/UI/PageHeader.vue';
+import RichTextEditor from '../../../Components/UI/RichTextEditor.vue';
 import Select from '../../../Components/UI/Select.vue';
 import Textarea from '../../../Components/UI/Textarea.vue';
 
@@ -64,8 +65,8 @@ const submit = () => {
                 <FormField label="Summary" for="c-summary">
                     <Textarea id="c-summary" v-model="form.summary" :rows="2" />
                 </FormField>
-                <FormField label="Description" for="c-description">
-                    <Textarea id="c-description" v-model="form.description_html" :rows="6" />
+                <FormField label="Description / story">
+                    <RichTextEditor v-model="form.description_html" placeholder="Tell donors why this campaign matters…" />
                 </FormField>
 
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-3">

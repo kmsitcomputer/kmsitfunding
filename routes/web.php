@@ -22,6 +22,12 @@ use App\Http\Controllers\PublicCampaignController;
 use App\Http\Controllers\PublicContentController;
 use App\Http\Controllers\PublicProgramController;
 use App\Http\Controllers\Theme\ThemeController;
+use App\Models\Campaign\Campaign;
+use App\Models\Campaign\Fund;
+use App\Models\Campaign\Program;
+use App\Models\Cms\CmsArticle;
+use App\Models\Cms\CmsPage;
+use App\Models\Theme\Theme;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -61,8 +67,20 @@ Route::middleware('guest')->group(function () {
 
 // Authenticated account security.
 Route::middleware(['auth', 'identity.active'])->group(function () {
+    // Presentation-only landing page — read-only counts from existing
+    // tables, no business/financial logic. IMP-008+ metrics (donations,
+    // donors, payments, ledger) do not exist and are never fabricated here.
     Route::get('/dashboard', function () {
-        return Inertia::render('Dashboard');
+        return Inertia::render('Dashboard', [
+            'counts' => [
+                'pages' => CmsPage::query()->count(),
+                'articles' => CmsArticle::query()->count(),
+                'programs' => Program::query()->count(),
+                'campaigns' => Campaign::query()->count(),
+                'funds' => Fund::query()->count(),
+                'themes' => Theme::query()->count(),
+            ],
+        ]);
     })->name('dashboard');
 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');

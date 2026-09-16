@@ -9,6 +9,7 @@ import Icon from '../../../Components/UI/Icon.vue';
 import Input from '../../../Components/UI/Input.vue';
 import MediaGallery from '../../../Components/UI/MediaGallery.vue';
 import PageHeader from '../../../Components/UI/PageHeader.vue';
+import RichTextEditor from '../../../Components/UI/RichTextEditor.vue';
 import StatusBadge from '../../../Components/UI/StatusBadge.vue';
 import Textarea from '../../../Components/UI/Textarea.vue';
 
@@ -86,8 +87,8 @@ const archive = () => {
                         <FormField label="Summary" for="p-summary">
                             <Textarea id="p-summary" v-model="updateForm.summary" :rows="2" />
                         </FormField>
-                        <FormField label="Description" for="p-description">
-                            <Textarea id="p-description" v-model="updateForm.description_html" :rows="6" />
+                        <FormField label="Description">
+                            <RichTextEditor v-model="updateForm.description_html" />
                         </FormField>
                         <Button type="submit" :disabled="updateForm.processing">Save changes</Button>
                     </form>

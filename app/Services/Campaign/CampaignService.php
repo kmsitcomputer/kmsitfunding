@@ -20,7 +20,10 @@ use Illuminate\Support\Str;
  */
 class CampaignService
 {
-    public function __construct(private readonly CampaignAuditLogger $auditLogger) {}
+    public function __construct(
+        private readonly CampaignAuditLogger $auditLogger,
+        private readonly CampaignContentSanitizer $sanitizer,
+    ) {}
 
     /**
      * @param  array{name:string,slug?:string,summary?:string,description_html?:string,purpose?:string,program_ulid?:string,target_amount_minor?:int,currency?:string,starts_at?:string,ends_at?:string}  $payload
@@ -57,7 +60,7 @@ class CampaignService
                 'name' => $payload['name'],
                 'slug' => $slug,
                 'summary' => $payload['summary'] ?? null,
-                'description_html' => $payload['description_html'] ?? null,
+                'description_html' => isset($payload['description_html']) ? $this->sanitizer->sanitize($payload['description_html']) : null,
                 'purpose' => $payload['purpose'] ?? null,
                 'target_amount_minor' => $payload['target_amount_minor'] ?? null,
                 'currency' => $payload['currency'] ?? config('campaign.default_currency'),
@@ -108,6 +111,12 @@ class CampaignService
 
             $fieldsChanged = [];
             $previousFundId = $locked->fund_id;
+
+            if (array_key_exists('description_html', $payload)) {
+                $payload['description_html'] = $payload['description_html'] !== null
+                    ? $this->sanitizer->sanitize($payload['description_html'])
+                    : null;
+            }
 
             foreach (['name', 'summary', 'description_html', 'purpose'] as $field) {
                 if (array_key_exists($field, $payload) && $payload[$field] !== $locked->{$field}) {

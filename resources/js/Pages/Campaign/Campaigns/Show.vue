@@ -11,6 +11,7 @@ import FormField from '../../../Components/UI/FormField.vue';
 import Input from '../../../Components/UI/Input.vue';
 import MediaGallery from '../../../Components/UI/MediaGallery.vue';
 import PageHeader from '../../../Components/UI/PageHeader.vue';
+import RichTextEditor from '../../../Components/UI/RichTextEditor.vue';
 import Select from '../../../Components/UI/Select.vue';
 import StatusBadge from '../../../Components/UI/StatusBadge.vue';
 import Textarea from '../../../Components/UI/Textarea.vue';
@@ -137,8 +138,8 @@ const reject = () => {
                         <FormField label="Summary" for="cc-summary">
                             <Textarea id="cc-summary" v-model="updateForm.summary" :rows="2" />
                         </FormField>
-                        <FormField label="Description / story" for="cc-description">
-                            <Textarea id="cc-description" v-model="updateForm.description_html" :rows="7" />
+                        <FormField label="Description / story">
+                            <RichTextEditor v-model="updateForm.description_html" />
                         </FormField>
                         <FormField label="Purpose" for="cc-purpose">
                             <Input id="cc-purpose" v-model="updateForm.purpose" />
