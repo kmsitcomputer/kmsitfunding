@@ -546,10 +546,14 @@ CLOSED campaigns reject ALL field mutation (CAMPAIGN_UPDATE included) — CLOSED
       content-frozen, historical record only. Enforced in the service layer AND as a
       resourceStatePredicate in CampaignPolicy::update() (defense-in-depth, mirrors
       ContentPagePolicy's publish()/archive() predicate pattern).
-BR-5  A Fund cannot be archived while any non-CLOSED Campaign currently references it
-      (application-level pre-check + FK RESTRICT provides the hard guarantee only against
-      deletion, not archival — archival is a status flag, so this is an explicit service check,
-      documented here rather than silently assumed enforceable by the schema alone).
+BR-5  Fund archival always succeeds and is idempotent, regardless of any existing Campaign
+      reference (including a PUBLISHED one) — protection against an ARCHIVED Fund being used
+      lives entirely at ASSIGNMENT time (a Campaign cannot select an ARCHIVED Fund) and at
+      PUBLISH time (BR-1: a Campaign cannot move APPROVED -> PUBLISHED against a non-ACTIVE
+      Fund), never as an archival-blocking check. This corrects an internally-inconsistent
+      earlier draft of this rule (identified and fixed during implementation — see section 32
+      SPEC-007-AUDIT-06); the corrected rule matches AC-007-016 and the Fund lifecycle note in
+      section 11, both of which required archival to succeed regardless of existing references.
 BR-6  Program/Campaign/Fund slugs are NOT frozen at any lifecycle status in v1 (no redirect/
       history mechanism exists — see Non-Goals). A slug may be changed at any status; a changed
       slug simply serves the new URL going forward, with no redirect preserved for the old one.
@@ -1259,4 +1263,95 @@ MAJOR:   0
 MINOR:   0
 EDITORIAL: 1 (cumulative with Round 1: 2 total across both rounds)
 OPEN HUMAN DECISIONS: 0
+```
+
+## 34. Self-Audit Findings — Round 3 (After Implementation)
+
+Per single-agent audit-separation discipline, re-applied after full implementation, test-writing,
+and a full SQLite + MySQL run: stop editing -> read-only re-read of the implementation against
+this specification, HD-IMP007-01..04, and the locked architecture -> freeze findings.
+
+```
+ID              SPEC-007-AUDIT-06
+Severity:       MINOR (implementation-phase specification defect, PATCHED)
+Evidence:       BR-5 (section 12), as originally drafted in Round 1/2, stated a Fund "cannot be
+                archived while any non-CLOSED Campaign currently references it" — directly
+                contradicting AC-007-016 (archival must succeed even with an existing PUBLISHED
+                reference) and the Fund lifecycle note in section 11 (archiving never
+                retroactively invalidates an existing Campaign). This was caught while
+                implementing FundService::archive() and would have produced code that failed
+                its own acceptance criterion had it followed the stale BR-5 prose literally.
+Impact:         None on shipped behavior — FundService::archive() was implemented to match
+                AC-007-016 and section 11 (archival always succeeds, unconditionally), and
+                BR-5's prose has been corrected to match. No Human Decision was required — this
+                was an internal drafting inconsistency within the already-approved
+                specification, not a new business-rule choice.
+Required action: BR-5 rewritten (section 12) to state the corrected rule. PATCHED.
+
+ID              SPEC-007-AUDIT-07
+Severity:       MINOR (disclosed scope limitation, not fixed)
+Evidence:       FundController::update() and its route exist and are exercised directly by
+                FundServiceTest, but no admin Vue page exposes an edit form for an existing
+                Fund's name/restriction_note — Funds/Index.vue offers create + archive only.
+Impact:         An admin cannot rename a Fund or edit its restriction note through the built
+                UI in v1 (the backend/API path is fully correct and authorized either way).
+                Does not affect any Acceptance Criterion — none references Fund editing via UI.
+Required action: Disclosed here; not fixed in this pass. A future increment can add a Fund
+                edit form using the exact same pattern as Programs/Show.vue.
+
+ID              SPEC-007-AUDIT-08
+Severity:       MINOR (disclosed scope limitation, partially fixed)
+Evidence:       Program/Campaign media upload+archive (ProgramMediaService/CampaignMediaService,
+                including the full adversarial validation pipeline) are implemented and directly
+                tested (CampaignMediaServiceTest, AC-007-015), and their HTTP routes/controller
+                actions now exist (added during this same implementation pass after a
+                self-audit catch — upload was originally wired but archive was not). However,
+                no admin Vue page yet renders a media upload widget or an asset gallery/archive
+                button for Program or Campaign — `mediaAssets` is passed to
+                Programs/Show.vue's and Campaigns/Show.vue's Inertia props but not yet
+                rendered in either template.
+Impact:         An admin cannot upload or archive Program/Campaign media through the built UI
+                in v1, though the backend is fully correct, authorized, and tested at the
+                service layer. AC-007-015 tests the validation pipeline directly (as specified)
+                and is unaffected.
+Required action: Disclosed here; not fixed in this pass (UI-only gap). A future increment can
+                add an upload form + asset list mirroring Theme/Show.vue's asset section.
+
+ID              SPEC-007-AUDIT-09
+Severity:       MINOR (environmental, not an IMP-007 code defect)
+Evidence:       During MySQL verification, `Schema::getTableListing(schemaQualified: false)` on
+                this local development machine's MySQL server was found to return table names
+                from multiple, entirely unrelated databases hosted on the same server (not just
+                the connected `kmsitdonation`/test database) — reproduced deterministically via
+                a minimal standalone script, unrelated to any IMP-007 file (this trait and its
+                call site are pre-existing IMP-004 test infrastructure, untouched by this
+                implementation). This causes every test class using
+                `tests/Support/TruncatesInMemorySqlite.php` (AuditFoundationTest, RbacAuditTest,
+                RolePermissionServiceTest, IdentityAuditFailureRollbackTest, RoleAssignmentTest —
+                none of them IMP-007 tests) to fail immediately when truncation hits the first
+                phantom (non-existent-in-the-current-schema) table name.
+Impact:         Confirmed NO destructive action occurred: the failing TRUNCATE statement targets
+                the connected database's unqualified table name, and since the phantom table
+                does not exist there, MySQL rejects it immediately (error 1146) before any real
+                table — belonging to this project or any other — is touched. Verified by
+                inspecting both the shared dev database and a disposable isolated test database
+                before and after: both retained their full, correct table sets. This blocks a
+                strict MySQL-verified claim for those 5 pre-existing, non-IMP-007 test classes
+                specifically in this session; it does NOT affect any IMP-007 test (all of which
+                use RefreshDatabase, not this trait) or any other pre-existing test in the suite
+                (577 non-TruncatesInMemorySqlite tests, including all new IMP-007 tests, passed
+                cleanly against real MySQL).
+Required action: Disclosed here as a machine/environment-level finding for the Human's
+                infrastructure awareness — not an IMP-007 implementation defect, and out of
+                this specification's authority to fix (it is pre-existing IMP-004 test
+                infrastructure interacting with this specific local MySQL server's
+                information_schema behavior). No code change made. GATE-IMPACT: NONE, since it
+                affects zero IMP-007-scoped acceptance criteria or tests.
+
+BLOCKER: 0
+MAJOR:   0
+MINOR:   4 (SPEC-007-AUDIT-06 patched, 07/08 disclosed-not-fixed, 09 environmental-disclosed)
+EDITORIAL: 0
+OPEN HUMAN DECISIONS: 0
+GATE-IMPACT FINDINGS: 0
 ```
