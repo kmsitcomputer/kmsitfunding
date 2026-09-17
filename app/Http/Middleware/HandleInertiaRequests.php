@@ -37,7 +37,13 @@ class HandleInertiaRequests extends Middleware
     {
         return [
             ...parent::share($request),
-            //
+            // Presentation-only: lets the admin top bar show who is signed
+            // in without every controller re-passing it. No authorization
+            // decision is ever made from this — backend policies remain
+            // authoritative.
+            'auth' => [
+                'user' => $request->user() ? ['email' => $request->user()->email] : null,
+            ],
         ];
     }
 }

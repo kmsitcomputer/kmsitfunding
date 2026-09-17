@@ -96,5 +96,51 @@ trait TruncatesInMemorySqlite
                 $connection->table($table)->truncate();
             }
         });
+
+        $this->reseedSingletonRowsFor($connection);
+    }
+
+    /**
+     * IMP005-FINAL-GATE-class fix (discovered while implementing IMP-006):
+     * `cms_homepage_assignment` (IMP-005) and `theme_activation` (IMP-006)
+     * are singleton tables whose one required row (id=1) is inserted ONLY
+     * by their own migration's `up()` — never reseeded by a database
+     * seeder. This trait's blanket truncate-everything approach silently
+     * deleted that row with no way to restore it for the remainder of the
+     * test process (this trait's own `migrate:fresh` runs only once,
+     * gated by a static flag), permanently breaking any LATER
+     * `RefreshDatabase`-based test — in the SAME `phpunit` process — that
+     * depends on either singleton row existing (both services use
+     * `whereKey(1)->lockForUpdate()->firstOrFail()`, so a missing row is a
+     * hard failure, not a graceful empty state). Restoring both rows here,
+     * immediately after every truncate, keeps this trait's own tests
+     * correctly isolated while no longer leaving the shared MySQL testing
+     * database in a state that silently breaks unrelated test classes
+     * ordered after them. Table existence is checked so this trait remains
+     * usable on a schema predating either table.
+     */
+    private function reseedSingletonRowsFor(ConnectionInterface $connection): void
+    {
+        $tables = $connection->getSchemaBuilder()->getTableListing(schemaQualified: false);
+
+        if (in_array('cms_homepage_assignment', $tables, true)) {
+            $connection->table('cms_homepage_assignment')->insert([
+                'id' => 1,
+                'page_id' => null,
+                'assigned_by_principal_id' => null,
+                'assigned_at' => null,
+                'updated_at' => now(),
+            ]);
+        }
+
+        if (in_array('theme_activation', $tables, true)) {
+            $connection->table('theme_activation')->insert([
+                'id' => 1,
+                'active_theme_id' => null,
+                'assigned_by_principal_id' => null,
+                'assigned_at' => null,
+                'updated_at' => now(),
+            ]);
+        }
     }
 }

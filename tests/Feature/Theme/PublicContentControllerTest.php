@@ -1,0 +1,194 @@
+<?php
+
+namespace Tests\Feature\Theme;
+
+use App\Models\Cms\CmsHomepageAssignment;
+use App\Services\Content\PageService;
+use App\Services\Content\PublicationService;
+use App\Services\Theme\ThemeActivationService;
+use App\Services\Theme\ThemeComponentService;
+use App\Services\Theme\ThemeNavigationService;
+use App\Services\Theme\ThemeSectionService;
+use App\Services\Theme\ThemeService;
+use App\Services\Theme\ThemeTemplateService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia as Assert;
+use Tests\Support\Rbac\RbacTestActors;
+use Tests\TestCase;
+
+/**
+ * IMP-006 — the public rendering pipeline end to end
+ * (docs/implementation/IMP-006-theme-engine.md section 13), the piece
+ * IMP-005 §8 described but left unbuilt.
+ */
+class PublicContentControllerTest extends TestCase
+{
+    use RbacTestActors;
+    use RefreshDatabase;
+
+    public function test_homepage_renders_with_no_designation(): void
+    {
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $page) => $page->component('Public/ThemeRender')->where('content', null));
+    }
+
+    public function test_homepage_renders_the_designated_published_page(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $page = app(PageService::class)->create(['title' => 'Home', 'body_html' => '<p>Welcome</p>'], $actor);
+        app(PublicationService::class)->publish($page->fresh(), $page->fresh()->currentDraft, $actor, '/home-slug');
+        CmsHomepageAssignment::query()->whereKey(1)->update(['page_id' => $page->id, 'assigned_at' => now()]);
+
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $page) => $page->component('Public/ThemeRender')->where('content.title', 'Home'));
+    }
+
+    public function test_a_published_page_resolves_through_the_catch_all_route(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $page = app(PageService::class)->create(['title' => 'About', 'body_html' => '<p>x</p>'], $actor);
+        app(PublicationService::class)->publish($page->fresh(), $page->fresh()->currentDraft, $actor, '/about-us');
+
+        $response = $this->get('/about-us');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $p) => $p->component('Public/ThemeRender')->where('content.title', 'About'));
+    }
+
+    public function test_an_unknown_path_renders_the_not_found_page(): void
+    {
+        $response = $this->get('/this-path-does-not-exist');
+
+        $response->assertNotFound();
+        $response->assertInertia(fn (Assert $page) => $page->component('Public/NotFound'));
+    }
+
+    public function test_a_renamed_path_redirects_to_the_current_path(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $page = app(PageService::class)->create(['title' => 'Renamed', 'body_html' => '<p>x</p>'], $actor);
+        app(PublicationService::class)->publish($page->fresh(), $page->fresh()->currentDraft, $actor, '/old-path');
+        app(PublicationService::class)->publish($page->fresh(), $page->fresh()->publishedRevision, $actor, '/new-path');
+
+        $response = $this->get('/old-path');
+
+        $response->assertRedirect('/new-path');
+        $response->assertStatus(301);
+    }
+
+    public function test_the_catch_all_route_never_shadows_a_system_route(): void
+    {
+        $this->get('/login')->assertOk();
+    }
+
+    public function test_admin_theme_routes_remain_protected_behind_authentication(): void
+    {
+        $this->get('/admin/theme')->assertRedirect('/login');
+    }
+
+    public function test_public_rendering_reflects_a_configured_theme_component(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $theme = app(ThemeService::class)->create(['name' => 'Custom'], $actor);
+        $template = app(ThemeTemplateService::class)->create($theme, ['name' => 'Home', 'content_kind' => 'home'], $actor);
+        $section = app(ThemeSectionService::class)->createAndPlace($template, [], $actor);
+        app(ThemeComponentService::class)->create($section, 'hero', ['headline' => 'Custom Hero'], $actor);
+        app(ThemeActivationService::class)->activate($theme, $actor);
+
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $page) => $page
+            ->where('template.template_slug', 'home')
+            ->where('template.sections.0.components.0.props.headline', 'Custom Hero')
+        );
+    }
+
+    public function test_a_content_list_component_resolves_a_real_url_per_item(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $page = app(PageService::class)->create(['title' => 'Listed Page', 'body_html' => '<p>x</p>'], $actor);
+        app(PublicationService::class)->publish($page->fresh(), $page->fresh()->currentDraft, $actor, '/listed-page');
+
+        $theme = app(ThemeService::class)->create(['name' => 'Custom'], $actor);
+        $template = app(ThemeTemplateService::class)->create($theme, ['name' => 'Home', 'content_kind' => 'home'], $actor);
+        $section = app(ThemeSectionService::class)->createAndPlace($template, [], $actor);
+        app(ThemeComponentService::class)->create($section, 'content_list', [
+            'content_kind' => 'page', 'limit' => 6, 'order' => 'latest',
+        ], $actor);
+        app(ThemeActivationService::class)->activate($theme, $actor);
+
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $p) => $p
+            ->where('template.sections.0.components.0.props.0.title', 'Listed Page')
+            ->where('template.sections.0.components.0.props.0.url', '/listed-page')
+        );
+    }
+
+    /**
+     * Presentation-foundation remediation: navigation_menu_slot's rendering
+     * was originally stubbed (docs/implementation/IMP-006-theme-engine.md's
+     * own doc comment: "resolved server-side per menu_code at a future
+     * slice"). Completes that already-approved, already-schema-validated
+     * extension point via ThemeNavigationMenu/Item + the existing
+     * NavigationDestinationResolver — no new component type, no schema
+     * change.
+     */
+    public function test_navigation_menu_slot_resolves_visible_items_with_real_urls(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $theme = app(ThemeService::class)->create(['name' => 'Custom'], $actor);
+        $template = app(ThemeTemplateService::class)->create($theme, ['name' => 'Home', 'content_kind' => 'home'], $actor);
+        $section = app(ThemeSectionService::class)->createAndPlace($template, [], $actor);
+        app(ThemeComponentService::class)->create($section, 'navigation_menu_slot', ['menu_code' => 'primary'], $actor);
+        app(ThemeActivationService::class)->activate($theme, $actor);
+
+        $menu = app(ThemeNavigationService::class)->createMenu($theme, ['code' => 'primary', 'name' => 'Primary'], $actor);
+        app(ThemeNavigationService::class)->createItem($menu, [
+            'label' => 'Home', 'destination_type' => 'SYSTEM_ROUTE', 'destination_route' => 'home',
+        ], $actor);
+
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $p) => $p
+            ->where('template.sections.0.components.0.props.menu_code', 'primary')
+            ->where('template.sections.0.components.0.props.items.0.label', 'Home')
+            ->where('template.sections.0.components.0.props.items.0.url', url('/'))
+        );
+    }
+
+    public function test_navigation_menu_slot_hides_items_whose_destination_no_longer_resolves(): void
+    {
+        // Mirrors NavigationDestinationResolver's own contract: an item
+        // pointing at a since-unpublished page resolves to null and is
+        // hidden, never a broken link.
+        $actor = $this->makeAuthorizedActor();
+        $page = app(PageService::class)->create(['title' => 'Temp', 'body_html' => '<p>x</p>'], $actor);
+        app(PublicationService::class)->publish($page->fresh(), $page->fresh()->currentDraft, $actor, '/temp');
+        app(PublicationService::class)->unpublish($page->fresh(), $actor);
+        app(PublicationService::class)->archive($page->fresh(), $actor);
+
+        $theme = app(ThemeService::class)->create(['name' => 'Custom'], $actor);
+        $template = app(ThemeTemplateService::class)->create($theme, ['name' => 'Home', 'content_kind' => 'home'], $actor);
+        $section = app(ThemeSectionService::class)->createAndPlace($template, [], $actor);
+        app(ThemeComponentService::class)->create($section, 'navigation_menu_slot', ['menu_code' => 'primary'], $actor);
+        app(ThemeActivationService::class)->activate($theme, $actor);
+
+        $menu = app(ThemeNavigationService::class)->createMenu($theme, ['code' => 'primary', 'name' => 'Primary'], $actor);
+        app(ThemeNavigationService::class)->createItem($menu, [
+            'label' => 'Temp', 'destination_type' => 'CMS_CONTENT', 'destination_content_kind' => 'page', 'destination_content_ulid' => $page->ulid,
+        ], $actor);
+
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $p) => $p->where('template.sections.0.components.0.props.items', []));
+    }
+}

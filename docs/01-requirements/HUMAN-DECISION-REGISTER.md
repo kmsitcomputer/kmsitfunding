@@ -31,6 +31,23 @@ implementation process — they carry the same Level 1 authority per
 [docs/00-governance/DOCUMENT-AUTHORITY.md](../00-governance/DOCUMENT-AUTHORITY.md) ("Human Decision
 Register — explicit approved Human changes").
 
+Q29-Q33 were materialized during the "IMP-005 CMS — Single AI Agent" specification audit/
+remediation task, resolving HD-IMP005-01/HD-IMP005-02/HD-IMP005-03/HD-IMP005-04/HD-IMP005-05 — the
+five Human Decisions
+[docs/implementation/IMP-005-cms.md](../implementation/IMP-005-cms.md) section 25 records as
+FINAL/LOCKED with Human provenance ("the Human supplied all five final decisions directly in the
+task 'IMP-005 CMS - HUMAN DECISION MATERIALIZATION PATCH'"). This register entry closes a
+materialization gap identified during the IMP-005 Single AI Agent specification audit: the
+decisions existed in IMP-005-cms.md §25 with clear Human provenance, but had not yet been
+transcribed into this Level 1 register. Per this register's own Change Control section, that
+transcription itself required explicit Human authorization; it was given directly: "I explicitly
+authorize Claude Code to materialize the already FINAL / LOCKED HD-IMP005-01 through HD-IMP005-05
+into the authoritative Human Decision Register, without changing their semantics, and to resume the
+IMP-005 Single AI Agent specification re-audit workflow afterward." Like Q26-Q28, Q29-Q33 are new
+Human Decisions made directly within this repository's implementation process — they carry the
+same Level 1 authority per
+[docs/00-governance/DOCUMENT-AUTHORITY.md](../00-governance/DOCUMENT-AUTHORITY.md).
+
 Per [docs/00-governance/DOCUMENT-AUTHORITY.md](../00-governance/DOCUMENT-AUTHORITY.md), this
 register is Level 1 — the highest authority in this repository. No Master Requirement,
 architecture document, ADR, implementation specification, governance document, or code may
@@ -67,10 +84,16 @@ Q25 — A  Controlled One-Time CLI Bootstrap for First Super Admin
 Q26 — A  Per-Category Audit Write Failure Semantics (Critical Fail-Closed, Default Fail-Closed)
 Q27 — A  Explicit Permission + Domain-Aware Scope for Audit Read (No Automatic Super Admin Access)
 Q28 — A  Append-Only Audit Operational Model + Governed Retention Purge
+Q29 — A  No Dedicated Editorial Approval Workflow in CMS v1 (Editing != Publishing Authority)
+Q30 — A  Menu/Navigation Presentation Belongs to IMP-006 Theme Engine
+Q31 — A  Single-Locale CMS v1 (No Speculative Multilingual Infrastructure)
+Q32 — A  Minimal Scheduled Publish/Unpublish via Laravel Scheduler + Cron
+Q33 — A  Article Is Canonical; News Is Article Classification (No Duplicate Entity/Mechanisms)
 ```
 
-Q21-Q28 are detailed in "Extended Decisions — Detailed Rules (Q21-Q28)" below; Q1-Q20 above
-retain their original one-line form as supplied during IMP-001 Readiness Remediation Pass 1.
+Q21-Q28 are detailed in "Extended Decisions — Detailed Rules (Q21-Q28)" below; Q29-Q33 are detailed
+in "Extended Decisions — Detailed Rules (Q29-Q33)" further below; Q1-Q20 above retain their
+original one-line form as supplied during IMP-001 Readiness Remediation Pass 1.
 
 ## Extended Decisions — Detailed Rules (Q21-Q28)
 
@@ -227,6 +250,65 @@ IMP-004 provides structural compatibility/foundation only — it does not build 
 ```
 
 Resolves readiness finding HD-IMP004-03.
+
+## Extended Decisions — Detailed Rules (Q29-Q33)
+
+Source: Human authorization message during the "IMP-005 CMS — Single AI Agent" task ("HUMAN
+DECISION — IMP-005 GOVERNANCE REGISTER AUTHORIZATION"), transcribed verbatim below without
+reinterpretation, broadening, or narrowing. Each resolves the correspondingly-numbered HD-IMP005-0N
+recorded in [docs/implementation/IMP-005-cms.md](../implementation/IMP-005-cms.md) section 25.
+
+### Q29 — No Dedicated Editorial Approval Workflow in CMS v1 (resolves HD-IMP005-01)
+
+```
+No dedicated editorial approval workflow in CMS v1.
+Editing/authoring authority is separate from publishing authority.
+Creator/editor does not automatically receive publishing authority.
+No reviewer queue, multi-step editorial approval workflow, or editorial approval matrix is
+  introduced in CMS v1.
+```
+
+### Q30 — Menu / Navigation Ownership (resolves HD-IMP005-02)
+
+```
+Menu/navigation presentation configuration belongs to IMP-006 Theme Engine.
+IMP-005 owns canonical CMS content and destination/link contracts only.
+IMP-005 does NOT implement: menu builder; navigation composition engine; Theme Engine.
+Navigation visibility never replaces backend authorization.
+```
+
+### Q31 — Multilingual Scope (resolves HD-IMP005-03)
+
+```
+CMS v1 is SINGLE LOCALE.
+Future localization may remain additive-ready.
+IMP-005 does NOT implement: translation tables; locale publication workflow; localized slug
+  engine; locale fallback engine.
+A future multilingual capability requires appropriate change control.
+```
+
+### Q32 — Scheduled Publication (resolves HD-IMP005-04)
+
+```
+CMS v1 supports minimal timestamp-based scheduled publish and scheduled unpublish.
+Execution must remain compatible with Laravel Scheduler + Cron and shared-hosting deployment.
+No mandatory Redis server; Supervisor; PM2; WebSocket server; Node.js production runtime;
+  additional always-running worker infrastructure.
+Scheduled transitions remain subject to canonical authorization, lifecycle, transaction,
+  concurrency, System Principal, and audit semantics.
+```
+
+### Q33 — Article / News Model (resolves HD-IMP005-05)
+
+```
+News is NOT an independent canonical CMS entity.
+Canonical editorial content remains Article.
+News is represented through authorized Article classification/type/category semantics.
+Do not duplicate: revision model; publication lifecycle; path model; authorization; audit;
+  scheduling; content ownership.
+```
+
+Resolves readiness findings HD-IMP005-01 through HD-IMP005-05.
 
 ## Superseded Decisions
 
