@@ -1,5 +1,15 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
+import AdminLayout from '../../../Components/Admin/AdminLayout.vue';
+import Breadcrumb from '../../../Components/UI/Breadcrumb.vue';
+import Button from '../../../Components/UI/Button.vue';
+import Card from '../../../Components/UI/Card.vue';
+import FormField from '../../../Components/UI/FormField.vue';
+import Input from '../../../Components/UI/Input.vue';
+import PageHeader from '../../../Components/UI/PageHeader.vue';
+import RichTextEditor from '../../../Components/UI/RichTextEditor.vue';
+import Select from '../../../Components/UI/Select.vue';
+import Textarea from '../../../Components/UI/Textarea.vue';
 
 const form = useForm({
     title: '',
@@ -12,72 +22,57 @@ const form = useForm({
     og_description: '',
 });
 
-const submit = () => {
-    form.post('/admin/content/articles');
-};
+const submit = () => form.post('/admin/content/articles');
 </script>
 
 <template>
-    <div class="min-h-screen bg-neutral-50 px-4 py-8">
-        <form class="mx-auto max-w-2xl space-y-4" @submit.prevent="submit">
-            <h1 class="text-xl font-semibold text-neutral-800">New Article</h1>
+    <AdminLayout>
+        <template #breadcrumb>
+            <Breadcrumb :items="[{ label: 'Articles', href: '/admin/content/articles' }, { label: 'New' }]" />
+        </template>
+        <template #header>
+            <PageHeader title="New article" />
+        </template>
 
-            <div>
-                <label class="block text-sm text-neutral-600">Type</label>
-                <select v-model="form.article_type" class="mt-1 w-full rounded border px-3 py-2">
-                    <option value="ARTICLE">Article</option>
-                    <option value="NEWS">News</option>
-                </select>
-                <p v-if="form.errors.article_type" class="mt-1 text-sm text-red-600">{{ form.errors.article_type }}</p>
-            </div>
+        <Card class="max-w-3xl">
+            <form class="space-y-5" @submit.prevent="submit">
+                <FormField label="Type" for="article-type" :error="form.errors.article_type">
+                    <Select id="article-type" v-model="form.article_type">
+                        <option value="ARTICLE">Article</option>
+                        <option value="NEWS">News</option>
+                    </Select>
+                </FormField>
+                <FormField label="Title" for="article-title" :error="form.errors.title">
+                    <Input id="article-title" v-model="form.title" />
+                </FormField>
+                <FormField label="Body" :error="form.errors.body_html">
+                    <RichTextEditor v-model="form.body_html" placeholder="Write the article content…" />
+                </FormField>
+                <FormField label="Excerpt" for="article-excerpt">
+                    <Textarea id="article-excerpt" v-model="form.excerpt" :rows="3" />
+                </FormField>
 
-            <div>
-                <label class="block text-sm text-neutral-600">Title</label>
-                <input v-model="form.title" type="text" class="mt-1 w-full rounded border px-3 py-2" required autofocus />
-                <p v-if="form.errors.title" class="mt-1 text-sm text-red-600">{{ form.errors.title }}</p>
-            </div>
+                <fieldset class="space-y-4 rounded-lg border border-slate-200 p-4">
+                    <legend class="px-1 text-sm font-medium text-slate-600">SEO</legend>
+                    <FormField label="Meta title" for="article-meta-title">
+                        <Input id="article-meta-title" v-model="form.meta_title" />
+                    </FormField>
+                    <FormField label="Meta description" for="article-meta-description">
+                        <Textarea id="article-meta-description" v-model="form.meta_description" :rows="2" />
+                    </FormField>
+                    <FormField label="OG title" for="article-og-title">
+                        <Input id="article-og-title" v-model="form.og_title" />
+                    </FormField>
+                    <FormField label="OG description" for="article-og-description">
+                        <Textarea id="article-og-description" v-model="form.og_description" :rows="2" />
+                    </FormField>
+                </fieldset>
 
-            <div>
-                <label class="block text-sm text-neutral-600">Body</label>
-                <textarea v-model="form.body_html" rows="12" class="mt-1 w-full rounded border px-3 py-2 font-mono text-sm" required></textarea>
-                <p v-if="form.errors.body_html" class="mt-1 text-sm text-red-600">{{ form.errors.body_html }}</p>
-            </div>
-
-            <div>
-                <label class="block text-sm text-neutral-600">Excerpt</label>
-                <textarea v-model="form.excerpt" rows="3" class="mt-1 w-full rounded border px-3 py-2"></textarea>
-                <p v-if="form.errors.excerpt" class="mt-1 text-sm text-red-600">{{ form.errors.excerpt }}</p>
-            </div>
-
-            <fieldset class="space-y-4 rounded border p-4">
-                <legend class="px-1 text-sm text-neutral-600">SEO</legend>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">Meta title</label>
-                    <input v-model="form.meta_title" type="text" class="mt-1 w-full rounded border px-3 py-2" />
-                    <p v-if="form.errors.meta_title" class="mt-1 text-sm text-red-600">{{ form.errors.meta_title }}</p>
+                <div class="flex items-center gap-2">
+                    <Button type="submit" :disabled="form.processing">Create article</Button>
+                    <Button as="a" href="/admin/content/articles" variant="secondary">Cancel</Button>
                 </div>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">Meta description</label>
-                    <textarea v-model="form.meta_description" rows="2" class="mt-1 w-full rounded border px-3 py-2"></textarea>
-                    <p v-if="form.errors.meta_description" class="mt-1 text-sm text-red-600">{{ form.errors.meta_description }}</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">OG title</label>
-                    <input v-model="form.og_title" type="text" class="mt-1 w-full rounded border px-3 py-2" />
-                </div>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">OG description</label>
-                    <textarea v-model="form.og_description" rows="2" class="mt-1 w-full rounded border px-3 py-2"></textarea>
-                </div>
-            </fieldset>
-
-            <button type="submit" class="w-full rounded bg-neutral-800 px-3 py-2 text-white" :disabled="form.processing">
-                Create article
-            </button>
-        </form>
-    </div>
+            </form>
+        </Card>
+    </AdminLayout>
 </template>

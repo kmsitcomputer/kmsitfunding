@@ -1,5 +1,12 @@
 <script setup lang="ts">
 import { Link, useForm } from '@inertiajs/vue3';
+import AdminLayout from '../../../Components/Admin/AdminLayout.vue';
+import Breadcrumb from '../../../Components/UI/Breadcrumb.vue';
+import Button from '../../../Components/UI/Button.vue';
+import Card from '../../../Components/UI/Card.vue';
+import EmptyState from '../../../Components/UI/EmptyState.vue';
+import PageHeader from '../../../Components/UI/PageHeader.vue';
+import StatusBadge from '../../../Components/UI/StatusBadge.vue';
 
 interface PageRow {
     ulid: string;
@@ -18,10 +25,7 @@ const archiveForm = useForm({});
 const unpublishForm = useForm({});
 
 const archive = (page: PageRow) => {
-    if (! confirm(`Archive "${page.title}"? This cannot be undone.`)) {
-        return;
-    }
-
+    if (!confirm(`Archive "${page.title}"? This cannot be undone.`)) return;
     archiveForm.post(`/admin/content/pages/${page.ulid}/archive`);
 };
 
@@ -31,54 +35,48 @@ const unpublish = (page: PageRow) => {
 </script>
 
 <template>
-    <div class="min-h-screen bg-neutral-50 px-4 py-8">
-        <div class="mx-auto max-w-4xl space-y-4">
-            <div class="flex items-center justify-between">
-                <h1 class="text-xl font-semibold text-neutral-800">Pages</h1>
-                <Link href="/admin/content/pages/create" class="rounded bg-neutral-800 px-3 py-2 text-sm text-white">
-                    New Page
-                </Link>
-            </div>
+    <AdminLayout>
+        <template #breadcrumb>
+            <Breadcrumb :items="[{ label: 'Pages' }]" />
+        </template>
+        <template #header>
+            <PageHeader title="Pages" description="Standalone CMS pages.">
+                <template #actions>
+                    <Button as="a" href="/admin/content/pages/create">New page</Button>
+                </template>
+            </PageHeader>
+        </template>
 
-            <table class="w-full rounded border bg-white text-sm">
-                <thead>
-                    <tr class="border-b text-left text-neutral-500">
-                        <th class="px-3 py-2">Title</th>
-                        <th class="px-3 py-2">Status</th>
-                        <th class="px-3 py-2">Updated</th>
-                        <th class="px-3 py-2"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="page in props.pages.data" :key="page.ulid" class="border-b last:border-0">
-                        <td class="px-3 py-2 text-neutral-800">{{ page.title }}</td>
-                        <td class="px-3 py-2 text-neutral-600">{{ page.status }}</td>
-                        <td class="px-3 py-2 text-neutral-600">{{ page.updated_at }}</td>
-                        <td class="px-3 py-2 text-right space-x-2">
-                            <Link :href="`/admin/content/pages/${page.ulid}`" class="text-neutral-800 underline">Edit</Link>
-                            <button
-                                v-if="page.status === 'PUBLISHED'"
-                                type="button"
-                                class="text-neutral-600 underline"
-                                @click="unpublish(page)"
-                            >
-                                Unpublish
-                            </button>
-                            <button
-                                v-if="page.status === 'DRAFT' || page.status === 'RETIRED'"
-                                type="button"
-                                class="text-red-600 underline"
-                                @click="archive(page)"
-                            >
-                                Archive
-                            </button>
-                        </td>
-                    </tr>
-                    <tr v-if="props.pages.data.length === 0">
-                        <td class="px-3 py-6 text-center text-neutral-500" colspan="4">No pages yet.</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+        <Card :padded="false">
+            <EmptyState v-if="props.pages.data.length === 0" icon="document" title="No pages yet">
+                <template #action>
+                    <Button as="a" href="/admin/content/pages/create">New page</Button>
+                </template>
+            </EmptyState>
+
+            <ul v-else class="divide-y divide-slate-100">
+                <li v-for="page in props.pages.data" :key="page.ulid" class="flex items-center justify-between gap-4 px-5 py-4">
+                    <div class="min-w-0">
+                        <p class="truncate text-sm font-medium text-slate-800">{{ page.title }}</p>
+                        <p class="mt-0.5 text-xs text-slate-500">Updated {{ page.updated_at }}</p>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-3">
+                        <StatusBadge :status="page.status" />
+                        <Link :href="`/admin/content/pages/${page.ulid}`" class="text-sm font-medium text-emerald-700 hover:text-emerald-800">Edit</Link>
+                        <button v-if="page.status === 'PUBLISHED'" type="button" class="text-sm text-slate-500 hover:text-slate-700" @click="unpublish(page)">
+                            Unpublish
+                        </button>
+                        <button
+                            v-if="page.status === 'DRAFT' || page.status === 'RETIRED'"
+                            type="button"
+                            class="text-sm text-slate-400 hover:text-red-600"
+                            @click="archive(page)"
+                        >
+                            Archive
+                        </button>
+                    </div>
+                </li>
+            </ul>
+        </Card>
+    </AdminLayout>
 </template>

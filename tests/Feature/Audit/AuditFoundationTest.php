@@ -101,15 +101,19 @@ class AuditFoundationTest extends TestCase
         // 19 Identity + 9 RBAC + 1 new denial event + 20 IMP-005 content.*
         // events (docs/implementation/IMP-005-cms.md section 12) + 12
         // IMP-006 theme.* events (docs/implementation/
-        // IMP-006-theme-engine.md section 19) = 61 active/target.
+        // IMP-006-theme-engine.md section 19) + 20 IMP-007 program.*/
+        // campaign.*/fund.* events (docs/implementation/
+        // IMP-007-campaign-program-fund.md section 17: 7 program.* + 10
+        // campaign.* + 3 fund.*) = 81 active/target.
         // Additive-only per MULTI-MODEL-OWNERSHIP: no existing event's
         // definition changed, registered by ContentAuditEventRegistrar /
-        // ThemeAuditEventRegistrar via AuditEventRegistry's own public
-        // register(), not by editing this registry's file.
-        $this->assertCount(61, $active);
+        // ThemeAuditEventRegistrar / CampaignAuditEventRegistrar via
+        // AuditEventRegistry's own public register(), not by editing this
+        // registry's file.
+        $this->assertCount(81, $active);
         // 5 reserved catalog events + governance.audit.purged = 6 reserved.
         $this->assertCount(6, $reserved);
-        $this->assertCount(67, $all);
+        $this->assertCount(87, $all);
 
         $this->assertNotNull($registry->find('security.authorization.denied', 1));
         $this->assertNotNull($registry->find('governance.audit.purged', 1));

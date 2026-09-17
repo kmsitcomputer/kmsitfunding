@@ -7,6 +7,7 @@ use App\Services\Content\PageService;
 use App\Services\Content\PublicationService;
 use App\Services\Theme\ThemeActivationService;
 use App\Services\Theme\ThemeComponentService;
+use App\Services\Theme\ThemeNavigationService;
 use App\Services\Theme\ThemeSectionService;
 use App\Services\Theme\ThemeService;
 use App\Services\Theme\ThemeTemplateService;
@@ -128,5 +129,66 @@ class PublicContentControllerTest extends TestCase
             ->where('template.sections.0.components.0.props.0.title', 'Listed Page')
             ->where('template.sections.0.components.0.props.0.url', '/listed-page')
         );
+    }
+
+    /**
+     * Presentation-foundation remediation: navigation_menu_slot's rendering
+     * was originally stubbed (docs/implementation/IMP-006-theme-engine.md's
+     * own doc comment: "resolved server-side per menu_code at a future
+     * slice"). Completes that already-approved, already-schema-validated
+     * extension point via ThemeNavigationMenu/Item + the existing
+     * NavigationDestinationResolver — no new component type, no schema
+     * change.
+     */
+    public function test_navigation_menu_slot_resolves_visible_items_with_real_urls(): void
+    {
+        $actor = $this->makeAuthorizedActor();
+        $theme = app(ThemeService::class)->create(['name' => 'Custom'], $actor);
+        $template = app(ThemeTemplateService::class)->create($theme, ['name' => 'Home', 'content_kind' => 'home'], $actor);
+        $section = app(ThemeSectionService::class)->createAndPlace($template, [], $actor);
+        app(ThemeComponentService::class)->create($section, 'navigation_menu_slot', ['menu_code' => 'primary'], $actor);
+        app(ThemeActivationService::class)->activate($theme, $actor);
+
+        $menu = app(ThemeNavigationService::class)->createMenu($theme, ['code' => 'primary', 'name' => 'Primary'], $actor);
+        app(ThemeNavigationService::class)->createItem($menu, [
+            'label' => 'Home', 'destination_type' => 'SYSTEM_ROUTE', 'destination_route' => 'home',
+        ], $actor);
+
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $p) => $p
+            ->where('template.sections.0.components.0.props.menu_code', 'primary')
+            ->where('template.sections.0.components.0.props.items.0.label', 'Home')
+            ->where('template.sections.0.components.0.props.items.0.url', url('/'))
+        );
+    }
+
+    public function test_navigation_menu_slot_hides_items_whose_destination_no_longer_resolves(): void
+    {
+        // Mirrors NavigationDestinationResolver's own contract: an item
+        // pointing at a since-unpublished page resolves to null and is
+        // hidden, never a broken link.
+        $actor = $this->makeAuthorizedActor();
+        $page = app(PageService::class)->create(['title' => 'Temp', 'body_html' => '<p>x</p>'], $actor);
+        app(PublicationService::class)->publish($page->fresh(), $page->fresh()->currentDraft, $actor, '/temp');
+        app(PublicationService::class)->unpublish($page->fresh(), $actor);
+        app(PublicationService::class)->archive($page->fresh(), $actor);
+
+        $theme = app(ThemeService::class)->create(['name' => 'Custom'], $actor);
+        $template = app(ThemeTemplateService::class)->create($theme, ['name' => 'Home', 'content_kind' => 'home'], $actor);
+        $section = app(ThemeSectionService::class)->createAndPlace($template, [], $actor);
+        app(ThemeComponentService::class)->create($section, 'navigation_menu_slot', ['menu_code' => 'primary'], $actor);
+        app(ThemeActivationService::class)->activate($theme, $actor);
+
+        $menu = app(ThemeNavigationService::class)->createMenu($theme, ['code' => 'primary', 'name' => 'Primary'], $actor);
+        app(ThemeNavigationService::class)->createItem($menu, [
+            'label' => 'Temp', 'destination_type' => 'CMS_CONTENT', 'destination_content_kind' => 'page', 'destination_content_ulid' => $page->ulid,
+        ], $actor);
+
+        $response = $this->get('/');
+
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $p) => $p->where('template.sections.0.components.0.props.items', []));
     }
 }

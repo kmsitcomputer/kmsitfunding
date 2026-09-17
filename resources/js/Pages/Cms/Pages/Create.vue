@@ -1,5 +1,14 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
+import AdminLayout from '../../../Components/Admin/AdminLayout.vue';
+import Breadcrumb from '../../../Components/UI/Breadcrumb.vue';
+import Button from '../../../Components/UI/Button.vue';
+import Card from '../../../Components/UI/Card.vue';
+import FormField from '../../../Components/UI/FormField.vue';
+import Input from '../../../Components/UI/Input.vue';
+import PageHeader from '../../../Components/UI/PageHeader.vue';
+import RichTextEditor from '../../../Components/UI/RichTextEditor.vue';
+import Textarea from '../../../Components/UI/Textarea.vue';
 
 const form = useForm({
     title: '',
@@ -11,63 +20,51 @@ const form = useForm({
     og_description: '',
 });
 
-const submit = () => {
-    form.post('/admin/content/pages');
-};
+const submit = () => form.post('/admin/content/pages');
 </script>
 
 <template>
-    <div class="min-h-screen bg-neutral-50 px-4 py-8">
-        <form class="mx-auto max-w-2xl space-y-4" @submit.prevent="submit">
-            <h1 class="text-xl font-semibold text-neutral-800">New Page</h1>
+    <AdminLayout>
+        <template #breadcrumb>
+            <Breadcrumb :items="[{ label: 'Pages', href: '/admin/content/pages' }, { label: 'New' }]" />
+        </template>
+        <template #header>
+            <PageHeader title="New page" />
+        </template>
 
-            <div>
-                <label class="block text-sm text-neutral-600">Title</label>
-                <input v-model="form.title" type="text" class="mt-1 w-full rounded border px-3 py-2" required autofocus />
-                <p v-if="form.errors.title" class="mt-1 text-sm text-red-600">{{ form.errors.title }}</p>
-            </div>
+        <Card class="max-w-3xl">
+            <form class="space-y-5" @submit.prevent="submit">
+                <FormField label="Title" for="page-title" :error="form.errors.title">
+                    <Input id="page-title" v-model="form.title" />
+                </FormField>
+                <FormField label="Body" :error="form.errors.body_html">
+                    <RichTextEditor v-model="form.body_html" placeholder="Write the page content…" />
+                </FormField>
+                <FormField label="Excerpt" for="page-excerpt" :error="form.errors.excerpt">
+                    <Textarea id="page-excerpt" v-model="form.excerpt" :rows="3" />
+                </FormField>
 
-            <div>
-                <label class="block text-sm text-neutral-600">Body</label>
-                <textarea v-model="form.body_html" rows="12" class="mt-1 w-full rounded border px-3 py-2 font-mono text-sm" required></textarea>
-                <p v-if="form.errors.body_html" class="mt-1 text-sm text-red-600">{{ form.errors.body_html }}</p>
-            </div>
+                <fieldset class="space-y-4 rounded-lg border border-slate-200 p-4">
+                    <legend class="px-1 text-sm font-medium text-slate-600">SEO</legend>
+                    <FormField label="Meta title" for="page-meta-title" :error="form.errors.meta_title">
+                        <Input id="page-meta-title" v-model="form.meta_title" />
+                    </FormField>
+                    <FormField label="Meta description" for="page-meta-description">
+                        <Textarea id="page-meta-description" v-model="form.meta_description" :rows="2" />
+                    </FormField>
+                    <FormField label="OG title" for="page-og-title">
+                        <Input id="page-og-title" v-model="form.og_title" />
+                    </FormField>
+                    <FormField label="OG description" for="page-og-description">
+                        <Textarea id="page-og-description" v-model="form.og_description" :rows="2" />
+                    </FormField>
+                </fieldset>
 
-            <div>
-                <label class="block text-sm text-neutral-600">Excerpt</label>
-                <textarea v-model="form.excerpt" rows="3" class="mt-1 w-full rounded border px-3 py-2"></textarea>
-                <p v-if="form.errors.excerpt" class="mt-1 text-sm text-red-600">{{ form.errors.excerpt }}</p>
-            </div>
-
-            <fieldset class="space-y-4 rounded border p-4">
-                <legend class="px-1 text-sm text-neutral-600">SEO</legend>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">Meta title</label>
-                    <input v-model="form.meta_title" type="text" class="mt-1 w-full rounded border px-3 py-2" />
-                    <p v-if="form.errors.meta_title" class="mt-1 text-sm text-red-600">{{ form.errors.meta_title }}</p>
+                <div class="flex items-center gap-2">
+                    <Button type="submit" :disabled="form.processing">Create page</Button>
+                    <Button as="a" href="/admin/content/pages" variant="secondary">Cancel</Button>
                 </div>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">Meta description</label>
-                    <textarea v-model="form.meta_description" rows="2" class="mt-1 w-full rounded border px-3 py-2"></textarea>
-                    <p v-if="form.errors.meta_description" class="mt-1 text-sm text-red-600">{{ form.errors.meta_description }}</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">OG title</label>
-                    <input v-model="form.og_title" type="text" class="mt-1 w-full rounded border px-3 py-2" />
-                </div>
-
-                <div>
-                    <label class="block text-sm text-neutral-600">OG description</label>
-                    <textarea v-model="form.og_description" rows="2" class="mt-1 w-full rounded border px-3 py-2"></textarea>
-                </div>
-            </fieldset>
-
-            <button type="submit" class="w-full rounded bg-neutral-800 px-3 py-2 text-white" :disabled="form.processing">
-                Create page
-            </button>
-        </form>
-    </div>
+            </form>
+        </Card>
+    </AdminLayout>
 </template>

@@ -5,6 +5,10 @@ namespace App\Providers;
 use App\Services\Audit\AuditEventRegistry;
 use App\Services\Audit\AuditScopeResolver;
 use App\Services\Audit\CorrelationContext;
+use App\Services\Campaign\CampaignAuditEventRegistrar;
+use App\Services\Campaign\CampaignScopeResolver;
+use App\Services\Campaign\FundScopeResolver;
+use App\Services\Campaign\ProgramScopeResolver;
 use App\Services\Content\ContentAuditEventRegistrar;
 use App\Services\Content\ContentScopeResolver;
 use App\Services\Rbac\OwnUserScopeResolver;
@@ -41,6 +45,14 @@ class AppServiceProvider extends ServiceProvider
             // IMP-006: Theme Engine scoping — identical shape to
             // ContentScopeResolver.
             new ThemeScopeResolver,
+            // IMP-007: Program/Campaign/Fund scoping — identical shape to
+            // ContentScopeResolver/ThemeScopeResolver (see
+            // docs/implementation/IMP-007-campaign-program-fund.md section 6
+            // for why ORGANIZATION, not the locked Program/Campaign/Fund
+            // ScopeType values, is used in v1).
+            new ProgramScopeResolver,
+            new CampaignScopeResolver,
+            new FundScopeResolver,
         ]));
 
         // IMP-004: canonical audit event registry + correlation foundation,
@@ -49,10 +61,13 @@ class AppServiceProvider extends ServiceProvider
         // registry's own public register() method — AuditEventRegistry's
         // own file (its registerCanonicalEvents()) is never touched.
         // IMP-006: the 12 theme.* events are registered the same way.
+        // IMP-007: the program.*/campaign.*/fund.* events are registered
+        // the same way.
         $this->app->singleton(AuditEventRegistry::class, function () {
             $registry = new AuditEventRegistry;
             (new ContentAuditEventRegistrar)->register($registry);
             (new ThemeAuditEventRegistrar)->register($registry);
+            (new CampaignAuditEventRegistrar)->register($registry);
 
             return $registry;
         });

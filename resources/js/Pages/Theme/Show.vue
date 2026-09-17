@@ -1,5 +1,15 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
+import AdminLayout from '../../Components/Admin/AdminLayout.vue';
+import Breadcrumb from '../../Components/UI/Breadcrumb.vue';
+import Button from '../../Components/UI/Button.vue';
+import Card from '../../Components/UI/Card.vue';
+import FormField from '../../Components/UI/FormField.vue';
+import Input from '../../Components/UI/Input.vue';
+import PageHeader from '../../Components/UI/PageHeader.vue';
+import Select from '../../Components/UI/Select.vue';
+import StatusBadge from '../../Components/UI/StatusBadge.vue';
+import Textarea from '../../Components/UI/Textarea.vue';
 
 interface ComponentRow {
     ulid: string;
@@ -93,111 +103,114 @@ const uploadAsset = () => assetForm.post(`/admin/theme/${props.theme.ulid}/asset
 </script>
 
 <template>
-    <div class="min-h-screen bg-neutral-50 px-4 py-8">
-        <div class="mx-auto max-w-4xl space-y-8">
-            <div class="flex items-center justify-between">
-                <h1 class="text-xl font-semibold text-neutral-800">{{ theme.name }}</h1>
-                <div class="flex items-center gap-2">
-                    <span class="rounded border px-2 py-1 text-xs text-neutral-600">{{ theme.status }}</span>
-                    <button
-                        v-if="theme.status !== 'ACTIVE'"
-                        type="button"
-                        class="rounded bg-neutral-800 px-3 py-2 text-sm text-white"
-                        @click="activate"
-                    >
-                        Activate
-                    </button>
-                </div>
-            </div>
+    <AdminLayout>
+        <template #breadcrumb>
+            <Breadcrumb :items="[{ label: 'Theme', href: '/admin/theme' }, { label: theme.name }]" />
+        </template>
+        <template #header>
+            <PageHeader :title="theme.name" description="Presentation configuration — templates, sections, navigation, branding, assets.">
+                <template #badge>
+                    <StatusBadge :status="theme.status" />
+                </template>
+                <template #actions>
+                    <Button v-if="theme.status !== 'ACTIVE'" @click="activate">Activate</Button>
+                </template>
+            </PageHeader>
+        </template>
 
-            <section class="space-y-4 rounded border bg-white p-4">
-                <h2 class="text-sm font-semibold text-neutral-600">Templates</h2>
+        <div class="space-y-6">
+            <Card>
+                <h2 class="text-sm font-semibold text-slate-800">Templates</h2>
 
-                <div v-for="template in templates" :key="template.ulid" class="rounded border p-3">
-                    <p class="font-medium text-neutral-800">{{ template.name }} ({{ template.content_kind }})</p>
+                <div class="mt-4 space-y-4">
+                    <div v-for="template in templates" :key="template.ulid" class="rounded-lg border border-slate-200 p-4">
+                        <p class="font-medium text-slate-800">{{ template.name }} <span class="text-slate-400">({{ template.content_kind }})</span></p>
 
-                    <div v-for="section in template.sections" :key="section.ulid" class="ml-4 mt-2 rounded border-l-2 border-neutral-200 pl-3">
-                        <p class="text-sm text-neutral-600">Section — {{ section.layout_variant }}</p>
-                        <ul class="ml-4 list-disc text-sm text-neutral-700">
-                            <li v-for="component in section.components" :key="component.ulid">{{ component.type }}</li>
-                        </ul>
+                        <div v-for="section in template.sections" :key="section.ulid" class="ml-3 mt-3 rounded-md border-l-2 border-slate-200 pl-3">
+                            <p class="text-sm text-slate-600">Section — {{ section.layout_variant }}</p>
+                            <ul class="ml-4 list-disc text-sm text-slate-600">
+                                <li v-for="component in section.components" :key="component.ulid">{{ component.type }}</li>
+                            </ul>
 
-                        <form class="mt-2 flex items-end gap-2" @submit.prevent="submitComponent(section.ulid)">
-                            <select v-model="componentForm.type" class="rounded border px-2 py-1 text-sm">
-                                <option value="hero">hero</option>
-                                <option value="rich_text">rich_text</option>
-                                <option value="image">image</option>
-                                <option value="cta_button">cta_button</option>
-                                <option value="content_list">content_list</option>
-                                <option value="stats">stats</option>
-                                <option value="banner">banner</option>
-                                <option value="card_grid">card_grid</option>
-                                <option value="navigation_menu_slot">navigation_menu_slot</option>
-                            </select>
-                            <textarea v-model="componentForm.config" rows="2" class="flex-1 rounded border px-2 py-1 font-mono text-xs" placeholder="{}"></textarea>
-                            <button type="submit" class="rounded border px-2 py-1 text-xs">Add component</button>
+                            <form class="mt-2 flex flex-wrap items-end gap-2" @submit.prevent="submitComponent(section.ulid)">
+                                <Select v-model="componentForm.type" class="!w-auto">
+                                    <option value="hero">hero</option>
+                                    <option value="rich_text">rich_text</option>
+                                    <option value="image">image</option>
+                                    <option value="cta_button">cta_button</option>
+                                    <option value="content_list">content_list</option>
+                                    <option value="stats">stats</option>
+                                    <option value="banner">banner</option>
+                                    <option value="card_grid">card_grid</option>
+                                    <option value="navigation_menu_slot">navigation_menu_slot</option>
+                                </Select>
+                                <Textarea v-model="componentForm.config" :rows="1" class="flex-1 font-mono !text-xs" placeholder="{}" />
+                                <Button type="submit" variant="secondary">Add component</Button>
+                            </form>
+                            <p v-if="componentForm.errors.config" class="mt-1 text-xs text-red-600">{{ componentForm.errors.config }}</p>
+                        </div>
+
+                        <form class="mt-3 flex items-end gap-2" @submit.prevent="submitSection(template.ulid)">
+                            <Input v-model="sectionForm.layout_variant" placeholder="layout_variant" class="!w-auto" />
+                            <Button type="submit" variant="secondary">Add section</Button>
                         </form>
-                        <p v-if="componentForm.errors.config" class="text-xs text-red-600">{{ componentForm.errors.config }}</p>
                     </div>
-
-                    <form class="mt-2 flex items-end gap-2" @submit.prevent="submitSection(template.ulid)">
-                        <input v-model="sectionForm.layout_variant" type="text" class="rounded border px-2 py-1 text-sm" placeholder="layout_variant" />
-                        <button type="submit" class="rounded border px-2 py-1 text-xs">Add section</button>
-                    </form>
                 </div>
 
-                <form class="flex items-end gap-2" @submit.prevent="submitTemplate">
-                    <input v-model="templateForm.name" type="text" class="rounded border px-2 py-1 text-sm" placeholder="Template name" required />
-                    <select v-model="templateForm.content_kind" class="rounded border px-2 py-1 text-sm">
+                <form class="mt-4 flex flex-wrap items-end gap-2 border-t border-slate-100 pt-4" @submit.prevent="submitTemplate">
+                    <Input v-model="templateForm.name" placeholder="Template name" class="!w-auto" />
+                    <Select v-model="templateForm.content_kind" class="!w-auto">
                         <option value="home">home</option>
                         <option value="page">page</option>
                         <option value="article">article</option>
-                    </select>
-                    <button type="submit" class="rounded border px-2 py-1 text-xs">Add template</button>
+                    </Select>
+                    <Button type="submit" variant="secondary">Add template</Button>
                 </form>
-                <p v-if="templateForm.errors.content_kind" class="text-xs text-red-600">{{ templateForm.errors.content_kind }}</p>
-            </section>
+                <p v-if="templateForm.errors.content_kind" class="mt-1 text-xs text-red-600">{{ templateForm.errors.content_kind }}</p>
+            </Card>
 
-            <section class="space-y-4 rounded border bg-white p-4">
-                <h2 class="text-sm font-semibold text-neutral-600">Navigation Menus</h2>
-                <ul>
-                    <li v-for="menu in navigationMenus" :key="menu.ulid" class="text-sm text-neutral-700">
-                        {{ menu.name }} ({{ menu.code }}) — {{ menu.items.length }} item(s)
-                    </li>
+            <Card>
+                <h2 class="text-sm font-semibold text-slate-800">Navigation menus</h2>
+                <ul v-if="navigationMenus.length > 0" class="mt-3 space-y-1.5 text-sm text-slate-600">
+                    <li v-for="menu in navigationMenus" :key="menu.ulid">{{ menu.name }} ({{ menu.code }}) — {{ menu.items.length }} item(s)</li>
                 </ul>
-                <form class="flex items-end gap-2" @submit.prevent="submitMenu">
-                    <input v-model="menuForm.code" type="text" class="rounded border px-2 py-1 text-sm" placeholder="code (e.g. primary)" required />
-                    <input v-model="menuForm.name" type="text" class="rounded border px-2 py-1 text-sm" placeholder="Name" required />
-                    <button type="submit" class="rounded border px-2 py-1 text-xs">Add menu</button>
+                <p v-else class="mt-3 text-sm text-slate-500">No navigation menus yet.</p>
+                <form class="mt-4 flex flex-wrap items-end gap-2 border-t border-slate-100 pt-4" @submit.prevent="submitMenu">
+                    <Input v-model="menuForm.code" placeholder="code (e.g. primary)" class="!w-auto" />
+                    <Input v-model="menuForm.name" placeholder="Name" class="!w-auto" />
+                    <Button type="submit" variant="secondary">Add menu</Button>
                 </form>
-            </section>
+            </Card>
 
-            <section class="space-y-4 rounded border bg-white p-4">
-                <h2 class="text-sm font-semibold text-neutral-600">Branding</h2>
-                <form class="space-y-2" @submit.prevent="submitBranding">
-                    <label class="block text-sm text-neutral-600">Color tokens (JSON)</label>
-                    <textarea v-model="brandingForm.color_tokens" rows="6" class="w-full rounded border px-2 py-1 font-mono text-xs"></textarea>
-                    <p v-if="brandingForm.errors.color_tokens" class="text-xs text-red-600">{{ brandingForm.errors.color_tokens }}</p>
-                    <select v-model="brandingForm.font_family" class="rounded border px-2 py-1 text-sm">
-                        <option value="system">system</option>
-                        <option value="serif">serif</option>
-                        <option value="mono">mono</option>
-                    </select>
-                    <button type="submit" class="rounded border px-2 py-1 text-xs">Save branding</button>
+            <Card>
+                <h2 class="text-sm font-semibold text-slate-800">Branding</h2>
+                <form class="mt-3 space-y-3" @submit.prevent="submitBranding">
+                    <FormField label="Color tokens (JSON)" :error="brandingForm.errors.color_tokens">
+                        <Textarea v-model="brandingForm.color_tokens" :rows="6" class="font-mono !text-xs" />
+                    </FormField>
+                    <FormField label="Font family">
+                        <Select v-model="brandingForm.font_family" class="!w-auto">
+                            <option value="system">system</option>
+                            <option value="serif">serif</option>
+                            <option value="mono">mono</option>
+                        </Select>
+                    </FormField>
+                    <Button type="submit">Save branding</Button>
                 </form>
-            </section>
+            </Card>
 
-            <section class="space-y-4 rounded border bg-white p-4">
-                <h2 class="text-sm font-semibold text-neutral-600">Theme Assets</h2>
-                <ul class="text-sm text-neutral-700">
+            <Card>
+                <h2 class="text-sm font-semibold text-slate-800">Theme assets</h2>
+                <ul v-if="assets.length > 0" class="mt-3 space-y-1 text-sm text-slate-600">
                     <li v-for="asset in assets" :key="asset.ulid">{{ asset.original_filename }}</li>
                 </ul>
-                <form class="flex items-end gap-2" @submit.prevent="uploadAsset">
-                    <input type="file" @change="onFileChange" />
-                    <button type="submit" class="rounded border px-2 py-1 text-xs">Upload</button>
+                <p v-else class="mt-3 text-sm text-slate-500">No assets uploaded yet.</p>
+                <form class="mt-4 flex items-end gap-2 border-t border-slate-100 pt-4" @submit.prevent="uploadAsset">
+                    <input type="file" class="text-sm" @change="onFileChange" />
+                    <Button type="submit" variant="secondary">Upload</Button>
                 </form>
-                <p v-if="assetForm.errors.file" class="text-xs text-red-600">{{ assetForm.errors.file }}</p>
-            </section>
+                <p v-if="assetForm.errors.file" class="mt-1 text-xs text-red-600">{{ assetForm.errors.file }}</p>
+            </Card>
         </div>
-    </div>
+    </AdminLayout>
 </template>
