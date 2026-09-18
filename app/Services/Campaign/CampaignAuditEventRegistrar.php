@@ -79,7 +79,7 @@ final class CampaignAuditEventRegistrar
 
             new AuditEventDefinition('campaign.fund_assigned', 1, $NC, null, $GENERAL, 'campaign', false, [
                 'previous_fund_id' => 'int', 'new_fund_id' => 'int',
-            ], $H, null, true, $ORG),
+            ], $H, null, false, $ORG, subjectIsFinancialReference: true),
 
             new AuditEventDefinition('campaign.media.uploaded', 1, $NC, null, $GENERAL, 'campaign_media_asset', false, [
                 'asset_ulid' => 'string', 'campaign_id' => 'int', 'mime_type' => 'string',
@@ -92,13 +92,13 @@ final class CampaignAuditEventRegistrar
 
             new AuditEventDefinition('fund.created', 1, $NC, null, $GENERAL, 'fund', false, [
                 'name' => 'string', 'code' => 'string',
-            ], $H, null, true, $ORG),
+            ], $H, null, false, $ORG, subjectIsFinancialReference: true),
 
             new AuditEventDefinition('fund.updated', 1, $NC, null, $GENERAL, 'fund', false, [
                 'fields_changed' => 'array',
-            ], $H, null, true, $ORG),
+            ], $H, null, false, $ORG, subjectIsFinancialReference: true),
 
-            new AuditEventDefinition('fund.archived', 1, $NC, null, $GENERAL, 'fund', false, [], $H, null, true, $ORG),
+            new AuditEventDefinition('fund.archived', 1, $NC, null, $GENERAL, 'fund', false, [], $H, null, false, $ORG, subjectIsFinancialReference: true),
         ];
 
         foreach ($definitions as $definition) {

@@ -101,12 +101,23 @@ class ProgramService
         });
     }
 
+    /**
+     * DRAFT -> PUBLISHED (section 11). Idempotent: a repeat request against an
+     * already-PUBLISHED Program is a no-op that writes NO second transition
+     * event — mirroring FundService::archive()'s own idempotency contract, so
+     * the audit trail never records a transition that did not actually occur
+     * (Human §5 data integrity: "no duplicate-transition side effects").
+     */
     public function publish(Program $program, Principal $actor): Program
     {
         return DB::transaction(function () use ($program, $actor) {
             $locked = Program::query()->whereKey($program->id)->lockForUpdate()->firstOrFail();
 
-            if (! in_array($locked->status, ['DRAFT', 'PUBLISHED'], true)) {
+            if ($locked->status === 'PUBLISHED') {
+                return $locked;
+            }
+
+            if ($locked->status !== 'DRAFT') {
                 throw new CampaignValidationException(
                     'invalid_publish_state',
                     "Program {$locked->id} is status={$locked->status}; only DRAFT may be published."

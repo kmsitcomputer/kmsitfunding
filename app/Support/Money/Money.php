@@ -42,18 +42,43 @@ final class Money
     }
 
     /**
-     * Display-only formatted string. Division happens ONLY here, at the
-     * final render step — never for storage or comparison.
+     * Display-only formatted string. The major/minor split happens ONLY here,
+     * at the final render step — never for storage or comparison — and is
+     * computed with INTEGER/STRING arithmetic exclusively: HD-IMP007-02
+     * makes floating-point never the authoritative representation, and
+     * AC-007-021 requires that no floating-point arithmetic be performed at
+     * any point in the request lifecycle.
+     *
+     * Using intdiv()/% plus pure-string thousands grouping (rather than
+     * `$amountMinor / 10 ** $digits` and number_format()) also keeps the
+     * output EXACT for minor-unit amounts beyond 2**53, where a float-based
+     * division would silently lose precision.
      */
     public function format(): string
     {
         $digits = CurrencyMinorUnits::digitsFor($this->currency);
-        $major = $this->amountMinor / (10 ** $digits);
 
-        $formatted = $digits > 0
-            ? number_format($major, $digits, ',', '.')
-            : number_format($major, 0, ',', '.');
+        // amount_minor is unsigned at the database layer and validated
+        // non-negative at every write path; the sign branch is purely
+        // defensive and uses integer negation only.
+        $sign = $this->amountMinor < 0 ? '-' : '';
+        $absolute = $sign === '-' ? -$this->amountMinor : $this->amountMinor;
 
-        return "{$this->currency} {$formatted}";
+        if ($digits === 0) {
+            $major = (string) $absolute;
+            $minorPart = '';
+        } else {
+            $factor = 10 ** $digits;
+
+            $major = (string) intdiv($absolute, $factor);
+            $minorPart = str_pad((string) ($absolute % $factor), $digits, '0', STR_PAD_LEFT);
+        }
+
+        // Thousands grouping as a pure string operation — no float involved.
+        $grouped = preg_replace('/\B(?=(\d{3})+(?!\d))/', '.', $major);
+
+        $formatted = $minorPart === '' ? $grouped : "{$grouped},{$minorPart}";
+
+        return "{$this->currency} {$sign}{$formatted}";
     }
 }

@@ -8,6 +8,7 @@ use App\Models\Campaign\Program;
 use App\Models\Rbac\Principal;
 use App\Services\Campaign\Exceptions\CampaignValidationException;
 use App\Support\Money\CurrencyMinorUnits;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -52,6 +53,7 @@ class CampaignService
             }
 
             $this->assertValidMoney($payload);
+            $this->assertValidPeriod($payload['starts_at'] ?? null, $payload['ends_at'] ?? null);
 
             $campaign = new Campaign;
             $campaign->forceFill([
@@ -141,12 +143,28 @@ class CampaignService
             }
 
             if (array_key_exists('fund_ulid', $payload)) {
-                $newFundId = $payload['fund_ulid'] !== null
-                    ? Fund::where('ulid', $payload['fund_ulid'])->value('id')
-                    : null;
+                if ($payload['fund_ulid'] !== null) {
+                    $fund = Fund::query()->where('ulid', $payload['fund_ulid'])->first();
 
-                if ($payload['fund_ulid'] !== null && $newFundId === null) {
-                    throw new CampaignValidationException('fund_not_found', 'The referenced Fund does not exist.');
+                    if ($fund === null) {
+                        throw new CampaignValidationException('fund_not_found', 'The referenced Fund does not exist.');
+                    }
+
+                    // BR-5: protection against an ARCHIVED Fund being used
+                    // lives at ASSIGNMENT time — the admin UI's own
+                    // ACTIVE-only selector is presentation, not enforcement.
+                    // (The publish-time re-check in CampaignLifecycleService
+                    // remains the second, independent guard.)
+                    if ($fund->status !== 'ACTIVE') {
+                        throw new CampaignValidationException(
+                            'fund_not_active',
+                            'An ARCHIVED Fund cannot be assigned to a campaign (BR-5).'
+                        );
+                    }
+
+                    $newFundId = $fund->id;
+                } else {
+                    $newFundId = null;
                 }
 
                 if ($newFundId !== $locked->fund_id) {
@@ -161,6 +179,15 @@ class CampaignService
                     'currency' => $payload['currency'] ?? $locked->currency,
                 ]);
             }
+
+            // Validated against the RESOLVED pair (payload value where
+            // supplied, persisted value otherwise) — a partial update that
+            // supplies only one of the two dates is a case the request-level
+            // rule alone cannot cover.
+            $this->assertValidPeriod(
+                array_key_exists('starts_at', $payload) ? $payload['starts_at'] : $locked->starts_at,
+                array_key_exists('ends_at', $payload) ? $payload['ends_at'] : $locked->ends_at,
+            );
 
             foreach (['target_amount_minor', 'currency', 'starts_at', 'ends_at'] as $field) {
                 if (array_key_exists($field, $payload) && $payload[$field] !== $locked->{$field}) {
@@ -194,6 +221,22 @@ class CampaignService
         $amount = $payload['target_amount_minor'] ?? null;
         $currency = $payload['currency'] ?? null;
 
+        // Currency validity is checked ALWAYS — an unregistered currency must
+        // never be persisted, even when no target amount accompanies it
+        // (section 13: currency "must exist in the CurrencyMinorUnits
+        // registry ... an unregistered currency code is rejected at
+        // validation time, never silently assumed to have 2 minor-unit
+        // digits"; AC-007-021). Campaign.currency always resolves to a
+        // concrete value, since it falls back to the configured default.
+        $resolvedCurrency = $currency ?? config('campaign.default_currency');
+
+        if (! CurrencyMinorUnits::isRegistered($resolvedCurrency)) {
+            throw new CampaignValidationException(
+                'unknown_currency',
+                "Currency '{$resolvedCurrency}' is not registered in config/money.php."
+            );
+        }
+
         if ($amount === null) {
             return;
         }
@@ -201,13 +244,27 @@ class CampaignService
         if (! is_int($amount) || $amount < 0) {
             throw new CampaignValidationException('invalid_amount', 'target_amount_minor must be a non-negative integer.');
         }
+    }
 
-        $resolvedCurrency = $currency ?? config('campaign.default_currency');
+    /**
+     * section 13: "starts_at/ends_at: nullable date; if both present, ends_at
+     * must be >= starts_at". Enforced here (the transaction owner) so the rule
+     * holds for EVERY entry point — including a partial update supplying only
+     * one of the two dates, which a request-level rule alone cannot cover.
+     *
+     * A null on either side means "no constraint on that side" — consistent
+     * with the eligibility contract's own null semantics (section 8b).
+     */
+    private function assertValidPeriod(mixed $startsAt, mixed $endsAt): void
+    {
+        if ($startsAt === null || $endsAt === null) {
+            return;
+        }
 
-        if (! CurrencyMinorUnits::isRegistered($resolvedCurrency)) {
+        if (Carbon::parse($endsAt)->lt(Carbon::parse($startsAt))) {
             throw new CampaignValidationException(
-                'unknown_currency',
-                "Currency '{$resolvedCurrency}' is not registered in config/money.php."
+                'invalid_period',
+                'ends_at must be greater than or equal to starts_at.'
             );
         }
     }
