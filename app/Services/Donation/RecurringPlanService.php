@@ -11,6 +11,7 @@ use App\Services\Campaign\CampaignEligibilityResolver;
 use App\Services\Donation\Exceptions\DonationTransitionConflictException;
 use App\Services\Donation\Exceptions\DonationValidationException;
 use App\Support\Money\CurrencyMinorUnits;
+use App\Support\Money\Exceptions\UnknownCurrencyException;
 use App\Support\Money\Money;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -166,7 +167,29 @@ class RecurringPlanService
      * markOccurrenceFailed() — IMP-008 never retries a FAILED occurrence
      * (BR-11, HD-IMP008-03).
      *
-     * @param  array{scheduled_at?:mixed}  $payload
+     * Concurrency (IMP008-REVIEW-02): due plans are selected OUTSIDE any
+     * lock, so two workers may both observe the same due plan. The lock
+     * serializes them; the loser MUST NOT generate again. After
+     * lockForUpdate the canonical plan is re-read and BOTH conditions are
+     * re-checked: ACTIVE status AND due-ness against the authoritative
+     * execution time ($payload['as_of'], default now()). A worker that
+     * already advanced next_occurrence_at past that time wins; the loser
+     * observes it and throws the typed already-processed conflict —
+     * a deterministic no-op, never a second Occurrence + Donation.
+     * next_occurrence_at therefore advances exactly once per logical due
+     * occurrence. Scheduler withoutOverlapping() is a courtesy only, never
+     * the correctness mechanism.
+     *
+     * Database backstop: the child Donation's idempotency key is derived
+     * from the STABLE consumed due point (the locked plan's own
+     * next_occurrence_at), not the fresh occurrence ULID — so the
+     * spec-mandated donations.idempotency_key UNIQUE constraint covers
+     * one logical scheduled occurrence even if two writers ever pass the
+     * due check with the same stored due point. No new business
+     * recurrence model is introduced: frequency remains MONTHLY, and no
+     * new schema constraint is invented on caller-controlled timestamps.
+     *
+     * @param  array{scheduled_at?:mixed,as_of?:mixed}  $payload
      */
     public function generateOccurrence(DonationRecurringPlan $plan, array $payload, Principal $actor): DonationRecurringOccurrence
     {
@@ -180,7 +203,19 @@ class RecurringPlanService
                 );
             }
 
-            $scheduledAt = $payload['scheduled_at'] ?? now();
+            $asOf = isset($payload['as_of']) ? Carbon::parse($payload['as_of']) : now();
+            $duePoint = $lockedPlan->next_occurrence_at !== null
+                ? Carbon::parse($lockedPlan->next_occurrence_at)
+                : null;
+
+            if ($duePoint !== null && $duePoint->gt($asOf)) {
+                throw new DonationTransitionConflictException(
+                    'occurrence_already_processed',
+                    "Recurring Plan {$lockedPlan->id} already generated its due occurrence (next_occurrence_at is past the execution time)."
+                );
+            }
+
+            $scheduledAt = $payload['scheduled_at'] ?? $asOf;
 
             $donor = $this->resolvePlanDonor($lockedPlan);
 
@@ -193,7 +228,8 @@ class RecurringPlanService
             $occurrence->save();
 
             try {
-                $idempotencyKey = 'recurring-'.$lockedPlan->ulid.'-'.$occurrence->ulid;
+                $dueKey = ($duePoint ?? $asOf)->format('Y-m-d H:i:s');
+                $idempotencyKey = 'recurring-'.$lockedPlan->ulid.'-'.$dueKey;
 
                 $donation = app(DonationService::class)->create(
                     Campaign::query()->whereKey($lockedPlan->campaign_id)->firstOrFail(),
@@ -302,10 +338,7 @@ class RecurringPlanService
     private function assertValidMoney(mixed $amount, mixed $currency): void
     {
         if (! is_string($currency) || ! CurrencyMinorUnits::isRegistered($currency)) {
-            throw new DonationValidationException(
-                'unknown_currency',
-                "Currency '{$currency}' is not registered in config/money.php."
-            );
+            throw new UnknownCurrencyException(is_string($currency) ? $currency : '');
         }
 
         Money::ofMinorUnits(0, $currency);

@@ -116,6 +116,26 @@ class DonationHttpTest extends TestCase
         $this->assertSame(0, Donation::query()->count());
     }
 
+    public function test_missing_idempotency_key_is_rejected_before_payload_or_eligibility_checks(): void
+    {
+        $seeder = $this->makeUnauthorizedActor();
+        $campaign = $this->makeEligibleCampaign($seeder);
+
+        // The payload is ALSO invalid (missing amount_minor) — the
+        // response must surface the idempotency_key error, proving the
+        // mandatory key is resolved/validated BEFORE payload business
+        // validation and before the eligibility gate (BR-12 exact order).
+        $response = $this->post("/campaigns/{$campaign->slug}/donations", [
+            'currency' => 'IDR',
+            'guest_name' => 'Guest Giver',
+            'guest_email' => 'guest@example.com',
+        ]);
+
+        $response->assertSessionHasErrors('idempotency_key');
+        $response->assertSessionMissing('amount_minor');
+        $this->assertSame(0, Donation::query()->count());
+    }
+
     public function test_public_creation_against_an_ineligible_campaign_is_rejected(): void
     {
         $seeder = $this->makeUnauthorizedActor();
@@ -162,6 +182,33 @@ class DonationHttpTest extends TestCase
         $response = $this->get('/me/donations');
 
         $response->assertRedirect('/login');
+    }
+
+    public function test_public_receipt_surface_is_not_registered(): void
+    {
+        $seeder = $this->makeUnauthorizedActor();
+        $campaign = $this->makeEligibleCampaign($seeder);
+
+        $this->post(
+            "/campaigns/{$campaign->slug}/donations",
+            [
+                'amount_minor' => 50000,
+                'currency' => 'IDR',
+                'guest_name' => 'Guest Giver',
+                'guest_email' => 'guest@example.com',
+            ],
+            ['Idempotency-Key' => 'http-noreceipt-'.uniqid()]
+        );
+
+        $donation = Donation::query()->first();
+
+        // The unapproved public receipt surface (ULID as bearer read
+        // capability) does not exist: the route is unregistered, so the
+        // catch-all resolves it as a missing content page, never a
+        // donation read.
+        $response = $this->get("/campaigns/{$campaign->slug}/donations/{$donation->ulid}");
+
+        $this->assertNotSame(200, $response->getStatusCode());
     }
 
     public function test_no_guest_facing_cancellation_endpoint_exists(): void

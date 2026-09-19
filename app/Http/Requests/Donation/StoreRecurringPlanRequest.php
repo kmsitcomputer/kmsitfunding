@@ -24,6 +24,7 @@ class StoreRecurringPlanRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'campaign_ulid' => ['required', 'string', 'size:26'],
             'amount_minor' => ['required', 'integer', 'min:1'],
             'currency' => ['required', 'string', 'size:3'],
             'frequency' => ['required', 'string', 'size:16'],

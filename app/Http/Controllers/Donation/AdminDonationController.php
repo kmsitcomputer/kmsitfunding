@@ -137,7 +137,6 @@ class AdminDonationController extends Controller
             'donor_display_name' => $donation->donor_display_name,
             'guest_name' => $donation->guest_name,
             'guest_email' => $donation->guest_email,
-            'campaign_id' => $donation->campaign_id,
             'created_at' => $donation->created_at,
         ];
     }

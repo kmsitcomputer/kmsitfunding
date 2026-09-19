@@ -279,8 +279,9 @@ Route::get('/campaigns/{campaign:slug}', [PublicCampaignController::class, 'show
 // `slug` like the Campaign routes; Idempotency-Key header REQUIRED.
 // Registered before the IMP-006 catch-all below.
 Route::get('/campaigns/{campaign:slug}/donate', [PublicDonationController::class, 'create'])->name('public.donations.create');
-Route::post('/campaigns/{campaign:slug}/donations', [PublicDonationController::class, 'store'])->name('public.donations.store');
-Route::get('/campaigns/{campaign:slug}/donations/{donation}', [PublicDonationController::class, 'receipt'])->name('public.donations.receipt');
+Route::post('/campaigns/{campaign:slug}/donations', [PublicDonationController::class, 'store'])
+    ->middleware('throttle:6,1')
+    ->name('public.donations.store');
 
 // IMP-006 — the public content catch-all (docs/implementation/
 // IMP-006-theme-engine.md section 13), registered LAST so every

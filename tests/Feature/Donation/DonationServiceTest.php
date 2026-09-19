@@ -6,6 +6,7 @@ use App\Models\Donation\Donation;
 use App\Services\Donation\DonationService;
 use App\Services\Donation\Exceptions\DonationTransitionConflictException;
 use App\Services\Donation\Exceptions\DonationValidationException;
+use App\Support\Money\Exceptions\UnknownCurrencyException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Support\Donation\MakesDonationCampaigns;
@@ -119,7 +120,7 @@ class DonationServiceTest extends TestCase
         $actor = $this->makeUnauthorizedActor();
         $campaign = $this->makeEligibleCampaign($actor);
 
-        $this->expectException(DonationValidationException::class);
+        $this->expectException(UnknownCurrencyException::class);
 
         app(DonationService::class)->create($campaign, [
             'amount_minor' => 1000,

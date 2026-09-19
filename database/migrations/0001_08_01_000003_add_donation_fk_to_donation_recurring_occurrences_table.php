@@ -24,8 +24,8 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('donation_recurring_occurrences', function (Blueprint $table) {
-            $table->dropUnique('donation_recurring_occurrences_donation_id_unique');
             $table->dropForeign(['donation_id']);
+            $table->dropUnique('donation_recurring_occurrences_donation_id_unique');
         });
     }
 };

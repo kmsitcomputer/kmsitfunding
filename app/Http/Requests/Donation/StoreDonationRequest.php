@@ -18,12 +18,25 @@ use Illuminate\Validation\ValidationException;
  * a missing/malformed key is rejected before any Donation row is created
  * or any Campaign-eligibility check runs — via DonationService's own
  * normalizeIdempotencyKey, so the contract lives in exactly one place.
+ *
+ * Ordering (BR-12 exact): preparation runs the key check FIRST, inside
+ * prepareForValidation() — which Laravel invokes before the payload
+ * rules below are even evaluated — and the controller resolves the key
+ * again before its eligibility gate. The service re-validates as
+ * defense in depth.
  */
 class StoreDonationRequest extends FormRequest
 {
+    private ?string $resolvedIdempotencyKey = null;
+
     public function authorize(): bool
     {
         return true;
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $this->resolvedIdempotencyKey = $this->resolveKey();
     }
 
     /**
@@ -42,6 +55,11 @@ class StoreDonationRequest extends FormRequest
     }
 
     public function idempotencyKey(): string
+    {
+        return $this->resolvedIdempotencyKey ?? $this->resolveKey();
+    }
+
+    private function resolveKey(): string
     {
         try {
             return DonationService::normalizeIdempotencyKey($this->header('Idempotency-Key'));

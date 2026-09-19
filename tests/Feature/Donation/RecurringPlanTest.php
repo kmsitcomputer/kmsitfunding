@@ -8,6 +8,7 @@ use App\Models\Donation\DonationRecurringPlan;
 use App\Services\Donation\Exceptions\DonationTransitionConflictException;
 use App\Services\Donation\Exceptions\DonationValidationException;
 use App\Services\Donation\RecurringPlanService;
+use App\Support\Money\Exceptions\UnknownCurrencyException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\Donation\MakesDonationCampaigns;
@@ -203,7 +204,7 @@ class RecurringPlanTest extends TestCase
         $actor = $this->makeUnauthorizedActor();
         $campaign = $this->makeEligibleCampaign($actor);
 
-        $this->expectException(DonationValidationException::class);
+        $this->expectException(UnknownCurrencyException::class);
 
         app(RecurringPlanService::class)->create($campaign, [
             'amount_minor' => 50000,
@@ -248,6 +249,43 @@ class RecurringPlanTest extends TestCase
         $this->assertSame(1500, $donation->amount_minor);
         $this->assertSame('JPY', $donation->currency);
         $this->assertTrue($donation->is_anonymous);
+    }
+
+    public function test_repeated_sweep_against_the_same_due_plan_does_not_duplicate(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $service = app(RecurringPlanService::class);
+        $plan = $this->makePlan();
+
+        $first = $service->generateOccurrence($plan, [], $actor);
+
+        $this->assertSame('GENERATED', $first->status);
+
+        // The plan's schedule has advanced past the first execution time,
+        // so a repeated sweep with the SAME execution time is a
+        // deterministic already-processed no-op — never a second
+        // Occurrence + Donation for the same logical due occurrence.
+        try {
+            $service->generateOccurrence($plan->fresh(), ['as_of' => $plan->next_occurrence_at], $actor);
+
+            $this->fail('A repeated sweep of an already-generated due point must be rejected.');
+        } catch (DonationTransitionConflictException $e) {
+            $this->assertSame('occurrence_already_processed', $e->reason);
+        }
+
+        $this->assertSame(1, DonationRecurringOccurrence::query()->where('recurring_plan_id', $plan->id)->count());
+        $this->assertSame(1, Donation::query()->where('campaign_id', $plan->campaign_id)->count());
+    }
+
+    public function test_generation_against_a_cancelled_plan_generates_nothing(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $service = app(RecurringPlanService::class);
+        $plan = $this->makePlan();
+        $service->cancel($plan, $actor);
+
+        $this->expectException(DonationTransitionConflictException::class);
+        $service->generateOccurrence($plan->fresh(), [], $actor);
     }
 
     public function test_plan_creation_alone_creates_no_donation_row(): void

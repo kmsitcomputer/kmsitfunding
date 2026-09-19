@@ -4,11 +4,15 @@ namespace App\Policies;
 
 use App\Enums\ScopeType;
 use App\Models\Donation\DonationRecurringPlan;
+use App\Models\Rbac\Permission;
 use App\Models\Rbac\Principal;
+use App\Models\Rbac\PrincipalRoleAssignment;
 use App\Policies\Concerns\AuthorizesUsingRbac;
 use App\Services\Donation\DonationOwnScopeResolver;
 use App\Services\Donation\RecurringPlanScopeResolver;
+use App\Services\Rbac\AuthorizationContext;
 use App\Services\Rbac\PermissionRegistry;
+use App\Services\Rbac\ScopeResolver;
 
 /**
  * Gates Recurring Plan capabilities (docs/implementation/IMP-008-donation.md
@@ -126,9 +130,45 @@ class RecurringPlanPolicy
 
     public function viewAny(Principal $actingPrincipal): bool
     {
-        return $this->authorizeRbac(
-            principal: $actingPrincipal,
-            permissionCode: PermissionRegistry::DONATION_RECURRING_PLAN_MANAGE,
+        return $this->hasOrganizationScope(
+            $actingPrincipal,
+            PermissionRegistry::DONATION_RECURRING_PLAN_MANAGE,
+            new RecurringPlanScopeResolver,
         );
+    }
+
+    /**
+     * Bulk/list authorization for the admin/staff path: the caller must
+     * hold the permission at ORGANIZATION scope via the established
+     * domain scope resolver — an OWN-only grant never authorizes
+     * cross-donor plan visibility. Default DENY on every failure.
+     */
+    private function hasOrganizationScope(
+        Principal $actingPrincipal,
+        string $permissionCode,
+        ScopeResolver $scopeResolver,
+    ): bool {
+        if (! $actingPrincipal->canAuthorize()) {
+            return false;
+        }
+
+        if (! Permission::where('code', $permissionCode)->whereNull('deprecated_at')->exists()) {
+            return false;
+        }
+
+        $assignments = (new AuthorizationContext($actingPrincipal))->activeRoleAssignmentsGranting($permissionCode);
+
+        if ($assignments->isEmpty()) {
+            return false;
+        }
+
+        return $assignments->contains(function (PrincipalRoleAssignment $assignment) use ($scopeResolver) {
+            if ($assignment->scope_type === ScopeType::GlobalPlatform) {
+                return true;
+            }
+
+            return $assignment->scope_type === ScopeType::Organization
+                && $scopeResolver->scopeType() === ScopeType::Organization;
+        });
     }
 }

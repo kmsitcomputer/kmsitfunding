@@ -23,9 +23,18 @@ const form = useForm({
     guest_email: '',
 });
 
+// One idempotency key per logical form intent: generated once when the
+// component is created and reused across network retries and repeated
+// submits of the same intent, so a retry/double-submit replays against
+// the same key instead of creating a second Donation. A genuinely new
+// intent (navigating back to a fresh form) generates a fresh key via a
+// new component instance. The key is a comparison key, never an
+// authentication secret.
+const idempotencyKey = crypto.randomUUID();
+
 function submit() {
     form.post(`/campaigns/${props.campaign.slug}/donations`, {
-        headers: { 'Idempotency-Key': crypto.randomUUID() },
+        headers: { 'Idempotency-Key': idempotencyKey },
     });
 }
 

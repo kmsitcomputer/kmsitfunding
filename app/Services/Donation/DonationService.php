@@ -9,6 +9,7 @@ use App\Services\Campaign\CampaignEligibilityResolver;
 use App\Services\Donation\Exceptions\DonationTransitionConflictException;
 use App\Services\Donation\Exceptions\DonationValidationException;
 use App\Support\Money\CurrencyMinorUnits;
+use App\Support\Money\Exceptions\UnknownCurrencyException;
 use App\Support\Money\Money;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -143,10 +144,7 @@ class DonationService
     private function assertValidMoney(mixed $amount, mixed $currency): void
     {
         if (! is_string($currency) || ! CurrencyMinorUnits::isRegistered($currency)) {
-            throw new DonationValidationException(
-                'unknown_currency',
-                "Currency '{$currency}' is not registered in config/money.php."
-            );
+            throw new UnknownCurrencyException(is_string($currency) ? $currency : '');
         }
 
         Money::ofMinorUnits(0, $currency);

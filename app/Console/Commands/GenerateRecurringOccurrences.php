@@ -42,7 +42,7 @@ class GenerateRecurringOccurrences extends Command
             return self::FAILURE;
         }
 
-        $cutoff = Carbon::now();
+        $cutoff = Carbon::now('UTC');
 
         $dueIds = DonationRecurringPlan::query()
             ->where('status', 'ACTIVE')

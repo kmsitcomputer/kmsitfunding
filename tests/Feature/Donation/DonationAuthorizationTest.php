@@ -162,6 +162,41 @@ class DonationAuthorizationTest extends TestCase
         $this->assertFalse($policy->cancelAny($ownOnly, $donation));
     }
 
+    public function test_own_scoped_view_grant_cannot_access_the_admin_donation_list(): void
+    {
+        $ownOnly = $this->makeGrantedActor([PermissionRegistry::DONATION_VIEW], ScopeType::Own);
+        $policy = new DonationPolicy;
+
+        $this->assertFalse($policy->viewAny($ownOnly));
+    }
+
+    public function test_own_scoped_plan_grant_cannot_view_another_donors_admin_plan(): void
+    {
+        $ownOnly = $this->makeGrantedActor([PermissionRegistry::DONATION_RECURRING_PLAN_MANAGE], ScopeType::Own);
+        $policy = new RecurringPlanPolicy;
+
+        $this->assertFalse($policy->viewAny($ownOnly));
+    }
+
+    public function test_wrong_organization_permission_does_not_authorize_the_admin_list(): void
+    {
+        $wrongPermission = $this->makeGrantedActor([PermissionRegistry::DONATION_CANCEL], ScopeType::Organization);
+        $policy = new DonationPolicy;
+
+        $this->assertFalse($policy->viewAny($wrongPermission));
+    }
+
+    public function test_organization_scoped_view_grant_authorizes_the_admin_list_and_plan_view(): void
+    {
+        $admin = $this->makeGrantedActor(
+            [PermissionRegistry::DONATION_VIEW, PermissionRegistry::DONATION_RECURRING_PLAN_MANAGE],
+            ScopeType::Organization
+        );
+
+        $this->assertTrue((new DonationPolicy)->viewAny($admin));
+        $this->assertTrue((new RecurringPlanPolicy)->viewAny($admin));
+    }
+
     public function test_human_principal_cannot_invoke_the_system_consequence_surface(): void
     {
         $human = $this->makeAuthorizedActor();

@@ -49,7 +49,7 @@ class ExpirePendingDonations extends Command
             return self::FAILURE;
         }
 
-        $cutoff = Carbon::now()->subMinutes((int) $expiryMinutes);
+        $cutoff = Carbon::now('UTC')->subMinutes((int) $expiryMinutes);
 
         $dueIds = Donation::query()
             ->where('status', 'PENDING')

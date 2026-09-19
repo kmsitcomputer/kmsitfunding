@@ -14,13 +14,16 @@ use Illuminate\Database\Seeder;
 /**
  * IMP-008 — seeds the bounded System Principal the donation scheduler
  * commands authorize as (ExpirePendingDonations /
- * GenerateRecurringOccurrences). The principal holds an explicit,
- * separately granted ORGANIZATION-scope donation.* grant set sufficient
- * for sweeping expirations and generating occurrences — and NO audit.read,
- * NO rbac.*, NO unrelated domain permission.
+ * GenerateRecurringOccurrences). The principal holds NO donation.*
+ * permission grants: the scheduler commands invoke
+ * DonationTransitionService / RecurringPlanService directly (thin
+ * per-row drivers that never consult Policies), so donation.view and
+ * donation.cancel authority is not required for their execution and is
+ * deliberately not granted (least privilege). NO audit.read, NO rbac.*,
+ * NO unrelated domain permission either.
  *
  * Idempotent (safe to re-run): catalog rows via firstOrCreate,
- * PrincipalService::forSystem() is itself idempotent, and the role/grant/
+ * PrincipalService::forSystem() is itself idempotent, and the role/
  * assignment steps each check for an existing row first. Grants are
  * direct Eloquent inserts — the same "internal-setup bypass... never an
  * exposed runtime path" carve-out CmsSystemPrincipalSeeder already
@@ -42,12 +45,20 @@ class DonationSystemPrincipalSeeder extends Seeder
             ['name' => 'Donation Scheduler', 'description' => 'IMP-008 Donation scheduler identity.', 'is_system' => true],
         );
 
-        foreach ([PermissionRegistry::DONATION_VIEW, PermissionRegistry::DONATION_CANCEL] as $permissionCode) {
-            $permission = Permission::where('code', $permissionCode)->firstOrFail();
+        // Least privilege (IMP008-REVIEW-10): the scheduler identity
+        // holds NO donation.* permission grants — the scheduler commands
+        // execute DonationTransitionService/RecurringPlanService directly
+        // without consulting any Policy, so donation.view/donation.cancel
+        // are provably unrequired. Detach any previously-seeded grants
+        // so re-running this seeder converges to least privilege.
+        $staleGrants = Permission::whereIn('code', [
+            PermissionRegistry::DONATION_VIEW,
+            PermissionRegistry::DONATION_CANCEL,
+            PermissionRegistry::DONATION_RECURRING_PLAN_MANAGE,
+        ])->pluck('id');
 
-            if (! $role->permissions()->where('permissions.id', $permission->id)->exists()) {
-                $role->permissions()->attach($permission->id, ['granted_at' => now(), 'granted_by_principal_id' => null]);
-            }
+        if ($staleGrants->isNotEmpty()) {
+            $role->permissions()->detach($staleGrants->all());
         }
 
         $alreadyAssigned = PrincipalRoleAssignment::where('principal_id', $principal->id)

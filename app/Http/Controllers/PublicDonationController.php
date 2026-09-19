@@ -10,11 +10,11 @@ use App\Services\Donation\DonationService;
 use App\Services\Donation\Exceptions\DonationTransitionConflictException;
 use App\Services\Donation\Exceptions\DonationValidationException;
 use App\Services\Rbac\PrincipalService;
+use App\Support\Money\Exceptions\UnknownCurrencyException;
 use App\Support\Money\Money;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
-use Inertia\Response;
 
 /**
  * IMP-008 public Donation entry point (docs/implementation/
@@ -59,6 +59,13 @@ class PublicDonationController extends Controller
     ): RedirectResponse {
         abort_unless($campaign->status === 'PUBLISHED', 404);
 
+        // BR-12: the mandatory client Idempotency-Key is resolved/
+        // validated/normalized FIRST — before Campaign eligibility and
+        // before request payload business validation — so a missing or
+        // malformed key is rejected as a request-shape error with no row
+        // created. The service re-validates as defense in depth.
+        $idempotencyKey = $request->idempotencyKey();
+
         // BR-1 fail-closed at the HTTP boundary: the service re-checks
         // authoritatively (a re-derived gate here would violate the
         // MUST-NOT-re-derive rule, so this delegates to the resolver —
@@ -66,32 +73,23 @@ class PublicDonationController extends Controller
         abort_unless($eligibility->isDonationEligible($campaign), 422);
 
         $validated = $request->validated();
-        $idempotencyKey = $request->idempotencyKey();
 
         $user = $request->user();
         $actor = $user !== null ? $principals->forUser($user) : null;
 
         try {
             $donation = $service->create($campaign, $validated, $actor, $idempotencyKey);
+        } catch (UnknownCurrencyException $e) {
+            throw ValidationException::withMessages(['currency' => $e->getMessage()]);
         } catch (DonationValidationException $e) {
             throw ValidationException::withMessages([$e->reason => $e->getMessage()]);
         } catch (DonationTransitionConflictException $e) {
             throw ValidationException::withMessages(['idempotency_key' => $e->getMessage()]);
         }
 
-        return redirect()->route('public.donations.receipt', [
+        return redirect()->route('public.campaigns.show', [
             'campaign' => $campaign->slug,
-            'donation' => $donation->ulid,
         ])->with('status', 'donation-created');
-    }
-
-    public function receipt(Campaign $campaign, Donation $donation): Response
-    {
-        abort_unless($donation->campaign_id === $campaign->id, 404);
-
-        return Inertia::render('Public/DonationReceipt', [
-            'donation' => $this->publicPayload($donation),
-        ]);
     }
 
     /**

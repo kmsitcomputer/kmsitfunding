@@ -15,6 +15,7 @@ use App\Services\Donation\Exceptions\DonationTransitionConflictException;
 use App\Services\Donation\Exceptions\DonationValidationException;
 use App\Services\Donation\RecurringPlanService;
 use App\Services\Rbac\PrincipalService;
+use App\Support\Money\Exceptions\UnknownCurrencyException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -95,10 +96,12 @@ class DashboardDonationController extends Controller
         abort_unless($policy->create($actor), 403);
 
         $validated = $request->validated();
-        $campaign = Campaign::where('ulid', $request->input('campaign_ulid'))->firstOrFail();
+        $campaign = Campaign::where('ulid', $validated['campaign_ulid'])->firstOrFail();
 
         try {
             $plan = $service->create($campaign, $validated, $actor);
+        } catch (UnknownCurrencyException $e) {
+            throw ValidationException::withMessages(['currency' => $e->getMessage()]);
         } catch (DonationValidationException $e) {
             throw ValidationException::withMessages([$e->reason => $e->getMessage()]);
         }
@@ -170,7 +173,6 @@ class DashboardDonationController extends Controller
             'currency' => $donation->currency,
             'is_anonymous' => $donation->is_anonymous,
             'donor_display_name' => $donation->donor_display_name,
-            'campaign_id' => $donation->campaign_id,
             'created_at' => $donation->created_at,
         ];
     }
