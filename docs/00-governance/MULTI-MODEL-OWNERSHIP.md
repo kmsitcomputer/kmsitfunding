@@ -5,7 +5,13 @@
 ```
 Base Amendment (V1):   FINAL / LOCKED
 Amendment V2:          PROPOSED — AWAITING INDEPENDENT CODEX AUDIT
-Amendment V3:          PROPOSED — AWAITING EXACT MODEL ID VERIFICATION + INDEPENDENT CODEX AUDIT
+Amendment V3 (full
+  prospective program): PROPOSED — AWAITING EXACT MODEL ID VERIFICATION + INDEPENDENT CODEX AUDIT
+GOV-MM-005 (V3 Pipeline
+  Activation, Human
+  Decision):             APPROVED / ACTIVE — effective IMP-008 forward (see "GOV-MM-005" under
+                          "Amendment V3" below for scope and the outstanding model-ID-verification
+                          precondition this activation does not itself satisfy)
 ```
 
 The base amendment (V1 — Primary Implementation Owner as a per-IMP role, the original Kimi/Qwen/
@@ -592,10 +598,15 @@ continued under a different model.
 
 ## Amendment V3 — Pipeline Write-Ownership Model
 
-**Status: `PROPOSED` — not self-declared `FINAL / LOCKED` by this patch.** Materialized under
-explicit Human authorization, received at the start of a governance-only session, to establish a
-token-efficient multi-agent pipeline "starting from IMP-008" and to draft the corresponding
-governance patch — see "Approval" below for the exact authorization-scope record.
+**Status: full amendment `PROPOSED`; pipeline structure and role assignment `APPROVED / ACTIVE`
+effective IMP-008 forward under GOV-MM-005 (Human Decision — see "GOV-MM-005" below).** Materialized
+under explicit Human authorization, received at the start of a governance-only session, to
+establish a token-efficient multi-agent pipeline "starting from IMP-008" and to draft the
+corresponding governance patch; subsequently activated, for its role/precedence structure only, by
+a direct Human Decision that does not itself constitute the Codex-audited amendment lock V1 used —
+see "GOV-MM-005" and "Exact Model ID Verification Gap" below for exactly what is and is not settled
+by that activation. See "Approval" below for the exact authorization-scope record of both the
+drafting and the activation.
 
 Unlike V2 (which reassigns which model owns which *domain*), V3 proposes restructuring *how a
 single IMP's implementation is divided across models* into a fixed pipeline, and proposes a new
@@ -609,9 +620,10 @@ QWEN 3.7 FLASH          Recon / cheap worker — repository reconnaissance, file
                         mapping, existing-contract discovery, test inventory. Read-only against
                         implementation source.
 MUSE SPARK 1.3
-  CONTRIBUTOR           Proposed Main Developer / default implementation write owner —
-                        implementation from approved spec + Qwen's file map, targeted
-                        remediation, implementation tests.
+  CONTRIBUTOR           Main Developer / default implementation write owner (role ACTIVE per
+                        GOV-MM-005; exact model identity still UNVERIFIED — see "Exact Model ID
+                        Verification Gap") — implementation from approved spec + Qwen's file map,
+                        targeted remediation, implementation tests.
 DEEPSEEK V4.1           Independent Technical Checker — diff-first review: specification
                         compliance, logic, security, transaction/concurrency/idempotency,
                         database-constraint review. Read-only by default.
@@ -621,19 +633,104 @@ CODEX                   Independent Final Semantic / Closure Auditor — final s
 HUMAN                   Final Authority — unchanged from every prior amendment.
 ```
 
+### GOV-MM-005 — Human-Approved V3 Pipeline Activation (IMP-008 Forward)
+
+> **Human, verbatim:**
+>
+> "Saya setuju.
+>
+> MULTI-AGENT WORKFLOW V3 APPROVED.
+>
+> The "Amendment V3 — Pipeline Write-Ownership Model" is approved for use prospectively beginning
+> with IMP-008.
+>
+> Human approval authorizes activation of V3 governance.
+>
+> IMP-000 through IMP-007 remain historical FINAL / LOCKED.
+>
+> This approval does NOT authorize IMP-008 implementation."
+
+This is a direct Human Decision activating V3's **pipeline structure and role assignment**,
+following the same pattern GOV-MM-004 already established in this document: a Human Decision can
+activate a specific, scoped piece of a still-`PROPOSED` amendment without waiting for that
+amendment's own full Codex-audit-and-lock sequence (see "Amendment V2" -> "GOV-MM-004" above for
+the precedent). It does **not** retroactively declare the full Amendment V3 program
+`FINAL / LOCKED` — no Independent Codex Audit of V3 has occurred, and none is fabricated here (see
+"Approval" below, where that field remains `PENDING`, exactly as it was left before this
+activation).
+
+**What GOV-MM-005 settles, effective IMP-008 forward:**
+
+- V3's pipeline (Lead Architect -> Recon -> Main Developer -> Automated Tests -> Independent
+  Technical Checker -> targeted remediation -> Full Regression -> Final Semantic/Closure Audit ->
+  Human Stage Gate) is the active execution workflow for IMP-008 and, per "Precedence Over the
+  Legacy Matrix" below, every subsequent stage it applies to.
+- Role assignment: Claude Code = Lead Architect / Spec Contract; Qwen 3.7 Flash = Recon; Muse
+  Spark 1.3 Contributor = Main Developer / default implementation write owner; DeepSeek V4.1 =
+  Independent Technical Checker; Codex = Independent Final Semantic/Closure Auditor; Human = Final
+  Authority.
+- Resolves Open Item 2 (below, retained for traceability): V3's Main Developer role **replaces**
+  the legacy matrix's domain-owner as IMP-008's Primary Implementation Owner going forward — it
+  does not run underneath it. IMP-008's Primary Implementation Owner is therefore Muse Spark 1.3
+  Contributor under V3, not Kimi K2.7 Code (Amendment V2's prospective, still-`PROPOSED`
+  assignment for that row), from GOV-MM-005's effective date onward.
+
+**What GOV-MM-005 does NOT settle:**
+
+- Open Item 1 (Exact Model ID Verification for Qwen 3.7 Flash, Muse Spark 1.3 Contributor,
+  DeepSeek V4.1) is **not addressed by this Human statement** and remains unresolved — see "Exact
+  Model ID Verification Gap" below, now restated as a precondition to *using* the activated
+  pipeline rather than to activating it. Per GOV-MM-002's own "owner/role approval and exact model
+  binding approval are separate controls" principle (already established in this document for
+  Claude's mission-critical stages), Human approving the pipeline's *structure and role
+  assignment* is not the same control as verifying the *exact identity* of the models filling
+  Qwen/Muse/DeepSeek's roles. Until that separate verification happens, those three role slots are
+  defined but not yet actionable for governed work.
+- IMP-008 readiness or implementation work — the Human statement says this explicitly ("This
+  approval does NOT authorize IMP-008 implementation").
+- Independent Codex Audit and Final Human Lock Approval of the full Amendment V3 program — both
+  remain `PENDING` in "Approval" below.
+
 ### Relationship to the Existing Fixed IMP Ownership Matrix
 
-**This patch does NOT change the "Fixed IMP Ownership Matrix" table above.** IMP-008's Primary
-Implementation Owner remains, as of this patch, **Kimi K2.7 Code** per the already-`PROPOSED`
-Amendment V2 matrix (itself not yet locked) — a pipeline write-ownership model and a
-domain-ownership assignment are two different axes, and V3 does not silently override V2's IMP-008
-row. If V3 reaches `FINAL / LOCKED` before IMP-008 reaches its own implementation gate, the
-"Fixed IMP Ownership Matrix" table will itself need a follow-up patch to either (a) replace Kimi
-K2.7 Code with Muse Spark 1.3 Contributor as IMP-008's Primary Implementation Owner under the new
-pipeline, or (b) run the V3 pipeline *underneath* Kimi K2.7 Code as the still-assigned Primary
-Owner (i.e., Kimi occupies the "Main Developer" pipeline slot instead of Muse Spark). **Which of
-these two is intended is not resolved by this patch and is recorded as an open item below** — it
-is a Human Decision, not something this document infers.
+**This patch does not delete, rewrite, or retroactively alter the "Fixed IMP Ownership Matrix"
+table above** — it remains the historical/traceability record of the V1/V2 domain-based
+assignments, and IMP-000 through IMP-007's entries in it are unaffected and `FINAL / LOCKED` where
+already completed. What changes, per GOV-MM-005, is which assignment is *operative* for IMP-008
+forward — see "Precedence Over the Legacy Matrix" immediately below.
+
+#### Precedence Over the Legacy Matrix
+
+Effective GOV-MM-005 (this activation), for every Fixed IMP Ownership Matrix row **from IMP-008
+forward**, the V3 pipeline's Main Developer role is the operative Primary Implementation Owner
+control, **except** for the two carve-outs this document already locked before V3 existed, which
+GOV-MM-005 does not touch or reopen:
+
+```
+Mission-Critical Claude Stages (IMP-009, 010, 011, 014, 015, 016, 027):
+  UNCHANGED. These remain Claude Code, under GOV-MM-002 Per-IMP Model Binding, exactly as
+  "Mission-Critical Claude Stages" below already locks. V3's Main Developer role does not apply to
+  these seven rows unless a future, separate Human Decision says otherwise.
+
+IMP-030 (Audit-Only Stage):
+  UNCHANGED. Codex remains Primary Audit Owner under GOV-MM-001; IMP-030 has no Primary
+  Implementation Owner and V3's pipeline does not apply to it.
+
+Every other row IMP-008 forward (008, 012, 013, 017, 018, 019, 020, 021, 022, 023, 024, 025, 026,
+028, 029):
+  The table's listed model (Kimi K2.7 Code / Qwen 3.8 Flash / DeepSeek V4.1 Flash, per Amendment
+  V2's still-PROPOSED prospective assignment) is superseded, for the "who writes/owns
+  implementation" question specifically, by V3's Main Developer (Muse Spark 1.3 Contributor,
+  pending the model-ID-verification precondition above). The table's original model names are
+  retained unmodified in the table itself for historical/traceability continuity — they are not
+  the active assignment going forward, per this precedence note.
+```
+
+There is therefore no contradictory *active* ownership rule for IMP-008 forward: the table
+records history/traceability; this precedence note, not the table, governs which assignment is
+operative. (Open Item 2 from the original draft of this section — replace-vs-run-underneath — is
+resolved by GOV-MM-005 above: replace. It is retained in "Open Items" below only for traceability
+of how the question was raised and settled, not as a still-open question.)
 
 ### Exact Model ID Verification Gap
 
@@ -661,16 +758,19 @@ these three names for governed write-ownership of implementation source**, until
 intentionally different, newly onboarded tool/agent with its own execution environment recorded.
 Claude Code and Codex are unaffected (both already verified/established in this document).
 
-### Write Ownership Under V3 (Proposed)
+### Write Ownership Under V3 (Active, IMP-008 Forward — GOV-MM-005)
 
-If and when V3 locks and is applied to a specific IMP, it restates — and does not weaken — the
-existing "ONE FILE / ONE ACTIVE OWNER" and "ONE IMP / ONE PRIMARY IMPLEMENTATION OWNER" rules (see
-"Non-Concurrent Ownership Rule" below): Claude Code, Qwen 3.7 Flash, DeepSeek V4.1, and Codex are
-read-only against implementation source code during that IMP's active build; only that IMP's
-designated Main Developer (Muse Spark 1.3 Contributor, or Kimi K2.7 Code per the open item above)
-writes implementation code, and only after Claude's spec is Human-approved.
+Restates — and does not weaken — the existing "ONE FILE / ONE ACTIVE OWNER" and "ONE IMP / ONE
+PRIMARY IMPLEMENTATION OWNER" rules (see "Non-Concurrent Ownership Rule" below): Claude Code, Qwen
+3.7 Flash, DeepSeek V4.1, and Codex are read-only against implementation source code during an
+IMP's active build; only that IMP's designated Main Developer (Muse Spark 1.3 Contributor, per
+GOV-MM-005, for IMP-008 forward outside the Mission-Critical Claude Stages and IMP-030) writes
+implementation code, and only after Claude's spec is Human-approved. This rule is structurally
+active now; it has no governed IMP to apply to yet, since IMP-008 implementation itself remains
+unauthorized (see "Authorization Scope") and Qwen/Muse/DeepSeek remain unverified (see "Exact
+Model ID Verification Gap").
 
-### Finding Routing (Proposed)
+### Finding Routing (Active, IMP-008 Forward — GOV-MM-005)
 
 ```
 Technical implementation defect     DeepSeek / Codex  -> Main Developer   (PATCH, not rewrite)
@@ -678,7 +778,7 @@ Architecture / contract defect      DeepSeek / Codex  -> Claude Code
 New/unresolved business decision    any agent          -> STOP -> HUMAN DECISION (never inferred)
 ```
 
-### Context-Efficiency Rules (Proposed, CE-01..CE-10)
+### Context-Efficiency Rules (Active, CE-01..CE-10 — GOV-MM-005)
 
 Restates, for this pipeline specifically, principles already implicit in this document's existing
 "Specialist Authority," "Remediation Ownership," and "Codex Independence" sections — RECON ONCE
@@ -689,7 +789,7 @@ escalate context only on concrete dependency evidence; one active write owner; H
 never inferred. These do not change any existing rule elsewhere in this document — they formalize
 the same discipline for the V3 pipeline's own handoffs.
 
-### Handoff Artifacts (Proposed)
+### Handoff Artifacts (Active — GOV-MM-005)
 
 Reuses the existing `docs/implementation/IMP-XXX-*.md` specification convention (already
 established by every prior IMP in this repository) and, only for IMPs run under the V3 pipeline,
@@ -702,25 +802,31 @@ canonical Stage Gate record for every IMP regardless of which pipeline built it.
 
 ### Authorization Scope
 
-This patch is explicitly **governance-drafting only**. It does NOT authorize: IMP-008
-readiness/specification work, IMP-008 implementation work, any change to the "Fixed IMP Ownership
-Matrix" table's IMP-008 row, invocation of Qwen 3.7 Flash / Muse Spark 1.3 Contributor / DeepSeek
-V4.1 for any governed task (pending the verification gap above), application source changes, or
-git push. It does not reopen or reinterpret Amendment V2's own still-`PROPOSED` state or its
-IMP-004 hold conditions. IMP-000 through IMP-007 remain historical, `FINAL / LOCKED`, and
-unmodified by this patch.
+Governance drafting (original patch) plus GOV-MM-005 activation (pipeline structure and role
+assignment, IMP-008 forward) together still do NOT authorize: IMP-008 readiness/specification
+work, IMP-008 implementation work, invocation of Qwen 3.7 Flash / Muse Spark 1.3 Contributor /
+DeepSeek V4.1 for any governed task (pending the Exact Model ID Verification Gap above, which
+GOV-MM-005 explicitly does not resolve), application source changes, or git push. Neither reopens
+or reinterprets Amendment V2's own still-`PROPOSED` state or its IMP-004 hold conditions. IMP-000
+through IMP-007 remain historical, `FINAL / LOCKED`, and unmodified.
 
-### Open Items (Require Human Decision Before Lock)
+### Open Items
 
 ```
-1. Exact model ID verification for Qwen 3.7 Flash, Muse Spark 1.3 Contributor, DeepSeek V4.1
-   (or confirmation these are intentionally distinct from the V2 baseline's Qwen 3.8 Flash /
-   DeepSeek V4.1 Flash, with their own execution environment).
-2. Whether V3, once locked, REPLACES the Fixed IMP Ownership Matrix's domain-owner assignment for
-   IMP-008 onward (Muse Spark becomes Primary Owner) or runs its pipeline roles UNDERNEATH the
-   existing per-domain owner (e.g. Kimi K2.7 Code occupies the "Main Developer" slot for IMP-008).
-3. Independent Codex audit of this amendment (not yet performed).
-4. Separate Human Final Lock Approval for V3 specifically (not yet given).
+1. STILL OPEN — Exact model ID verification for Qwen 3.7 Flash, Muse Spark 1.3 Contributor,
+   DeepSeek V4.1 (or confirmation these are intentionally distinct from the V2 baseline's Qwen
+   3.8 Flash / DeepSeek V4.1 Flash, with their own execution environment). Blocks actual
+   invocation of these three roles even though GOV-MM-005 has activated the pipeline structure
+   around them — see "GOV-MM-005" above.
+2. RESOLVED by GOV-MM-005 (see above): V3's Main Developer REPLACES the Fixed IMP Ownership
+   Matrix's domain-owner assignment for IMP-008 forward (excluding the Mission-Critical Claude
+   Stages and IMP-030 carve-outs), rather than running underneath it.
+3. STILL OPEN — Independent Codex audit of the full Amendment V3 program (not yet performed;
+   GOV-MM-005 activated the pipeline via direct Human Decision without this step, mirroring
+   GOV-MM-004's precedent — see "GOV-MM-005" above).
+4. STILL OPEN — Separate Final Human Lock Approval declaring the full Amendment V3 program
+   `FINAL / LOCKED` (not yet given; distinct from GOV-MM-005's narrower activation — see
+   "Approval" below).
 ```
 
 ## Non-Concurrent Ownership Rule
@@ -1229,14 +1335,51 @@ Amendment V3 Creation Authorization:
                      Human Lock Approval (V3), both below, still PENDING, and resolution of the
                      Open Items recorded under "Amendment V3" above.
 
-Independent Codex Audit (Amendment V3):
-  Status:            PENDING
+GOV-MM-005 Authorization (V3 Pipeline Activation, IMP-008 Forward):
+  Authority:         Human
+  Statement:         "Saya setuju.
+
+                     MULTI-AGENT WORKFLOW V3 APPROVED.
+
+                     The "Amendment V3 — Pipeline Write-Ownership Model" is approved for use
+                     prospectively beginning with IMP-008.
+
+                     Human approval authorizes activation of V3 governance.
+
+                     IMP-000 through IMP-007 remain historical FINAL / LOCKED.
+
+                     This approval does NOT authorize IMP-008 implementation."
+  Scope:             Activates V3's pipeline structure and role assignment (Claude = Lead
+                     Architect; Qwen 3.7 Flash = Recon; Muse Spark 1.3 Contributor = Main
+                     Developer/default implementation write owner; DeepSeek V4.1 = Independent
+                     Technical Checker; Codex = Final Semantic/Closure Auditor; Human = Final
+                     Authority) as `APPROVED / ACTIVE`, effective IMP-008 forward, and resolves
+                     Open Item 2 (V3's Main Developer replaces, not runs underneath, the legacy
+                     matrix's domain-owner for IMP-008 forward, excluding the Mission-Critical
+                     Claude Stages and IMP-030 carve-outs — see "Precedence Over the Legacy
+                     Matrix" above). Does NOT authorize IMP-008 readiness or implementation work
+                     (per the statement's own final line); does NOT verify or resolve Open Item 1
+                     (Exact Model ID Verification for Qwen 3.7 Flash / Muse Spark 1.3 Contributor
+                     / DeepSeek V4.1, which this statement does not address and which is not
+                     inferred here); and does NOT itself constitute, and is not recorded as, an
+                     Independent Codex Audit or a Final Human Lock Approval of the full Amendment
+                     V3 program — those remain separate, still-PENDING controls immediately below,
+                     exactly as GOV-MM-004 (IMP-004) previously activated a scoped exception via
+                     direct Human Decision without first requiring Amendment V2's own full lock.
+  Repository Mutation by Human: NO (governance-document patch performed by Claude Code per this
+                     authorization; no application source touched)
+  Push by this authorization: NOT AUTHORIZED (see "Authorization Scope" above)
+
+Independent Codex Audit (Amendment V3, full program):
+  Status:            PENDING (not required for, and not satisfied by, GOV-MM-005's narrower
+                     activation above)
   Reviewer:
   Findings:
   Evidence/Reference:
 
-Final Human Lock Approval (Amendment V3):
-  Status:            PENDING
+Final Human Lock Approval (Amendment V3, full program):
+  Status:            PENDING (distinct from GOV-MM-005's activation above, which is already
+                     APPROVED / ACTIVE for its own narrower scope)
   Human Approver:
   Approval Date:
   Approval Evidence:
