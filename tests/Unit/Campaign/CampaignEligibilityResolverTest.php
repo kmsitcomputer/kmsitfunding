@@ -104,4 +104,24 @@ class CampaignEligibilityResolverTest extends TestCase
 
         $this->assertSame('PUBLISHED', $campaign->fresh()->status, 'Time passing alone must never mutate status.');
     }
+
+    /**
+     * Completion-phase remediation: the specification's own documented public
+     * contract (section 8b) is
+     * `isDonationEligible(Campaign $campaign, ?DateTimeInterface $at = null)`
+     * — any DateTimeInterface, not only Carbon. A future IMP-008 caller
+     * passing a plain DateTimeImmutable must not hit a TypeError.
+     */
+    public function test_accepts_a_plain_datetime_interface_not_only_carbon(): void
+    {
+        $resolver = new CampaignEligibilityResolver;
+        $campaign = $this->makeCampaign([
+            'starts_at' => Carbon::parse('2026-06-01 00:00:00'),
+            'ends_at' => Carbon::parse('2026-06-30 23:59:59'),
+        ]);
+
+        $this->assertTrue($resolver->isDonationEligible($campaign, new \DateTimeImmutable('2026-06-15 12:00:00')));
+        $this->assertFalse($resolver->isDonationEligible($campaign, new \DateTimeImmutable('2026-07-15 12:00:00')));
+        $this->assertTrue($resolver->isDonationEligible($campaign, new \DateTimeImmutable('2026-06-30 23:59:59')), 'Upper boundary stays inclusive.');
+    }
 }

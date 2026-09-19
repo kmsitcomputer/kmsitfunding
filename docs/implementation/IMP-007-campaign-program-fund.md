@@ -1375,3 +1375,123 @@ EDITORIAL: 0
 OPEN HUMAN DECISIONS: 0
 GATE-IMPACT FINDINGS: 0
 ```
+
+## 35. Self-Audit Findings — Round 4 (Completion-Phase Remediation)
+
+Independent re-read of `CampaignService`, `CampaignEligibilityResolver`, `ProgramService`, and
+`Money` against section 13 (validation rules), BR-5, HD-IMP007-02/03, and AC-007-021 turned up six
+implementation-level gaps against already-approved rules (no new Human Decision required — each
+is a correction to match a rule already specified, not a new business-rule choice).
+
+```
+ID              SPEC-007-AUDIT-11
+Severity:       MINOR (implementation defect, FIXED)
+Evidence:       Section 13's currency-registry check ("an unregistered currency code is rejected
+                at validation time, never silently assumed") only ran inside
+                CampaignService::assertValidMoney() when a target_amount_minor accompanied it,
+                so `create(['currency' => 'XXX'])` (no amount) persisted an unregistered
+                currency, later breaking Money::ofMinorUnits() at read time.
+Required action: assertValidMoney() now resolves and validates the currency unconditionally,
+                before the amount-null short-circuit. Covered by
+                test_create_rejects_an_unregistered_currency_even_without_a_target_amount and
+                test_update_rejects_an_unregistered_currency_without_a_target_amount.
+
+ID              SPEC-007-AUDIT-12
+Severity:       MINOR (implementation defect, FIXED)
+Evidence:       Section 13's "ends_at must be >= starts_at" was enforced only by the HTTP-layer
+                `after_or_equal:starts_at` validation rule on CampaignController::update(),
+                which cannot see the persisted starts_at when a request supplies only ends_at —
+                a partial update could set an ends_at before the existing starts_at.
+Required action: CampaignService gained assertValidPeriod(), called in create() against the
+                payload and in update() against the RESOLVED pair (payload value where supplied,
+                persisted value otherwise); CampaignController::update()'s request rule also
+                gained `after_or_equal:starts_at` for defense-in-depth. Covered by
+                test_create_rejects_an_ends_at_before_starts_at,
+                test_update_rejects_an_ends_at_before_the_persisted_starts_at, and
+                test_update_accepts_a_valid_period.
+
+ID              SPEC-007-AUDIT-13
+Severity:       MINOR (implementation defect, FIXED)
+Evidence:       BR-1 re-checks Fund status at PUBLISH time, but CampaignService::update() let an
+                ARCHIVED Fund be ASSIGNED to a Campaign at any earlier lifecycle stage — the
+                admin UI's ACTIVE-only Fund selector is presentation, not enforcement.
+Required action: update() now rejects assigning a non-ACTIVE Fund (`fund_not_active`) at
+                assignment time, independent of the existing publish-time guard. Covered by
+                test_update_rejects_assigning_an_archived_fund.
+
+ID              SPEC-007-AUDIT-14
+Severity:       MINOR (implementation defect, FIXED)
+Evidence:       ProgramService::publish() treated a repeat publish of an already-PUBLISHED
+                Program as a no-op transition but still recorded a second program.published
+                audit event, unlike FundService::archive()'s idempotency contract (no
+                duplicate-transition side effects).
+Required action: publish() now returns early on an already-PUBLISHED Program without writing a
+                second transition event. Covered by
+                test_re_publishing_an_already_published_program_is_an_idempotent_no_op.
+
+ID              SPEC-007-AUDIT-15
+Severity:       MINOR (implementation defect, FIXED)
+Evidence:       (a) CampaignEligibilityResolver::isDonationEligible()'s implementation was typed
+                to `?CarbonInterface`, narrower than section 8b's documented public contract
+                (any DateTimeInterface). (b) Money::format() divided amount_minor by a float
+                (`10 ** $digits`) for its major/minor split, contradicting AC-007-021 ("no
+                floating-point arithmetic ... at any point in the request lifecycle") and losing
+                precision for minor-unit amounts beyond 2**53.
+Required action: (a) isDonationEligible() now accepts `?DateTimeInterface` and normalizes via
+                Carbon::instance() internally, with no change to comparison semantics — covered
+                by test_accepts_a_plain_datetime_interface_not_only_carbon. (b) Money::format()
+                now uses intdiv()/modulo integer arithmetic plus pure-string thousands grouping
+                — covered by test_format_performs_no_floating_point_arithmetic_beyond_double_precision
+                and test_format_pads_the_minor_part_to_the_registered_digit_count.
+
+BLOCKER: 0
+MAJOR:   0
+MINOR:   5 (SPEC-007-AUDIT-11..15, all FIXED)
+EDITORIAL: 0
+OPEN HUMAN DECISIONS: 0
+GATE-IMPACT FINDINGS: 0
+```
+
+Full suite re-verified after remediation: 697 passed, 2 skipped, 0 failed (699 tests, 2,227
+assertions), `php artisan test`.
+
+## 36. Self-Audit Findings — Round 5 (Independent Completion Review)
+
+Found during an independent completion-review pass (read-only audit of the Round 4 remediation
+plus a fresh requirement-by-requirement re-read of `CampaignAuditEventRegistrar` against section
+16/17 and AC-007-016), not previously disclosed in Rounds 1-4.
+
+```
+ID              SPEC-007-AUDIT-16
+Severity:       MAJOR (implementation defect, FIXED) — GATE-IMPACT
+Evidence:       Section 17 requires `hasFinancialReference: true` (materialized in code as
+                `subjectIsFinancialReference: true`) on fund.created, fund.updated, fund.archived,
+                and campaign.fund_assigned, so that AUDIT_READ_FINANCIAL_REFERENCE is required to
+                read them (HD-IMP007-02, AC-007-016). `CampaignAuditEventRegistrar` passed `true`
+                as the 11th positional constructor argument to `AuditEventDefinition` for these
+                four events — a positional-argument mistake that landed on
+                `requiresElevatedAssuranceToRead` (param 11) instead of `subjectIsFinancialReference`
+                (param 14). Effect: these four events silently required NO
+                AUDIT_READ_FINANCIAL_REFERENCE permission at all to read (any actor holding only
+                the ordinary AUDIT_READ permission could read fund/fund-assignment audit evidence),
+                while instead imposing an undocumented, unspecified ELEVATED-assurance read
+                requirement never called for by section 16/17. Not covered by any existing test
+                (`ContentAuditRegistryTest`'s equivalent assertion covers only `content.*` events).
+Required action: The four call sites now use named arguments
+                (`requiresElevatedAssuranceToRead: false, ..., subjectIsFinancialReference: true`),
+                matching every other campaign/program event's elevated-assurance value and
+                correctly setting the financial-reference flag. Covered by the new
+                `tests/Feature/Campaign/CampaignAuditRegistryTest.php`: registry-level assertions
+                for all four events plus two end-to-end `AuditReadAuthorizer::canRead()` tests
+                proving a plain AUDIT_READ grant cannot read a `fund.archived` record and an
+                AUDIT_READ_FINANCIAL_REFERENCE grant can.
+
+BLOCKER: 0
+MAJOR:   1 (SPEC-007-AUDIT-16, FIXED)
+EDITORIAL: 0
+OPEN HUMAN DECISIONS: 0
+GATE-IMPACT FINDINGS: 1 (SPEC-007-AUDIT-16, closed by the fix above)
+```
+
+Full suite re-verified after this fix: 702 passed, 2 skipped, 0 failed (704 tests, 2,242
+assertions), `php artisan test`; `vendor/bin/pint --test` PASS.
