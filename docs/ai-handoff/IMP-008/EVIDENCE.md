@@ -1,4 +1,25 @@
-# IMP-008 Regression Evidence (Pass 2 — corrected)
+# IMP-008 Regression Evidence (Pass 3 — Codex final audit remediation)
+
+> Evidence only. Introduces no business requirements, no specification
+> semantic amendment, no ADR change, no governance change. One
+> documentation-fidelity correction to the spec's literal CHECK example
+> (section 13) — see "DOCUMENTATION FIDELITY CORRECTION ONLY" below.
+
+## 0. Codex final audit input and remediation HEAD
+
+| Field | Value |
+|---|---|
+| Branch (baseline) | `master` |
+| Starting HEAD (expected `ab55355`) | `ab55355034b741deeb847d899327a8115b68c412` — matched, clean tree |
+| Codex final audit | FAIL — CODEX-IMP008-FINAL-01 (MAJOR, gate), -02 (MAJOR, gate), -03 (MINOR, non-gate) |
+| Claude reconciliation | EXISTING CONTRACT SUFFICIENT — route patch to Muse; no new human decision, no spec amendment, no ADR |
+| Remediation commit | single `fix(imp-008): close Codex final audit findings` commit on `master` (hash in final report; no push/merge) |
+
+Sections 1–12 below preserve the Pass 2 record verbatim (earlier
+invalid-regression history is NOT rewritten or hidden). Pass 3 evidence
+follows in sections 13+.
+
+---
 
 > Evidence only. Introduces no business requirements, no specification change,
 > no ADR change, no governance change.
@@ -242,3 +263,209 @@ IMP-008 expectation gap is closed with independently verified inventory
 UP-DOWN-UP evidence stand; all static/build/security checks pass; and the
 148 unrelated harness failures are dispositioned as out-of-scope follow-up
 debt rather than hidden.
+
+---
+
+## 13. Pass 3 — Codex final audit remediation (FINAL-01 / FINAL-02 / FINAL-03)
+
+### 13.1 FINAL-01 — donor authorization (CLOSED)
+
+Codex found donor-owned listing relied on ownership filtering without an
+explicit policy authorization. Patched (minimum sufficient change, existing
+IMP-003 `AuthorizationEvaluator` chain — no parallel auth system):
+
+- `DonationPolicy::viewOwnList()` (new): `donation.view` at OWN scope via
+  the canonical evaluator, anchored on a transient self-owned Donation.
+- `RecurringPlanPolicy::viewOwnList()` (new): `donation.recurring_plan.manage`
+  at OWN scope, same anchoring.
+- `RecurringPlanPolicy::create()` (patched in place — creation is a
+  donor-only path, no admin create endpoint exists): now requires
+  `donation.recurring_plan.manage` at OWN scope. An ORGANIZATION-only grant
+  MUST NOT authorize donor-owned creation; GLOBAL_PLATFORM passes only where
+  the existing IMP-003 scope contract allows (no invented scope semantics).
+- `DashboardDonationController::index()` / `indexPlans()`: `abort_unless`
+  on the new list gates BEFORE querying (ownership filtering is not the
+  authorization decision). `storePlan()` already called `$policy->create()`.
+- Incidental defect fixed (FINAL-01 test G was otherwise unprovable):
+  `StoreRecurringPlanRequest` required `frequency` `size:16`, which rejects
+  the approved `MONTHLY` value (7 chars) on every HTTP create — relaxed to
+  `max:16`; the service allow-list (BR-9) remains authoritative.
+
+New HTTP-level proof (`tests/Feature/Donation/DonationDashboardAuthorizationTest.php`,
+11 tests / 20 assertions — PASS):
+
+- A. permissionless principal → 403 on GET /me/donations.
+- B. ORGANIZATION-only `donation.view` → 403 on GET /me/donations.
+- C. OWN `donation.view` → 200, sees own ULID only.
+- D. suspended (`SecurityRestriction::Suspended`) and disabled
+  (`IdentityLifecycle::Disabled`) principals → 403 despite a valid grant.
+- E. permissionless principal → 403 on plan list AND plan create.
+- F. ORGANIZATION-only `recurring_plan.manage` → 403 on plan create.
+- G. OWN `recurring_plan.manage` → redirect, ACTIVE plan owned by the donor.
+- H. cross-donor read of another donor's donation/plan → 403.
+
+No existing test weakened.
+
+### 13.2 FINAL-02 — deferred generation engine removed (CLOSED)
+
+Per Claude reconciliation the spec explicitly defers the concrete recurring
+occurrence scheduling/execution engine ("Out of Scope"), so the engine was
+REMOVED, not completed. No ends_at behavior, no COMPLETED transitions, no
+retry engine, no new scheduling/failure semantics added.
+
+Removed (verified not required by any approved IMP-008 acceptance criterion):
+
+- `app/Console/Commands/GenerateRecurringOccurrences.php` (deleted).
+- `routes/console.php`: `donation:generate-occurrences` schedule line
+  (expiry sweep + CMS schedulers untouched; comment narrowed).
+- `RecurringPlanService::generateOccurrence()` + exclusive helpers
+  `resolvePlanDonor()` / `nextMonthlyOccurrence()` + now-unused imports.
+- `RecurringPlanService::markOccurrenceFailed()` — execution capability
+  serving only the deferred flow; approved lifecycle is
+  create/pause/resume/cancel, and the BR-11 FAILED-terminal rule is now
+  proven schema/state-only per the spec's own "Tests Required".
+- Stale generation references in `DonationSystemPrincipalSeeder`
+  (expiry role, least-privilege grants, and assignment logic untouched).
+
+Preserved: recurring plan/occurrence tables + FK/unique contracts,
+create/pause/resume/cancel, expiry sweep, `donation.scheduler` identity,
+BR-9 allow-list, BR-11 no-retry state rule, `donation_id` UNIQUE contract.
+
+Test classification (documented per mandate):
+
+- REMOVED (solely engine): `RecurringPlanTest` — generation_creates,
+  generation_inactive, marking_non_scheduled, money_anonymity,
+  repeated_sweep, cancelled_generates (6); `DonationConcurrencyTest` —
+  two_overlapping_workers, inactive_plan (2).
+- PATCHED (mixed): `failed_occurrence_is_never_retried…` →
+  `a_failed_occurrence_is_terminal_state_only` (schema/state-only);
+  `occurrence_donation_id_uniqueness…` now sources its Donation via
+  `DonationService` (approved persistence contract, no engine).
+- KEPT: all create/pause/resume/cancel/frequency/currency/no-donation-on-plan tests.
+- `DonationConcurrencyTest::disposableMysqlAvailable()`: same
+  connect-to-disposable-DB-first probe fix as the XOR test (the surrounding
+  process may carry `DB_DATABASE=:memory:`).
+
+Scheduler proof: `grep -rn "generate-occurrences\|GenerateRecurringOccurrences"
+routes/ app/Console/` → no hits outside historical RECON notes.
+
+Prior editorial REVIEW-17 / REVIEW-18: CLOSED BY SCOPE REMEDIATION (they
+described the deferred engine surface, which no longer exists in IMP-008).
+REVIEW-12 / REVIEW-16: unchanged accepted debt.
+
+### 13.3 FINAL-03 — donor-path XOR (CLOSED)
+
+BR-2 is authoritative (full XOR). Release-state check: the IMP-008
+migration (`1fa2aee`) is ahead of `origin/master` (unpushed) and IMP-008
+has NOT passed Human Stage Gate — governance confirms the migration is
+still unreleased and mutable within IMP-008. Patched in place (no
+follow-up migration needed):
+
+- `database/migrations/0001_08_01_000002_create_donations_table.php`:
+  `chk_donations_donor_path` now enforces the full XOR (authenticated XOR
+  guest; never both, never neither). `donor_display_name` untouched.
+- `Donation::isDonorPathConsistent()` inspected: ALREADY the full XOR —
+  NOT modified (per mandate).
+
+Raw MySQL proof bypassing Eloquent
+(`tests/Feature/Donation/DonationDonorPathCheckTest.php`, disposable
+`kmsitdonation_imp008_xor`, NEVER `kmsitdonation` — 5 tests / 12 assertions,
+PASS):
+
+- authenticated-only row: ACCEPTED. Guest-only row: ACCEPTED.
+- NEITHER: REJECTED by MySQL (error 3819, check-constraint-violated).
+- BOTH: REJECTED by MySQL (error 3819) — the critical new proof.
+- Migration UP → DOWN → UP: PASS (table gone after DOWN, re-created after
+  UP, re-created CHECK still rejects BOTH).
+
+SQLite skips this DB-CHECK test per existing driver convention; the
+app-guard half is covered by `DonationSchemaConstraintsTest`.
+
+### 13.4 DOCUMENTATION FIDELITY CORRECTION ONLY — NO SPECIFICATION SEMANTIC AMENDMENT
+
+`docs/implementation/IMP-008-donation.md` "Database Impact" literal CHECK
+example encoded only "not neither" while BR-2/domain model approve the full
+XOR — a transcription defect. Corrected ONLY that literal expression to the
+already-approved BR-2 invariant. BR-2, business semantics, Human Decisions,
+and scope are UNCHANGED.
+
+### 13.5 Pass 3 targeted tests (SQLite :memory:, APP_ENV=testing)
+
+- `tests/Feature/Donation` (full dir): **82 tests, 286 assertions, 0 failed,
+  2 skipped** (MySQL-only concurrency self-skips) — PASS.
+- New `DonationDashboardAuthorizationTest`: **11 tests, 20 assertions** — PASS.
+- `RecurringPlanTest` + `DonationAuthorizationTest` + `DonationHttpTest` +
+  `DonationExpirationTest`: **33 tests, 93 assertions** — PASS.
+
+### 13.6 Pass 3 genuine SQLite full regression
+
+Clean child-process env (`APP_ENV=testing`, `DB_CONNECTION=sqlite`,
+`DB_DATABASE=:memory:`, array cache/session, sync queue, array mail;
+`Application::runningUnitTests()=true`):
+
+- **Tests: 786, Assertions: 2528, Failed: 0, Skipped: 4, Duration: ~129s,
+  Exit code: 0 — PASS.**
+- The 4 skips are the expected MySQL-only tests (concurrency + XOR CHECK).
+- Delta vs Pass 2 (778/6): +11 auth tests, +5 XOR tests, −8 removed engine
+  tests (6 RecurringPlan + 2 concurrency), +1 FAILED-terminal state test,
+  −2 engine skips.
+
+### 13.7 Pass 3 MySQL IMP-008 tests (disposable DBs only, never `kmsitdonation`)
+
+- XOR CHECK + reversibility (`kmsitdonation_imp008_xor`): **5 tests,
+  12 assertions — PASS** (incl. BOTH-rejected + UP-DOWN-UP).
+- Approved concurrency (`kmsitdonation_imp008_test`): **2 tests,
+  9 assertions — PASS** (engine concurrency tests removed with the engine;
+  NOT recreated).
+- Repository-wide MySQL full regression: NOT attempted (pre-existing
+  harness not MySQL-safe — unchanged).
+
+### 13.8 Pass 3 static validation
+
+| Check | Result |
+|---|---|
+| `Pint --test` | PASS — 404 files, exit 0 |
+| `vue-tsc --noEmit` | PASS — exit 0 |
+| `Vite production build` | PASS — built in ~4.1s |
+| `Composer Audit` | PASS — no advisories |
+| `git diff --check` | PASS — no whitespace errors |
+
+### 13.9 Development DB safety
+
+DEVELOPMENT DB HISTORICAL SAFETY: **INDETERMINATE** (unchanged — the Pass 2
+statement stands and is not rewritten). During THIS pass no
+`kmsitdonation` write was performed: SQLite regression used `:memory:`
+only; MySQL runs targeted disposable DBs (`kmsitdonation_imp008_xor`,
+`kmsitdonation_imp008_test`); the only `kmsitdonation`-adjacent operations
+were read-only connection probes.
+
+## 14. Pass 3 change-boundary classification
+
+- FINAL-01: `app/Policies/DonationPolicy.php`, `app/Policies/RecurringPlanPolicy.php`,
+  `app/Http/Controllers/Donation/DashboardDonationController.php`,
+  `app/Http/Requests/Donation/StoreRecurringPlanRequest.php` (frequency
+  `size:16` → `max:16` — authorization-enabling fix, no semantic change).
+- FINAL-02: `app/Console/Commands/GenerateRecurringOccurrences.php` (deleted),
+  `routes/console.php`, `app/Services/Donation/RecurringPlanService.php`,
+  `database/seeders/DonationSystemPrincipalSeeder.php` (description/comments only).
+- FINAL-03: `database/migrations/0001_08_01_000002_create_donations_table.php`.
+- TEST: `tests/Feature/Donation/DonationDashboardAuthorizationTest.php` (new),
+  `tests/Feature/Donation/DonationDonorPathCheckTest.php` (new),
+  `tests/Feature/Donation/RecurringPlanTest.php`,
+  `tests/Feature/Donation/DonationConcurrencyTest.php`.
+- EVIDENCE: `docs/ai-handoff/IMP-008/EVIDENCE.md` (this file).
+- SPEC-FIDELITY: `docs/implementation/IMP-008-donation.md` (CHECK literal only).
+
+No unrelated file changed. Global test harness untouched (`TruncatesInMemorySqlite`,
+`phpunit.xml`).
+
+## 15. Pass 3 finding status
+
+- Codex FINAL-01: CLOSED. FINAL-02: CLOSED. FINAL-03: CLOSED.
+- BLOCKER 0, MAJOR 0, MINOR 0, GATE-IMPACT 0.
+- Prior editorial REVIEW-12 / REVIEW-16: unchanged accepted debt.
+  REVIEW-17 / REVIEW-18: CLOSED BY SCOPE REMEDIATION.
+- Architectural escalation: NO. New human decision: NO.
+- Application source modified: YES. Global test harness modified: NO.
+- Development DB modified: NO (historical safety: INDETERMINATE).
+- Push: NOT PERFORMED. Merge: NOT PERFORMED.

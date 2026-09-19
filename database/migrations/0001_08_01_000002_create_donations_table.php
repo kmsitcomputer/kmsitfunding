@@ -62,9 +62,17 @@ return new class extends Migration
         if (DB::connection()->getDriverName() === 'mysql') {
             DB::statement(<<<'SQL'
                 ALTER TABLE donations ADD CONSTRAINT chk_donations_donor_path CHECK (
-                    (donor_principal_id IS NOT NULL)
+                    (
+                        donor_principal_id IS NOT NULL
+                        AND guest_name IS NULL
+                        AND guest_email IS NULL
+                    )
                     OR
-                    (guest_name IS NOT NULL AND guest_email IS NOT NULL)
+                    (
+                        donor_principal_id IS NULL
+                        AND guest_name IS NOT NULL
+                        AND guest_email IS NOT NULL
+                    )
                 )
                 SQL);
         }

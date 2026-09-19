@@ -3,14 +3,11 @@
 namespace Tests\Feature\Donation;
 
 use App\Models\Donation\Donation;
-use App\Models\Donation\DonationRecurringOccurrence;
-use App\Models\Donation\DonationRecurringPlan;
 use App\Models\Rbac\Principal;
 use App\Models\Rbac\SystemPrincipal;
 use App\Services\Donation\DonationService;
 use App\Services\Donation\DonationTransitionService;
 use App\Services\Donation\Exceptions\DonationTransitionConflictException;
-use App\Services\Donation\RecurringPlanService;
 use App\Services\Rbac\PrincipalService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +21,12 @@ use Tests\TestCase;
  * IMP-008-donation.md "Concurrency" / AC-008-017, IMP008-REVIEW-04):
  * REAL disposable MySQL required — SQLite does not provide genuine
  * row-locking/transaction-isolation behavior.
+ *
+ * Covers the APPROVED concurrency contracts only: overlapping terminal
+ * Donation transitions and concurrent same-key creates. Recurring
+ * occurrence generation concurrency tests were removed with the deferred
+ * generation engine itself (IMP-008 spec "Out of Scope") — they verified
+ * engine behavior that no longer exists in this IMP.
  *
  * Each test creates GENUINE overlap with two separate database
  * connections to the same disposable database: a contender connection
@@ -124,6 +127,12 @@ class DonationConcurrencyTest extends TestCase
     private function disposableMysqlAvailable(): bool
     {
         try {
+            // Point the mysql connection at the disposable database BEFORE
+            // connecting: the surrounding test process may carry
+            // DB_DATABASE=:memory: (SQLite regression), which is not a
+            // valid MySQL dbname and would fail the PDO handshake.
+            config()->set('database.connections.mysql.database', self::MYSQL_DATABASE);
+
             DB::purge('mysql');
 
             DB::connection('mysql')->getPdo();
@@ -306,127 +315,5 @@ class DonationConcurrencyTest extends TestCase
             $replayed->id
         );
         $this->assertSame('PENDING', $replayed->status);
-    }
-
-    /**
-     * C. Recurring occurrence, two concurrent workers against the same
-     * due plan: exactly one logical occurrence and one Donation, the
-     * schedule advances exactly once.
-     */
-    public function test_two_overlapping_workers_generate_exactly_one_occurrence(): void
-    {
-        $actor = $this->makeUnauthorizedActor();
-        $campaign = $this->makeEligibleCampaign($actor);
-        $service = app(RecurringPlanService::class);
-        $plan = $service->create($campaign, [
-            'amount_minor' => 50000,
-            'currency' => 'IDR',
-            'frequency' => 'MONTHLY',
-        ], $actor);
-        $duePoint = $plan->next_occurrence_at;
-
-        // Genuine overlap: the contender holds the plan row lock on a
-        // separate open transaction while the worker attempts generation
-        // with a short lock wait — a 1205 proves real contention.
-        $this->holdRowLock('donation_recurring_plans', $plan->id);
-        $this->useShortLockWait();
-
-        try {
-            $service->generateOccurrence($plan->fresh(), [], $actor);
-            $this->fail('The overlapping generation must block on the contender-held plan lock.');
-        } catch (QueryException $e) {
-            $this->assertLockWaitTimeout($e);
-        } finally {
-            $this->releaseContender();
-        }
-
-        // First worker wins: exactly one Occurrence + one Donation, the
-        // schedule advances exactly once past the consumed due point.
-        $won = $service->generateOccurrence($plan->fresh(), [], $actor);
-
-        $this->assertSame('GENERATED', $won->status);
-        $this->assertNotNull($won->donation_id);
-        $this->assertTrue($plan->fresh()->next_occurrence_at->gt($duePoint));
-
-        // Second worker, serialized after the first, observes the
-        // already-processed due point as a deterministic no-op conflict —
-        // never a second Occurrence + Donation.
-        try {
-            $service->generateOccurrence($plan->fresh(), ['as_of' => $duePoint], $actor);
-            $this->fail('The second worker must observe the already-processed due occurrence.');
-        } catch (DonationTransitionConflictException $e) {
-            $this->assertSame('occurrence_already_processed', $e->reason);
-        }
-
-        $this->assertSame(1, DonationRecurringOccurrence::query()->where('recurring_plan_id', $plan->id)->count());
-        $this->assertSame(
-            1,
-            Donation::query()->where('campaign_id', $plan->campaign_id)->whereNotNull('recurring_occurrence_id')->count()
-        );
-        $this->assertSame(
-            $won->donation_id,
-            DonationRecurringOccurrence::query()->where('recurring_plan_id', $plan->id)->first()->donation_id
-        );
-    }
-
-    /**
-     * Paused/cancelled plans generate nothing even under contention;
-     * a FAILED occurrence is never automatically retried.
-     */
-    public function test_inactive_plan_generates_nothing_and_failed_occurrence_is_not_retried(): void
-    {
-        $actor = $this->makeUnauthorizedActor();
-        $service = app(RecurringPlanService::class);
-        $plan = $service->create($this->makeEligibleCampaign($actor), [
-            'amount_minor' => 50000,
-            'currency' => 'IDR',
-            'frequency' => 'MONTHLY',
-        ], $actor);
-        $service->pause($plan, $actor);
-
-        try {
-            $service->generateOccurrence($plan->fresh(), [], $actor);
-            $this->fail('A PAUSED plan must generate nothing.');
-        } catch (DonationTransitionConflictException $e) {
-            $this->assertSame('plan_not_active', $e->reason);
-        }
-
-        $service->cancel($plan->fresh(), $actor);
-
-        try {
-            $service->generateOccurrence($plan->fresh(), [], $actor);
-            $this->fail('A CANCELLED plan must generate nothing.');
-        } catch (DonationTransitionConflictException $e) {
-            $this->assertSame('plan_not_active', $e->reason);
-        }
-
-        $this->assertSame(0, DonationRecurringPlan::find($plan->id)->occurrences()->count());
-
-        $activePlan = $service->create($this->makeEligibleCampaign($actor), [
-            'amount_minor' => 50000,
-            'currency' => 'IDR',
-            'frequency' => 'MONTHLY',
-        ], $actor);
-
-        $scheduled = new DonationRecurringOccurrence;
-        $scheduled->forceFill([
-            'recurring_plan_id' => $activePlan->id,
-            'scheduled_at' => now(),
-            'status' => 'SCHEDULED',
-        ]);
-        $scheduled->save();
-
-        $failed = $service->markOccurrenceFailed($scheduled, 'child donation could not complete', $actor);
-
-        $this->assertSame('FAILED', $failed->status);
-
-        try {
-            $service->markOccurrenceFailed($failed->fresh(), 'retry attempt', $actor);
-            $this->fail('A FAILED occurrence must never be retried.');
-        } catch (DonationTransitionConflictException $e) {
-            $this->assertSame('invalid_transition', $e->reason);
-        }
-
-        $this->assertSame('FAILED', $failed->fresh()->status);
     }
 }

@@ -53,6 +53,32 @@ class DonationPolicy
         );
     }
 
+    /**
+     * Donor OWN-list authorization for GET /me/donations: the caller must
+     * hold donation.view at OWN scope. Evaluated through the canonical
+     * AuthorizationEvaluator chain (authenticated principal, permission,
+     * OWN scope coverage, ownership rule, security restrictions) anchored
+     * on a transient self-owned Donation — the ownership-filtered query
+     * below the controller is NOT the authorization decision, so an
+     * ORGANIZATION-only grant never passes while a GLOBAL_PLATFORM grant
+     * passes only where the canonical scope contract allows it.
+     */
+    public function viewOwnList(Principal $actingPrincipal): bool
+    {
+        $anchor = (new Donation)->forceFill(['donor_principal_id' => $actingPrincipal->id]);
+
+        return $this->authorizeRbac(
+            principal: $actingPrincipal,
+            permissionCode: PermissionRegistry::DONATION_VIEW,
+            resource: $anchor,
+            scopeResolver: new DonationOwnScopeResolver,
+            requestedScopeType: ScopeType::Own,
+            requestedScopeId: null,
+            ownershipCheck: fn (Donation $donation, Principal $principal): bool => $donation->donor_principal_id !== null
+                && $donation->donor_principal_id === $principal->id,
+        );
+    }
+
     public function viewAny(Principal $actingPrincipal): bool
     {
         return $this->hasOrganizationScope(

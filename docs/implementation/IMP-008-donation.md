@@ -673,7 +673,8 @@ donations
   CHECK (app-level guard always; DB-level CHECK where the driver supports it, mirroring
     `principals`' own migration comment on SQLite not carrying the CHECK — the ONLY enforcement
     layer on SQLite is therefore the application-level guard, same as Principal::isConsistent):
-    (donor_principal_id IS NOT NULL) OR (guest_name IS NOT NULL AND guest_email IS NOT NULL)
+    ((donor_principal_id IS NOT NULL AND guest_name IS NULL AND guest_email IS NULL)
+      OR (donor_principal_id IS NULL AND guest_name IS NOT NULL AND guest_email IS NOT NULL))
 
 donation_recurring_plans
   id (BIGINT PK), ulid (CHAR 26, unique)

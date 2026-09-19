@@ -27,7 +27,7 @@ class StoreRecurringPlanRequest extends FormRequest
             'campaign_ulid' => ['required', 'string', 'size:26'],
             'amount_minor' => ['required', 'integer', 'min:1'],
             'currency' => ['required', 'string', 'size:3'],
-            'frequency' => ['required', 'string', 'size:16'],
+            'frequency' => ['required', 'string', 'max:16'],
             'is_anonymous' => ['sometimes', 'boolean'],
             'starts_at' => ['nullable', 'date'],
             'ends_at' => ['nullable', 'date', 'after_or_equal:starts_at'],

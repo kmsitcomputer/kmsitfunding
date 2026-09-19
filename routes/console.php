@@ -21,11 +21,11 @@ Schedule::command('content:run-scheduled-transitions')->everyMinute()->withoutOv
 Schedule::command('content:cleanup-media')->hourly()->withoutOverlapping();
 
 // IMP-008 — Donation expiration sweep (HD-IMP008-04, config-gated: no-op
-// while donation.pending_expiry_minutes is null) + monthly recurring
-// occurrence generation driver (HD-IMP008-02/03). Laravel Scheduler +
+// while donation.pending_expiry_minutes is null). Laravel Scheduler +
 // Cron, shared-hosting compatible — no Redis/Supervisor/PM2/WebSocket/
-// separate worker. withoutOverlapping() is a courtesy only: each
-// command's own per-row locking already makes overlapping runs safe by
-// construction (each identity serializes on its own row lock).
+// separate worker. withoutOverlapping() is a courtesy only: the command's
+// own per-row locking already makes overlapping runs safe by construction
+// (each identity serializes on its own row lock). The recurring occurrence
+// generation SCHEDULING/EXECUTION engine is explicitly deferred (spec
+// "Out of Scope") — no generator is scheduled here.
 Schedule::command('donation:expire-pending')->everyMinute()->withoutOverlapping();
-Schedule::command('donation:generate-occurrences')->hourly()->withoutOverlapping();

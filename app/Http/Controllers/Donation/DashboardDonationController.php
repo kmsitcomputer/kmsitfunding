@@ -36,6 +36,7 @@ class DashboardDonationController extends Controller
     public function index(Request $request, DonationPolicy $policy): Response
     {
         $actor = $this->resolveActingPrincipal($request);
+        abort_unless($policy->viewOwnList($actor), 403);
 
         $donations = Donation::query()
             ->where('donor_principal_id', $actor->id)
@@ -75,6 +76,7 @@ class DashboardDonationController extends Controller
     public function indexPlans(Request $request, RecurringPlanPolicy $policy): Response
     {
         $actor = $this->resolveActingPrincipal($request);
+        abort_unless($policy->viewOwnList($actor), 403);
 
         $plans = DonationRecurringPlan::query()
             ->where('donor_principal_id', $actor->id)

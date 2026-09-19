@@ -13,14 +13,15 @@ use Illuminate\Database\Seeder;
 
 /**
  * IMP-008 — seeds the bounded System Principal the donation scheduler
- * commands authorize as (ExpirePendingDonations /
- * GenerateRecurringOccurrences). The principal holds NO donation.*
- * permission grants: the scheduler commands invoke
- * DonationTransitionService / RecurringPlanService directly (thin
- * per-row drivers that never consult Policies), so donation.view and
- * donation.cancel authority is not required for their execution and is
+ * command authorizes as (ExpirePendingDonations). The principal holds NO donation.*
+ * permission grants: the scheduler command invokes
+ * DonationTransitionService directly (thin
+ * per-row driver that never consults Policies), so donation.view and
+ * donation.cancel authority is not required for execution and is
  * deliberately not granted (least privilege). NO audit.read, NO rbac.*,
- * NO unrelated domain permission either.
+ * NO unrelated domain permission either. The recurring occurrence
+ * generation engine is explicitly deferred (spec "Out of Scope") — no
+ * generator identity is seeded here.
  *
  * Idempotent (safe to re-run): catalog rows via firstOrCreate,
  * PrincipalService::forSystem() is itself idempotent, and the role/
@@ -36,7 +37,7 @@ class DonationSystemPrincipalSeeder extends Seeder
     {
         $systemPrincipal = SystemPrincipal::firstOrCreate(
             ['code' => 'donation.scheduler'],
-            ['description' => 'IMP-008 Donation — expires pending donations and generates monthly recurring occurrences (donation:expire-pending, donation:generate-occurrences).']
+            ['description' => 'IMP-008 Donation — expires pending donations (donation:expire-pending).']
         );
         $principal = app(PrincipalService::class)->forSystem($systemPrincipal);
 
@@ -46,8 +47,8 @@ class DonationSystemPrincipalSeeder extends Seeder
         );
 
         // Least privilege (IMP008-REVIEW-10): the scheduler identity
-        // holds NO donation.* permission grants — the scheduler commands
-        // execute DonationTransitionService/RecurringPlanService directly
+        // holds NO donation.* permission grants — the scheduler command
+        // executes DonationTransitionService directly
         // without consulting any Policy, so donation.view/donation.cancel
         // are provably unrequired. Detach any previously-seeded grants
         // so re-running this seeder converges to least privilege.

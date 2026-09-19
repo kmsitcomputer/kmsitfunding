@@ -26,11 +26,51 @@ class RecurringPlanPolicy
 {
     use AuthorizesUsingRbac;
 
+    /**
+     * Donor-owned recurring-plan creation for POST /me/recurring-plans:
+     * donation.recurring_plan.manage must be granted at OWN scope — an
+     * ORGANIZATION-only grant MUST NOT authorize donor-owned creation.
+     * Evaluated through the canonical AuthorizationEvaluator chain anchored
+     * on a transient self-owned plan; GLOBAL_PLATFORM passes only where the
+     * existing IMP-003 scope contract explicitly allows it (no invented
+     * scope semantics). There is no admin create endpoint — creation is a
+     * donor-only path, so no ORGANIZATION variant exists.
+     */
     public function create(Principal $actingPrincipal): bool
     {
+        $anchor = (new DonationRecurringPlan)->forceFill(['donor_principal_id' => $actingPrincipal->id]);
+
         return $this->authorizeRbac(
             principal: $actingPrincipal,
             permissionCode: PermissionRegistry::DONATION_RECURRING_PLAN_MANAGE,
+            resource: $anchor,
+            scopeResolver: new DonationOwnScopeResolver,
+            requestedScopeType: ScopeType::Own,
+            requestedScopeId: null,
+            ownershipCheck: fn (DonationRecurringPlan $plan, Principal $principal): bool => $plan->donor_principal_id !== null
+                && $plan->donor_principal_id === $principal->id,
+        );
+    }
+
+    /**
+     * Donor OWN-list authorization for GET /me/recurring-plans: the caller
+     * must hold donation.recurring_plan.manage at OWN scope, evaluated
+     * through the canonical chain anchored on a transient self-owned plan —
+     * the ownership-filtered query is NOT the authorization decision.
+     */
+    public function viewOwnList(Principal $actingPrincipal): bool
+    {
+        $anchor = (new DonationRecurringPlan)->forceFill(['donor_principal_id' => $actingPrincipal->id]);
+
+        return $this->authorizeRbac(
+            principal: $actingPrincipal,
+            permissionCode: PermissionRegistry::DONATION_RECURRING_PLAN_MANAGE,
+            resource: $anchor,
+            scopeResolver: new DonationOwnScopeResolver,
+            requestedScopeType: ScopeType::Own,
+            requestedScopeId: null,
+            ownershipCheck: fn (DonationRecurringPlan $plan, Principal $principal): bool => $plan->donor_principal_id !== null
+                && $plan->donor_principal_id === $principal->id,
         );
     }
 

@@ -3,8 +3,6 @@
 namespace App\Services\Donation;
 
 use App\Models\Campaign\Campaign;
-use App\Models\Donation\Donation;
-use App\Models\Donation\DonationRecurringOccurrence;
 use App\Models\Donation\DonationRecurringPlan;
 use App\Models\Rbac\Principal;
 use App\Services\Campaign\CampaignEligibilityResolver;
@@ -13,23 +11,28 @@ use App\Services\Donation\Exceptions\DonationValidationException;
 use App\Support\Money\CurrencyMinorUnits;
 use App\Support\Money\Exceptions\UnknownCurrencyException;
 use App\Support\Money\Money;
-use Illuminate\Database\QueryException;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * IMP-008 — Recurring Plan lifecycle + Occurrence generation
- * (docs/implementation/IMP-008-donation.md "Domain Model", BR-6/BR-9/
- * BR-10/BR-11, HD-IMP008-01B/HD-IMP008-02/HD-IMP008-03).
+ * IMP-008 — Recurring Plan lifecycle (docs/implementation/
+ * IMP-008-donation.md "Domain Model", BR-6/BR-9/BR-10/BR-11,
+ * HD-IMP008-01B/HD-IMP008-02/HD-IMP008-03).
  *
  * Authenticated-donor-only (a NULL actor is rejected — guest recurring
  * is NOT supported, BR-6). Frequency accepts exactly the configured
  * allow-list values (v1: MONTHLY only) via a validated-list check
  * structured for future extension without redesign (BR-9). Pause/resume/
  * cancel lock the Plan row first and re-verify status under that lock.
- * A FAILED Occurrence is never auto-retried (BR-11); generation of one
- * Occurrence is guarded by the donation_id unique constraint so two
- * concurrent generations cannot both succeed.
+ *
+ * The concrete recurring occurrence SCHEDULING/EXECUTION engine (what
+ * moves a SCHEDULED Occurrence to GENERATED — the actual cron/job that
+ * creates the child Donation on schedule) is explicitly deferred to a
+ * later IMP (spec "Out of Scope"): this service owns create/pause/resume/
+ * cancel only and performs no automatic occurrence generation. The
+ * locked operational rules the engine will one day consume — MONTHLY-only
+ * frequency, pause/resume/cancel authority, a FAILED Occurrence is never
+ * auto-retried (BR-11, HD-IMP008-03) — are defined by the specification,
+ * and the occurrence tables exist now as a deliberate minimal foundation.
  *
  * WHO may call what is a Policy-layer concern (RecurringPlanPolicy):
  * the owning donor (OWN scope) and the ORGANIZATION-scoped admin
@@ -153,162 +156,6 @@ class RecurringPlanService
         });
     }
 
-    /**
-     * Generates the child Donation for the plan's next due occurrence:
-     * persists one SCHEDULED Occurrence, creates its Donation through
-     * DonationService (campaign eligibility re-checked at creation time),
-     * marks the Occurrence GENERATED, and advances next_occurrence_at by
-     * one month — all atomically. A child-creation failure rolls the whole
-     * attempt back (no orphan SCHEDULED row, no partial Donation); the
-     * plan's schedule is simply re-attempted by the next sweep — mirroring
-     * the CMS "transient failures leave due work pending" precedent. To
-     * record a PERSISTENT failure, generate the SCHEDULED row first (via a
-     * sweep that persists it outside this transaction) and call
-     * markOccurrenceFailed() — IMP-008 never retries a FAILED occurrence
-     * (BR-11, HD-IMP008-03).
-     *
-     * Concurrency (IMP008-REVIEW-02): due plans are selected OUTSIDE any
-     * lock, so two workers may both observe the same due plan. The lock
-     * serializes them; the loser MUST NOT generate again. After
-     * lockForUpdate the canonical plan is re-read and BOTH conditions are
-     * re-checked: ACTIVE status AND due-ness against the authoritative
-     * execution time ($payload['as_of'], default now()). A worker that
-     * already advanced next_occurrence_at past that time wins; the loser
-     * observes it and throws the typed already-processed conflict —
-     * a deterministic no-op, never a second Occurrence + Donation.
-     * next_occurrence_at therefore advances exactly once per logical due
-     * occurrence. Scheduler withoutOverlapping() is a courtesy only, never
-     * the correctness mechanism.
-     *
-     * Database backstop: the child Donation's idempotency key is derived
-     * from the STABLE consumed due point (the locked plan's own
-     * next_occurrence_at), not the fresh occurrence ULID — so the
-     * spec-mandated donations.idempotency_key UNIQUE constraint covers
-     * one logical scheduled occurrence even if two writers ever pass the
-     * due check with the same stored due point. No new business
-     * recurrence model is introduced: frequency remains MONTHLY, and no
-     * new schema constraint is invented on caller-controlled timestamps.
-     *
-     * @param  array{scheduled_at?:mixed,as_of?:mixed}  $payload
-     */
-    public function generateOccurrence(DonationRecurringPlan $plan, array $payload, Principal $actor): DonationRecurringOccurrence
-    {
-        return DB::transaction(function () use ($plan, $payload) {
-            $lockedPlan = DonationRecurringPlan::query()->whereKey($plan->id)->lockForUpdate()->firstOrFail();
-
-            if ($lockedPlan->status !== 'ACTIVE') {
-                throw new DonationTransitionConflictException(
-                    'plan_not_active',
-                    "Recurring Plan {$lockedPlan->id} is status={$lockedPlan->status}; only ACTIVE plans generate occurrences."
-                );
-            }
-
-            $asOf = isset($payload['as_of']) ? Carbon::parse($payload['as_of']) : now();
-            $duePoint = $lockedPlan->next_occurrence_at !== null
-                ? Carbon::parse($lockedPlan->next_occurrence_at)
-                : null;
-
-            if ($duePoint !== null && $duePoint->gt($asOf)) {
-                throw new DonationTransitionConflictException(
-                    'occurrence_already_processed',
-                    "Recurring Plan {$lockedPlan->id} already generated its due occurrence (next_occurrence_at is past the execution time)."
-                );
-            }
-
-            $scheduledAt = $payload['scheduled_at'] ?? $asOf;
-
-            $donor = $this->resolvePlanDonor($lockedPlan);
-
-            $occurrence = new DonationRecurringOccurrence;
-            $occurrence->forceFill([
-                'recurring_plan_id' => $lockedPlan->id,
-                'scheduled_at' => $scheduledAt,
-                'status' => 'SCHEDULED',
-            ]);
-            $occurrence->save();
-
-            try {
-                $dueKey = ($duePoint ?? $asOf)->format('Y-m-d H:i:s');
-                $idempotencyKey = 'recurring-'.$lockedPlan->ulid.'-'.$dueKey;
-
-                $donation = app(DonationService::class)->create(
-                    Campaign::query()->whereKey($lockedPlan->campaign_id)->firstOrFail(),
-                    [
-                        'amount_minor' => $lockedPlan->amount_minor,
-                        'currency' => $lockedPlan->currency,
-                        'is_anonymous' => $lockedPlan->is_anonymous,
-                        'recurring_occurrence_id' => $occurrence->id,
-                    ],
-                    $donor,
-                    $idempotencyKey,
-                );
-            } catch (QueryException $e) {
-                $driverCode = $e->errorInfo[1] ?? null;
-
-                if (in_array($driverCode, [1062, 19, 2067], true)) {
-                    throw new DonationTransitionConflictException(
-                        'occurrence_already_generated',
-                        "Occurrence {$occurrence->id} already generated its donation."
-                    );
-                }
-
-                throw $e;
-            }
-
-            try {
-                $occurrence->forceFill([
-                    'donation_id' => $donation->id,
-                    'status' => 'GENERATED',
-                    'generated_at' => now(),
-                ])->save();
-            } catch (QueryException $e) {
-                $driverCode = $e->errorInfo[1] ?? null;
-
-                if (in_array($driverCode, [1062, 19, 2067], true)) {
-                    throw new DonationTransitionConflictException(
-                        'occurrence_already_generated',
-                        "Occurrence {$occurrence->id} already generated its donation."
-                    );
-                }
-
-                throw $e;
-            }
-
-            $lockedPlan->forceFill([
-                'next_occurrence_at' => $this->nextMonthlyOccurrence($lockedPlan),
-            ])->save();
-
-            return $occurrence->fresh();
-        });
-    }
-
-    /**
-     * Records a FAILED outcome against one SCHEDULED Occurrence (e.g. the
-     * child Donation creation could not complete). Terminal: IMP-008
-     * never retries it; the plan's next SCHEDULED occurrence proceeds
-     * independently (BR-11, HD-IMP008-03).
-     */
-    public function markOccurrenceFailed(DonationRecurringOccurrence $occurrence, string $reason, Principal $actor): DonationRecurringOccurrence
-    {
-        return DB::transaction(function () use ($occurrence, $reason) {
-            $locked = DonationRecurringOccurrence::query()->whereKey($occurrence->id)->lockForUpdate()->firstOrFail();
-
-            if ($locked->status !== 'SCHEDULED') {
-                throw new DonationTransitionConflictException(
-                    'invalid_transition',
-                    "Occurrence {$locked->id} is status={$locked->status}; only SCHEDULED may be marked FAILED."
-                );
-            }
-
-            $locked->forceFill([
-                'status' => 'FAILED',
-                'failure_reason' => substr($reason, 0, 1000),
-            ])->save();
-
-            return $locked;
-        });
-    }
-
     private function lockedIn(DonationRecurringPlan $plan, array $allowedStatuses, string $action): DonationRecurringPlan
     {
         $locked = DonationRecurringPlan::query()->whereKey($plan->id)->lockForUpdate()->firstOrFail();
@@ -342,17 +189,5 @@ class RecurringPlanService
         }
 
         Money::ofMinorUnits(0, $currency);
-    }
-
-    private function resolvePlanDonor(DonationRecurringPlan $plan): Principal
-    {
-        return Principal::query()->whereKey($plan->donor_principal_id)->firstOrFail();
-    }
-
-    private function nextMonthlyOccurrence(DonationRecurringPlan $plan): mixed
-    {
-        $base = $plan->next_occurrence_at ?? now();
-
-        return Carbon::parse($base)->addMonthNoOverflow();
     }
 }
