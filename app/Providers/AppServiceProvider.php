@@ -11,6 +11,9 @@ use App\Services\Campaign\FundScopeResolver;
 use App\Services\Campaign\ProgramScopeResolver;
 use App\Services\Content\ContentAuditEventRegistrar;
 use App\Services\Content\ContentScopeResolver;
+use App\Services\Donation\DonationAuditEventRegistrar;
+use App\Services\Donation\DonationScopeResolver;
+use App\Services\Donation\RecurringPlanScopeResolver;
 use App\Services\Rbac\OwnUserScopeResolver;
 use App\Services\Rbac\ScopeResolverRegistry;
 use App\Services\Theme\ThemeAuditEventRegistrar;
@@ -53,6 +56,16 @@ class AppServiceProvider extends ServiceProvider
             new ProgramScopeResolver,
             new CampaignScopeResolver,
             new FundScopeResolver,
+            // IMP-008: Donation/Recurring-Plan ORGANIZATION scoping —
+            // identical shape to ContentScopeResolver/ThemeScopeResolver.
+            // (The donor OWN path uses DonationOwnScopeResolver, which is
+            // instantiated directly by the Policies — like every domain
+            // resolver — and is deliberately NOT registered here: the
+            // registry is keyed by ScopeType and OWN already maps to
+            // OwnUserScopeResolver, which must keep its User-resource
+            // semantics for any other consumer.)
+            new DonationScopeResolver,
+            new RecurringPlanScopeResolver,
         ]));
 
         // IMP-004: canonical audit event registry + correlation foundation,
@@ -63,11 +76,13 @@ class AppServiceProvider extends ServiceProvider
         // IMP-006: the 12 theme.* events are registered the same way.
         // IMP-007: the program.*/campaign.*/fund.* events are registered
         // the same way.
+        // IMP-008: the donation.* events are registered the same way.
         $this->app->singleton(AuditEventRegistry::class, function () {
             $registry = new AuditEventRegistry;
             (new ContentAuditEventRegistrar)->register($registry);
             (new ThemeAuditEventRegistrar)->register($registry);
             (new CampaignAuditEventRegistrar)->register($registry);
+            (new DonationAuditEventRegistrar)->register($registry);
 
             return $registry;
         });

@@ -18,8 +18,11 @@ use App\Http\Controllers\Cms\ArticleController;
 use App\Http\Controllers\Cms\HomepageController;
 use App\Http\Controllers\Cms\MediaController;
 use App\Http\Controllers\Cms\PageController;
+use App\Http\Controllers\Donation\AdminDonationController;
+use App\Http\Controllers\Donation\DashboardDonationController;
 use App\Http\Controllers\PublicCampaignController;
 use App\Http\Controllers\PublicContentController;
+use App\Http\Controllers\PublicDonationController;
 use App\Http\Controllers\PublicProgramController;
 use App\Http\Controllers\Theme\ThemeController;
 use App\Models\Campaign\Campaign;
@@ -225,6 +228,42 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::post('/{campaign}/media', [AdminCampaignController::class, 'uploadAsset'])->name('media.upload');
         Route::post('/media/{asset}/archive', [AdminCampaignController::class, 'archiveAsset'])->name('media.archive');
     });
+
+    // IMP-008 — donor-owned Donation views/actions (docs/implementation/
+    // IMP-008-donation.md "API Impact"). {donation}/{plan} are bound by
+    // ULID, never the internal BIGINT id. Authenticated-only: there is no
+    // guest self-service cancellation endpoint in v1 (HD-IMP008-05B).
+    Route::prefix('me/donations')->name('donations.')->group(function () {
+        Route::get('/', [DashboardDonationController::class, 'index'])->name('index');
+        Route::get('/{donation}', [DashboardDonationController::class, 'show'])->name('show');
+        Route::post('/{donation}/cancel', [DashboardDonationController::class, 'cancel'])->name('cancel');
+    });
+
+    Route::prefix('me/recurring-plans')->name('donations.plans.')->group(function () {
+        Route::get('/', [DashboardDonationController::class, 'indexPlans'])->name('index');
+        Route::post('/', [DashboardDonationController::class, 'storePlan'])->name('store');
+        Route::get('/{plan}', [DashboardDonationController::class, 'showPlan'])->name('show');
+        Route::post('/{plan}/pause', [DashboardDonationController::class, 'pausePlan'])->name('pause');
+        Route::post('/{plan}/resume', [DashboardDonationController::class, 'resumePlan'])->name('resume');
+        Route::post('/{plan}/cancel', [DashboardDonationController::class, 'cancelPlan'])->name('cancel');
+    });
+
+    // IMP-008 — admin/backoffice Donation views/actions (ORGANIZATION
+    // scope; also the guest-cancellation support path, HD-IMP008-05B —
+    // no separate guest mechanism — and the recurring-plan admin
+    // override, HD-IMP008-03). Mirrors the admin/campaign/* convention.
+    Route::prefix('admin/donation/donations')->name('donation.admin.')->group(function () {
+        Route::get('/', [AdminDonationController::class, 'index'])->name('index');
+        Route::get('/{donation}', [AdminDonationController::class, 'show'])->name('show');
+        Route::post('/{donation}/cancel', [AdminDonationController::class, 'cancel'])->name('cancel');
+    });
+
+    Route::prefix('admin/donation/recurring-plans')->name('donation.admin.plans.')->group(function () {
+        Route::get('/{plan}', [AdminDonationController::class, 'showPlan'])->name('show');
+        Route::post('/{plan}/pause', [AdminDonationController::class, 'pausePlan'])->name('pause');
+        Route::post('/{plan}/resume', [AdminDonationController::class, 'resumePlan'])->name('resume');
+        Route::post('/{plan}/cancel', [AdminDonationController::class, 'cancelPlan'])->name('cancel');
+    });
 });
 
 // IMP-007 — public Program/Campaign routes (docs/implementation/
@@ -233,6 +272,15 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
 Route::get('/programs/{program:slug}', [PublicProgramController::class, 'show'])->name('public.programs.show');
 Route::get('/campaigns', [PublicCampaignController::class, 'index'])->name('public.campaigns.index');
 Route::get('/campaigns/{campaign:slug}', [PublicCampaignController::class, 'show'])->name('public.campaigns.show');
+
+// IMP-008 — public Donation entry point (docs/implementation/
+// IMP-008-donation.md "API Impact": POST /campaigns/{slug}/donations —
+// the intentional guest-or-authenticated creation endpoint). Bound by
+// `slug` like the Campaign routes; Idempotency-Key header REQUIRED.
+// Registered before the IMP-006 catch-all below.
+Route::get('/campaigns/{campaign:slug}/donate', [PublicDonationController::class, 'create'])->name('public.donations.create');
+Route::post('/campaigns/{campaign:slug}/donations', [PublicDonationController::class, 'store'])->name('public.donations.store');
+Route::get('/campaigns/{campaign:slug}/donations/{donation}', [PublicDonationController::class, 'receipt'])->name('public.donations.receipt');
 
 // IMP-006 — the public content catch-all (docs/implementation/
 // IMP-006-theme-engine.md section 13), registered LAST so every

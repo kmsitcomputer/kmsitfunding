@@ -19,3 +19,13 @@ Schedule::command('content:run-scheduled-transitions')->everyMinute()->withoutOv
 // like publication; hourly is a defensible cadence against the default
 // 24h orphan grace / 7-day purge grace windows (config/media.php).
 Schedule::command('content:cleanup-media')->hourly()->withoutOverlapping();
+
+// IMP-008 — Donation expiration sweep (HD-IMP008-04, config-gated: no-op
+// while donation.pending_expiry_minutes is null) + monthly recurring
+// occurrence generation driver (HD-IMP008-02/03). Laravel Scheduler +
+// Cron, shared-hosting compatible — no Redis/Supervisor/PM2/WebSocket/
+// separate worker. withoutOverlapping() is a courtesy only: each
+// command's own per-row locking already makes overlapping runs safe by
+// construction (each identity serializes on its own row lock).
+Schedule::command('donation:expire-pending')->everyMinute()->withoutOverlapping();
+Schedule::command('donation:generate-occurrences')->hourly()->withoutOverlapping();

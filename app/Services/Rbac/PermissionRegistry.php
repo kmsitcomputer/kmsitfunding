@@ -112,6 +112,20 @@ class PermissionRegistry
 
     public const FUND_ARCHIVE = 'fund.archive';
 
+    // IMP-008 Donation permission family (docs/implementation/
+    // IMP-008-donation.md "Authorization / RBAC"). donation.cancel covers
+    // donor self-service (OWN scope) AND admin support-path cancellation
+    // (ORGANIZATION scope); donation.recurring_plan.manage covers donor
+    // self-service (OWN) AND admin override (ORGANIZATION) — same
+    // permission, scope distinguishes the path. Included in the
+    // super_admin bulk grant below like every other non-audit permission —
+    // no bypass.
+    public const DONATION_VIEW = 'donation.view';
+
+    public const DONATION_CANCEL = 'donation.cancel';
+
+    public const DONATION_RECURRING_PLAN_MANAGE = 'donation.recurring_plan.manage';
+
     /**
      * @return array<string, array{description: string, module: string}>
      */
@@ -288,6 +302,18 @@ class PermissionRegistry
             self::FUND_ARCHIVE => [
                 'description' => 'Archive a Fund.',
                 'module' => 'fund',
+            ],
+            self::DONATION_VIEW => [
+                'description' => 'Read/manage-list Donations.',
+                'module' => 'donation',
+            ],
+            self::DONATION_CANCEL => [
+                'description' => 'Cancel a PENDING Donation (donor self-service at OWN scope; admin support path at ORGANIZATION scope).',
+                'module' => 'donation',
+            ],
+            self::DONATION_RECURRING_PLAN_MANAGE => [
+                'description' => 'Create, pause, resume, or cancel a Recurring Donation Plan (donor self-service at OWN scope; admin override at ORGANIZATION scope).',
+                'module' => 'donation',
             ],
         ];
     }
