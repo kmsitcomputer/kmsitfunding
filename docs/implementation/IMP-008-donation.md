@@ -153,18 +153,22 @@ AuditEventRegistry / AuditEventDefinition (app/Services/Audit/*, IMP-004) — th
 ## Scope
 
 ```
-Donation aggregate (one-time donation to a Campaign).
-Guest and authenticated donor donation entry points.
+Donation aggregate (one-time donation to a Campaign — CAMPAIGN-ONLY, HD-IMP008-01A).
+Guest (one-time only, HD-IMP008-01B) and authenticated donor donation entry points.
 Public anonymity contract (Q6).
 Donation lifecycle (PENDING/SUCCEEDED/FAILED/CANCELLED/EXPIRED) and its state-transition contract
   — including the abstract, authorization-gated transition surface IMP-009 (Payment) will later
   invoke, WITHOUT implementing IMP-009 itself.
-Recurring Plan / Recurring Occurrence schema and ownership boundary (module-owned by IMP-008 per
-  MODULE-OWNERSHIP.md §4), to the extent authoritative evidence supports it — see "Open Human
-  Decisions" for what is deliberately NOT decided here.
+Recurring Plan / Recurring Occurrence — authenticated-donor-only (HD-IMP008-01B), MONTHLY
+  frequency only in v1 (HD-IMP008-02), donor self-service pause/resume/cancel + admin override
+  (HD-IMP008-03), module-owned by IMP-008 per MODULE-OWNERSHIP.md §4. The Occurrence generation
+  SCHEDULING/EXECUTION engine itself remains a separate build task (schema/ownership boundary only
+  in this spec — see "Recurring Plan / Recurring Occurrence" and "Out of Scope").
+Mandatory client-provided idempotency key for Donation creation (HD-IMP008-05A).
 Fund/Campaign reference (read-only consumption of IMP-007 contracts).
 Authorization (RBAC) for donor-owned and admin/staff-facing Donation actions.
-Audit events for Donation lifecycle transitions.
+Audit events for Donation lifecycle transitions, including the guest-actor
+  `AuditActorKind::Unauthenticated` contract (HD-IMP008-06, ADR-002).
 Database schema: `donations`, `donation_recurring_plans`, `donation_recurring_occurrences`.
 Minimum public/donor-owned/admin web/application contracts needed to create and observe a
   Donation (not the full IMP-025 REST API).
@@ -203,8 +207,22 @@ Any later IMP:                Campaign progress/collected-amount display aggrega
                              into the public Campaign page's presentation layer is a follow-on,
                              not part of this spec's acceptance criteria).
                              Full IMP-025 REST API surface for Donation.
-                             Recurring Occurrence generation SCHEDULING/EXECUTION mechanism (cron
-                             job, retry/backoff policy) — see "Open Human Decisions" OQ-008-02/03.
+                             Program-level and Fund-level direct donation (HD-IMP008-01A —
+                             CAMPAIGN-ONLY for v1; a future authorized extension may add this).
+                             Guest recurring donation and any guest bearer-token/magic-link
+                             authorization architecture (HD-IMP008-01B — explicitly prohibited in
+                             v1, not merely undecided).
+                             Recurring frequencies other than MONTHLY (HD-IMP008-02 — the schema
+                             must remain extensible to future frequencies without redesign, but no
+                             non-MONTHLY value is implemented now).
+                             Automatic occurrence-generation retry (HD-IMP008-03 — a FAILED
+                             Occurrence is never auto-retried; only the plan's normal next
+                             SCHEDULED occurrence proceeds).
+                             Recurring Occurrence generation SCHEDULING/EXECUTION mechanism itself
+                             (the actual cron/job implementation) — the schema and its now-locked
+                             operational rules (HD-IMP008-02/03) are defined by this spec, but
+                             building the engine is deferred as a separate, later implementation
+                             task, not blocked on any remaining unknown.
 ```
 
 ## Affected Domains
@@ -254,13 +272,16 @@ Public display name:       donor_display_name (string 150, nullable), captured a
                             rendered publicly regardless of its value (see "Public Anonymity").
 
 Campaign relationship:     campaign_id (FK campaigns, RESTRICT, NOT NULL). Every Donation targets
-                            exactly one Campaign. Program- or Fund-level direct donation (bypassing
-                            a specific Campaign) is OUT OF SCOPE: IMP-007 defines donation
-                            eligibility (CampaignEligibilityResolver) only at Campaign granularity
-                            — Program has no starts_at/ends_at/eligibility contract of its own —
-                            so there is no authoritative resolver a Program- or Fund-level Donation
-                            could consume without IMP-008 inventing one. See OQ-008-01 if
-                            Program/Fund-level donation is actually required.
+                            exactly one Campaign — CAMPAIGN-ONLY, `FINAL / LOCKED` per
+                            HD-IMP008-01A. Program- or Fund-level direct donation (bypassing a
+                            specific Campaign) is explicitly OUT OF SCOPE for v1: IMP-007 defines
+                            donation eligibility (CampaignEligibilityResolver) only at Campaign
+                            granularity — Program has no starts_at/ends_at/eligibility contract of
+                            its own — so there is no authoritative resolver a Program- or
+                            Fund-level Donation could consume without IMP-008 inventing one. A
+                            future direct Program/Fund donation capability requires its own
+                            explicit future authorized extension (HD-IMP008-01A), not a unilateral
+                            IMP-008 addition.
 
 Fund relationship:         NOT a direct column. Reached transitively via
                             Donation.campaign_id -> Campaign.fund_id (IMP-007). Storing fund_id
@@ -302,8 +323,14 @@ Immutable vs mutable:      campaign_id, donor_principal_id, guest_name, guest_em
 
 Cancellation/expiration
   boundaries:                see "State / Lifecycle" — CANCELLED and EXPIRED are both terminal,
-                            pre-success states; the exact expiration TIMEOUT duration is NOT
-                            invented here (no authoritative value exists) — see OQ-008-04.
+                            pre-success states. The PENDING->EXPIRED mechanism itself is
+                            `FINAL / LOCKED` (HD-IMP008-04): the exact expiration TIMEOUT duration
+                            remains configurable, with NO default value asserted by this
+                            specification — the mechanism MUST NOT invent or silently assume a
+                            duration (see "State / Lifecycle" for the exact configuration
+                            contract). Donation intent expiration (this mechanism) and Payment
+                            expiration (IMP-009's own, separate concern) remain distinct — see
+                            "State / Lifecycle".
 
 Metadata boundaries:        no free-form metadata/message/comment/dedication field is included —
                             no authoritative requirement evidences one (grepped
@@ -327,25 +354,30 @@ This task's own instructions (§11) state the locked entity chain:
 Recurring Plan -> Occurrence -> Donation -> Payment
 ```
 
+Per HD-IMP008-02, "Hybrid Recurring Donation" (Q5) means: (1) a donor may make a ONE-TIME
+Donation; OR (2) an authenticated donor may establish a RECURRING Donation Plan — i.e. "hybrid"
+describes the *platform* offering both modes side by side, not a single donation that is itself
+part-recurring/part-one-time. This resolves OQ-008-02.
+
 `donation_recurring_plans`:
 
 ```
 id (BIGINT PK), ulid (CHAR 26, unique)
-donor_principal_id (FK principals, RESTRICT, NOT NULL — NOT nullable; a Recurring Plan requires an
-  authenticated donor, because a guest has no persistent identity across sessions for a future
-  occurrence to be meaningfully associated back to — this is a structural/technical necessity
-  derived from "guest" having no durable identity, not an invented business policy; see
-  OQ-008-01 if guest recurring is actually required)
+donor_principal_id (FK principals, RESTRICT, NOT NULL — `FINAL / LOCKED`, HD-IMP008-01B: a
+  Recurring Plan requires an authenticated donor; guest recurring is explicitly NOT supported in
+  v1, and no bearer-token/magic-link authorization architecture is introduced for it)
 campaign_id (FK campaigns, RESTRICT, NOT NULL)
 amount_minor (BIGINT UNSIGNED, NOT NULL), currency (CHAR 3, NOT NULL) — via Money/CurrencyMinorUnits
-frequency (VARCHAR 16, NOT NULL) — allowed value set NOT authoritatively established; see
-  OQ-008-02
-status (VARCHAR 16, NOT NULL) — ACTIVE|PAUSED|CANCELLED|COMPLETED (minimal derivable set; exact
-  transition triggers/authorization for PAUSE and COMPLETED NOT authoritatively established; see
-  OQ-008-03)
+frequency (VARCHAR 16, NOT NULL) — `FINAL / LOCKED`, HD-IMP008-02: the only value accepted/
+  enforced in v1 is `MONTHLY` (validated-list check, not a boolean/hard-coded monthly-only code
+  path, so additional authorized frequency values can be added later without redesigning this
+  column or the Donation/Recurring Plan aggregates — see "Business Rules" BR-9)
+status (VARCHAR 16, NOT NULL) — ACTIVE|PAUSED|CANCELLED|COMPLETED. PAUSE/RESUME/CANCEL authority
+  `FINAL / LOCKED` per HD-IMP008-03 — see "Authorization / RBAC"
 is_anonymous (BOOLEAN, NOT NULL, DEFAULT FALSE) — propagates to generated Occurrences' Donations
 starts_at (DATETIME, NOT NULL), ends_at (DATETIME, NULLABLE — open-ended by default)
 next_occurrence_at (DATETIME, NULLABLE)
+paused_at / paused_by_principal_id (DATETIME / FK principals RESTRICT, NULLABLE)
 cancelled_at / cancelled_by_principal_id (DATETIME / FK principals RESTRICT, NULLABLE)
 timestamps
 ```
@@ -357,20 +389,24 @@ id (BIGINT PK), ulid (CHAR 26, unique)
 recurring_plan_id (FK donation_recurring_plans, RESTRICT, NOT NULL)
 scheduled_at (DATETIME, NOT NULL)
 donation_id (FK donations, RESTRICT, NULLABLE — set once this occurrence generates its Donation)
-status (VARCHAR 16, NOT NULL) — SCHEDULED|GENERATED|SKIPPED|FAILED (minimal derivable set; exact
-  retry/backoff policy for FAILED, and who/what may SKIP, NOT authoritatively established; see
-  OQ-008-03)
+status (VARCHAR 16, NOT NULL) — SCHEDULED|GENERATED|SKIPPED|FAILED. `FINAL / LOCKED` per
+  HD-IMP008-03: NO automatic retry of a FAILED occurrence — it remains FAILED permanently; the
+  next independently SCHEDULED occurrence proceeds on the plan's normal monthly schedule
+  regardless (see "Business Rules" BR-11). Payment-ATTEMPT retry (once a Payment attempt exists
+  against a GENERATED occurrence's Donation) is exclusively IMP-009's concern, never IMP-008's.
 generated_at (DATETIME, NULLABLE)
 failure_reason (TEXT, NULLABLE)
 timestamps
 ```
 
-**This specification defines the schema and ownership boundary only.** The generation
-scheduling/execution mechanism (what triggers moving a SCHEDULED Occurrence to GENERATED, i.e. an
-actual cron/job that creates the child Donation) is OUT OF SCOPE pending OQ-008-02/03 — see "Open
-Human Decisions." Creating the tables now (with FK integrity) without building the engine is a
-deliberate, minimal foundation, matching HD-IMP007-02's own "minimum canonical foundation, no
-premature capability" precedent.
+**This specification defines the schema, ownership boundary, AND the now-locked operational rules
+(monthly-only frequency, pause/resume/cancel authority, no auto-retry).** The generation
+scheduling/execution mechanism itself (what triggers moving a SCHEDULED Occurrence to GENERATED —
+i.e. the actual cron/job that creates the child Donation on schedule) remains a separate,
+deferred implementation task (see "Out of Scope") — its OPERATIONAL RULES are no longer
+undetermined (HD-IMP008-02/03 resolved that), only its concrete build is sequenced later. Creating
+the tables now (with FK integrity) ahead of that build is a deliberate, minimal foundation,
+matching HD-IMP007-02's own "minimum canonical foundation, no premature capability" precedent.
 
 ## Data Ownership
 
@@ -406,8 +442,8 @@ Principal:                    read-only consumption of IMP-003's `principals` ta
               |  FAILED   |          |  EXPIRED  |
               +-----------+          +-----------+
                                 (PENDING with no resolution
-                                 within a bounded window —
-                                 window value: OQ-008-04)
+                                 within a CONFIGURABLE window —
+                                 see below, HD-IMP008-04)
 ```
 
 ```
@@ -417,10 +453,22 @@ PENDING    -> SUCCEEDED   ONLY via the authorized transition surface an Authoriz
                           happens; it defines the resulting state and its invariants.
 PENDING    -> FAILED      same authorized-consequence surface, failure outcome.
 PENDING    -> EXPIRED     system-initiated (no Payment outcome arrived within the configurable
-                          timeout — see OQ-008-04); never donor/admin-initiated directly.
-PENDING    -> CANCELLED   donor (own, unauthenticated-guest via a signed reference, or
-                          authenticated) or an authorized admin, before any Payment outcome
-                          arrives. See "Authorization / RBAC".
+                          timeout — HD-IMP008-04); never donor/admin-initiated directly.
+                          Configuration contract (`FINAL / LOCKED`): a single nullable config
+                          value (e.g. `config('donation.pending_expiry_minutes')`, default `null`)
+                          gates the sweep — the scheduled sweep job MUST NOT act, and no Donation
+                          ever transitions to EXPIRED, while this value is unset. No numeric
+                          default is asserted by this specification (HD-IMP008-04 explicitly
+                          prohibits inventing or silently assuming a duration); an operator/Human
+                          sets the value through ordinary application configuration once a
+                          duration is authorized. Donation intent expiration (this mechanism) is
+                          distinct from Payment expiration (a Payment ATTEMPT's own validity
+                          window/session timeout, e.g. a bank-transfer instruction's expiry) —
+                          IMP-009 owns the latter entirely; the two clocks are independent and
+                          neither this document nor IMP-009 may conflate them.
+PENDING    -> CANCELLED   donor (own, authenticated only — guest self-service cancellation is
+                          explicitly NOT supported, HD-IMP008-05B) or an authorized admin, before
+                          any Payment outcome arrives. See "Authorization / RBAC".
 SUCCEEDED  -> (terminal)  no further transition from IMP-008's own domain. A later Refund
                           (IMP-016) records ITS OWN state against Payment/Ledger; it does not
                           mutate a SUCCEEDED Donation row.
@@ -458,12 +506,41 @@ BR-5  Donation creation, by itself, MUST NOT create a Ledger journal/entry, Comm
       entitlement, Withdrawal balance, or Reconciliation entry (see "Financial Boundary" — this
       restates AGENTS.md "Never: invent accounting entries" and the Financial Posting Boundary
       for this specific IMP).
-BR-6  A Recurring Plan requires an authenticated donor (donor_principal_id NOT NULL) — see
-      "Domain Model" rationale.
+BR-6  A Recurring Plan requires an authenticated donor (donor_principal_id NOT NULL) — HD-IMP008-01B,
+      `FINAL / LOCKED`. Guest recurring donation is not supported in v1, and no bearer-token/
+      magic-link authorization architecture is introduced to work around this.
 BR-7  A terminal Donation state (SUCCEEDED/FAILED/CANCELLED/EXPIRED) is never mutated back to
       PENDING or to any other terminal state.
 BR-8  Donation.campaign_id, donor_principal_id, guest_name, guest_email, amount_minor, currency,
       is_anonymous, recurring_occurrence_id are immutable after creation (see "Domain Model").
+BR-9  A Recurring Plan's `frequency` accepts exactly one value in v1 — `MONTHLY` — via a
+      validated-list check (HD-IMP008-02, `FINAL / LOCKED`). The check MUST be structured so that
+      additional authorized frequency values can be added later without redesigning the Donation
+      or Recurring Plan aggregates (e.g. a config-driven or DB-lookup allow-list, never a
+      hard-coded single-value boolean check that would itself need replacing to extend).
+BR-10 A Recurring Plan may be PAUSED and RESUMED by its owning donor (OWN scope,
+      donation.recurring_plan.manage) or by an authorized ORGANIZATION-scoped admin override
+      (HD-IMP008-03, `FINAL / LOCKED`) — see "Authorization / RBAC".
+BR-11 A FAILED Recurring Occurrence is never automatically retried by IMP-008 (HD-IMP008-03,
+      `FINAL / LOCKED`); the next independently SCHEDULED occurrence proceeds per the plan's
+      normal monthly schedule regardless of a prior FAILED occurrence. Payment-attempt retry
+      belongs exclusively to IMP-009.
+BR-12 Donation creation MUST include a client-provided idempotency key; a request without one is
+      rejected before any Donation row is created (HD-IMP008-05A, `FINAL / LOCKED`) — see
+      "Idempotency" for the exact contract.
+BR-13 No guest self-service Donation cancellation exists in v1 (HD-IMP008-05B, `FINAL / LOCKED`).
+      Guest cancellation, when legitimately required, is handled exclusively through the
+      authorized organization/admin support path (see "Authorization / RBAC"). No Donation
+      identifier (internal id or ulid), email address, or other guessable/knowable value may ever
+      function as an authorization credential for a guest action. Abandoned guest PENDING
+      Donations resolve through the Donation expiration mechanism (HD-IMP008-04), not through a
+      guest-initiated cancellation.
+BR-14 A guest-originated `donation.created` audit event records actor kind
+      `AuditActorKind::Unauthenticated`, `actor_principal_id = NULL`, and the fixed registered
+      `execution_context = "http:donation:guest_created"` (HD-IMP008-06, `FINAL / LOCKED`, per
+      [ADR-002](../adr/ADR-002-donation-unauthenticated-actor-scope-amendment.md)). Never
+      `AuditActorKind::System` (would misrepresent a human-originated action as automation), and
+      no new actor kind is introduced.
 ```
 
 ## Security Requirements
@@ -504,12 +581,26 @@ Admin/staff viewing Donations:     Authenticated AND permission donation.view AN
 
 Donor cancelling own PENDING
   Donation:                        Authenticated AND permission donation.cancel AND scope OWN AND
-                                   resource state PENDING. A guest's own cancellation path (no
-                                   account to authenticate) is NOT defined here — see OQ-008-05.
+                                   resource state PENDING. Only an authenticated donor may
+                                   self-service cancel — a guest has no self-service cancellation
+                                   path at all in v1 (HD-IMP008-05B, `FINAL / LOCKED`, not merely
+                                   undefined).
+
+Guest cancellation
+  (support path only):              NOT self-service. When legitimately required, handled
+                                   exclusively through the admin/organization support path below
+                                   (Authenticated staff AND donation.cancel AND scope ORGANIZATION
+                                   AND resource state PENDING) — same permission/scope as ordinary
+                                   admin cancellation, no separate guest-specific mechanism.
+                                   Abandoned guest PENDING Donations otherwise resolve via the
+                                   Donation expiration mechanism (HD-IMP008-04), never via a
+                                   bearer-token/magic-link/identifier-as-credential path
+                                   (HD-IMP008-05B).
 
 Admin cancelling a PENDING
   Donation:                        Authenticated AND permission donation.cancel AND scope
-                                   ORGANIZATION AND resource state PENDING.
+                                   ORGANIZATION AND resource state PENDING. This is the SAME path
+                                   used for guest cancellation support requests above.
 
 System/authorized-consequence
   transition (PENDING ->
@@ -519,11 +610,30 @@ System/authorized-consequence
                                    Principal::principal_kind = System, IMP-003) — IMP-009/011
                                    define WHO/WHAT calls this; IMP-008 defines only that the
                                    surface exists and is inaccessible to ordinary Human Principals.
+                                   EXPIRED specifically fires only from the configured sweep (see
+                                   "State / Lifecycle") — never a human-facing action either.
 
-Recurring Plan create/pause/
-  cancel (donor, own):              Authenticated AND permission
-                                   donation.recurring_plan.manage AND scope OWN. Exact PAUSE
-                                   semantics: see OQ-008-03.
+Recurring Plan create (donor,
+  own):                             Authenticated AND permission donation.recurring_plan.manage
+                                   AND scope OWN. Authenticated-donor-only, per HD-IMP008-01B.
+
+Recurring Plan pause/resume
+  (donor, own):                     Authenticated AND permission donation.recurring_plan.manage
+                                   AND scope OWN AND resource state ACTIVE (pause) or PAUSED
+                                   (resume) — HD-IMP008-03, `FINAL / LOCKED`.
+
+Recurring Plan cancel
+  (donor, own):                     Authenticated AND permission donation.recurring_plan.manage
+                                   AND scope OWN AND resource state ACTIVE or PAUSED.
+
+Recurring Plan admin override
+  (pause/resume/cancel, support/
+  compliance):                      Authenticated AND permission donation.recurring_plan.manage
+                                   AND scope ORGANIZATION — HD-IMP008-03, `FINAL / LOCKED`. Same
+                                   permission as donor self-service; scope distinguishes OWN
+                                   (donor) from ORGANIZATION (admin), exactly as every other
+                                   OWN/ORGANIZATION pair in this document already does — no new
+                                   permission invented for the override.
 ```
 
 New permissions (naming mirrors `campaign.*`/`fund.*` convention from IMP-007's
@@ -552,13 +662,14 @@ donations
   amount_minor (BIGINT UNSIGNED, NOT NULL), currency (CHAR 3, NOT NULL)
   status (VARCHAR 16, NOT NULL, DEFAULT 'PENDING')
   is_anonymous (BOOLEAN, NOT NULL, DEFAULT FALSE)
-  idempotency_key (VARCHAR 100, NULLABLE, UNIQUE) — see OQ-008-05 for its authoritative contract
+  idempotency_key (VARCHAR 128, NOT NULL, UNIQUE) — `FINAL / LOCKED`, HD-IMP008-05A; see
+    "Idempotency" for the exact contract
   succeeded_at / failed_at / cancelled_at / expired_at (DATETIME, NULLABLE)
   cancelled_by_principal_id (FK principals.id, RESTRICT, NULLABLE)
   timestamps
 
   Indexes: campaign_id, donor_principal_id, status, recurring_occurrence_id
-  Unique: ulid, idempotency_key (where not null)
+  Unique: ulid, idempotency_key
   CHECK (app-level guard always; DB-level CHECK where the driver supports it, mirroring
     `principals`' own migration comment on SQLite not carrying the CHECK — the ONLY enforcement
     layer on SQLite is therefore the application-level guard, same as Principal::isConsistent):
@@ -569,11 +680,14 @@ donation_recurring_plans
   donor_principal_id (FK principals.id, RESTRICT, NOT NULL)
   campaign_id (FK campaigns.id, RESTRICT, NOT NULL)
   amount_minor (BIGINT UNSIGNED, NOT NULL), currency (CHAR 3, NOT NULL)
-  frequency (VARCHAR 16, NOT NULL) — value set: OQ-008-02
-  status (VARCHAR 16, NOT NULL, DEFAULT 'ACTIVE')
+  frequency (VARCHAR 16, NOT NULL) — `FINAL / LOCKED` (HD-IMP008-02): validated against an
+    allow-list currently containing only 'MONTHLY' (BR-9); the check/list is structured to be
+    extended later without a schema redesign
+  status (VARCHAR 16, NOT NULL, DEFAULT 'ACTIVE') — ACTIVE|PAUSED|CANCELLED|COMPLETED
   is_anonymous (BOOLEAN, NOT NULL, DEFAULT FALSE)
   starts_at (DATETIME, NOT NULL), ends_at (DATETIME, NULLABLE)
   next_occurrence_at (DATETIME, NULLABLE)
+  paused_at (DATETIME, NULLABLE), paused_by_principal_id (FK principals.id, RESTRICT, NULLABLE)
   cancelled_at (DATETIME, NULLABLE), cancelled_by_principal_id (FK principals.id, RESTRICT,
     NULLABLE)
   timestamps
@@ -597,6 +711,10 @@ donation_recurring_occurrences
 
 No Payment/Ledger/Commission/Refund/Reconciliation table is created (see "Out of Scope"). No
 existing IMP-007 table (`campaigns`, `programs`, `funds`) is modified.
+
+Configuration (not a table): `config('donation.pending_expiry_minutes')`, default `null` — see
+"State / Lifecycle" (HD-IMP008-04). No config file value is pre-populated with an invented number
+by this specification; the key exists, unset, until an authorized duration is supplied.
 
 Migration naming (mirrors IMP-007's `0001_07_01_NNNNNN` convention):
 `0001_08_01_000000_create_donations_table.php`,
@@ -668,7 +786,7 @@ Donation persists amount_minor/currency as a DISPLAY/INTENT figure only — the 
 
 ## Idempotency
 
-Observable invariant (not an implementation mechanism):
+`FINAL / LOCKED` per HD-IMP008-05A. Observable invariant:
 
 ```
 INV-1  Two donation-creation requests that represent the SAME donor intent (e.g. a network retry
@@ -676,16 +794,54 @@ INV-1  Two donation-creation requests that represent the SAME donor intent (e.g.
        independently reaching SUCCEEDED and triggering two separate financial consequences.
 ```
 
-**Mechanism NOT invented here.** No client-generated idempotency-key contract exists anywhere in
-this repository as of IMP-007 (grepped; none found). This specification defines the storage slot
-(`donations.idempotency_key`, nullable unique) an implementer MAY populate from a
-client-supplied header if the Human authorizes one, but does **not** mandate a specific header
-name, TTL, or scope — see **OQ-008-05**. Until that Human Decision is made, IMP-008's own
-acceptance criteria (see "Acceptance Criteria") test only the narrower, server-side-only invariant
-that is fully determinable without inventing a client contract: submitting the identical
-`idempotency_key` value twice within its uniqueness window is rejected (standard unique-constraint
-behavior), while the broader "duplicate double-click with no idempotency key supplied" case
-remains an accepted, explicitly flagged gap pending OQ-008-05 — never silently declared solved.
+**Client-provided idempotency key — MANDATORY, scoped to Donation creation only.** IMP-009
+Payment/gateway idempotency semantics (provider-side dedupe, gateway retry tokens, etc.) are a
+wholly separate contract, owned exclusively by IMP-009 — this section does not define, constrain,
+or anticipate them.
+
+```
+Contract:
+  Transport:        HTTP header `Idempotency-Key` on the Donation-creation request (both the
+                     guest and authenticated entry points, POST /campaigns/{slug}/donations).
+                     This mirrors the widely-used HTTP idempotency-key convention (e.g. Stripe's
+                     `Idempotency-Key` header) rather than inventing a bespoke mechanism — the
+                     platform adopts an established pattern, not a new one.
+  Format:            Caller-generated opaque string. Printable ASCII, 1-128 characters. The
+                     server does NOT interpret its internal structure (a UUID/ULID is a
+                     reasonable client-side choice but is not mandated or validated as such
+                     beyond the length/charset bound) — it is a comparison key, nothing more.
+  Presence:          REQUIRED. A request without this header is rejected before any Donation row
+                     is created or any Campaign-eligibility check runs (BR-12) — a missing key is
+                     a request-shape error, checked first.
+  Scope:             Unique per the `donations.idempotency_key` column itself — i.e. scoped to
+                     Donation creation as a whole (not per-donor, not per-campaign; the column's
+                     own database-level UNIQUE constraint is the entire scope mechanism, enforced
+                     transactionally: an INSERT that violates the unique constraint is caught and
+                     handled as a replay, never surfaced as a raw database error to the caller).
+  Replay semantics:  If a request arrives with a key that already exists on a prior Donation:
+                       - If the new request's campaign_id, amount_minor, currency, and donor
+                         identity (donor_principal_id, or guest_name+guest_email) MATCH the
+                         existing Donation's — this is a legitimate retry (e.g. a network
+                         timeout that actually succeeded server-side). The EXISTING Donation is
+                         returned (HTTP 200-equivalent success), and NO second row is created —
+                         this is the deterministic duplicate-request protection HD-IMP008-05A
+                         requires.
+                       - If the key matches but any of those fields DIFFER — the caller is
+                         reusing a key for a materially different donation, which indicates a
+                         client-side bug (key collision or incorrect reuse), never a legitimate
+                         retry. Rejected with a typed conflict exception (409-style); no row
+                         created or returned.
+  Enforcement:       Database-level UNIQUE constraint on `donations.idempotency_key` (NOT NULL,
+                     unique — see "Database Impact") is the deterministic backstop; the
+                     application wraps Donation creation in a single transaction that either (a)
+                     inserts a genuinely new row, or (b) on a caught unique-constraint violation,
+                     re-fetches and compares the existing row per the replay semantics above —
+                     never a "check-then-insert" race (BR-12, "Concurrency").
+```
+
+This resolves OQ-008-05-A in full: the mechanism is now specified, not deferred. It does not
+define or weaken any future IMP-009 Payment/gateway-level idempotency contract, which remains
+entirely IMP-009's own, separate concern (see "Out of Scope").
 
 ## Concurrency
 
@@ -696,9 +852,9 @@ Donation status transitions (PENDING -> *) use a single-row, single-writer trans
   Donation's transition to SUCCEEDED is financial-reference-adjacent even though it is not itself
   a Ledger post. Two concurrent transition attempts on the same Donation MUST NOT both succeed —
   the second observes the already-terminal state and is rejected per BR-7.
-Recurring Occurrence generation (when built, per OQ-008-02/03) must not generate two Donations for
-  the same Occurrence — enforced by the `donation_recurring_occurrences.donation_id` unique
-  constraint (see "Database Impact").
+Recurring Occurrence generation (when the deferred generation engine is built, per HD-IMP008-02/03's
+  now-locked operational rules) must not generate two Donations for the same Occurrence — enforced
+  by the `donation_recurring_occurrences.donation_id` unique constraint (see "Database Impact").
 ```
 
 ## Error Handling
@@ -715,8 +871,17 @@ Unregistered currency (BR-3 fails):                            typed validation 
                                                               UnknownCurrencyException, reused).
 Invalid state transition (BR-7):                               typed conflict exception, no state
                                                               change (mirrors AC-007-007).
-Duplicate idempotency_key:                                     typed conflict exception (409-style),
-                                                              no second Donation row created.
+Missing Idempotency-Key header (BR-12):                        typed validation exception, checked
+                                                              first, before any other validation;
+                                                              no Donation row created.
+Idempotency-Key reused with matching
+  payload (legitimate replay):                                  NOT an error — existing Donation
+                                                              returned, no second row created (see
+                                                              "Idempotency").
+Idempotency-Key reused with different
+  payload:                                                      typed conflict exception
+                                                              (409-style); no row created or
+                                                              returned (see "Idempotency").
 ```
 
 ## Audit Requirements
@@ -727,21 +892,36 @@ scope, `hasFinancialReference: true` where the event carries amount/currency, ac
 donor-facing events and System for the authorized-consequence transition):
 
 ```
-donation.created            actor: Human (or unauthenticated/guest — see below) | financial
-                             reference: true | payload: campaign_id, amount_minor, currency,
-                             is_anonymous, is_guest (bool)
+donation.created            actor kinds: [Human, Unauthenticated] | financial reference: true |
+                             payload: campaign_id, amount_minor, currency, is_anonymous,
+                             is_guest (bool) | execution_context: NULL for Human-actor rows;
+                             "http:donation:guest_created" (fixed, registered) for
+                             Unauthenticated-actor rows (HD-IMP008-06, ADR-002 — see BR-14)
 donation.succeeded          actor: System | financial reference: true | payload: donation_ulid
 donation.failed             actor: System | financial reference: true | payload: donation_ulid
 donation.expired             actor: System | financial reference: true | payload: donation_ulid
 donation.cancelled          actor: Human | financial reference: true | payload: donation_ulid,
-                             cancelled_by_principal_id
+                             cancelled_by_principal_id (no Unauthenticated actor kind for this
+                             event — no guest-actor cancellation exists, HD-IMP008-05B)
 donation.recurring_plan.created   actor: Human | financial reference: true
+donation.recurring_plan.paused    actor: Human | financial reference: true | payload:
+                             donation_recurring_plan_ulid, paused_by_principal_id
+donation.recurring_plan.resumed   actor: Human | financial reference: true | payload:
+                             donation_recurring_plan_ulid
 donation.recurring_plan.cancelled actor: Human | financial reference: true
 ```
 
-`donation.created` for a guest (no Principal) requires an actor-kind decision the existing
-`AuditActorKind` enum may not yet cover (Human/System/Integration — an unauthenticated public
-visitor is none of these cleanly). **This is a gap, not invented here** — see OQ-008-06.
+`donation.created`'s guest-actor case is `FINAL / LOCKED` per HD-IMP008-06: a guest-originated
+event (no Principal — `donor_principal_id` null on the Donation) records
+`AuditActorKind::Unauthenticated`, `actor_principal_id = NULL`, and the fixed registered
+`execution_context = "http:donation:guest_created"` — per
+[ADR-002](../adr/ADR-002-donation-unauthenticated-actor-scope-amendment.md)'s controlled,
+narrowly-scoped widening of IMP-004's "Canonical Actor (Pre-Principal Cases)" (previously
+restricted to failed-authentication-attempt evidence only; now also covers this one explicitly
+registered, legitimate-successful-guest-action case — no other IMP-008 event uses this widened
+category, and no new `AuditActorKind` value was added). An authenticated-donor `donation.created`
+event continues to use `AuditActorKind::Human` exactly as before, execution_context NULL, per the
+ordinary human/system/integration case IMP-004 already locked.
 
 All Donation events are classified NonCritical (they are business events, not the
 identity/security/RBAC/governance categories Q26 lists as Critical), consistent with how
@@ -789,8 +969,29 @@ Guest/authenticated
 Public anonymity:         is_anonymous=true never leaks donor_display_name/guest_name/
                           donor identity through any PUBLIC-facing read path, while
                           organization-scoped admin/audit visibility is unaffected.
-Idempotency:              duplicate idempotency_key rejected (where supplied) — see "Idempotency"
-                          for the explicit scope limit of this test given OQ-008-05.
+Idempotency:              missing Idempotency-Key header rejected; identical key + matching
+                          payload returns the existing Donation (no second row); identical key +
+                          differing payload rejected with a typed conflict (see "Idempotency" for
+                          the full contract, HD-IMP008-05A).
+Recurring frequency:      Recurring Plan creation with `frequency != 'MONTHLY'` rejected
+                          (HD-IMP008-02, BR-9).
+Recurring pause/resume/
+  cancel:                  owning donor (OWN scope) may pause/resume/cancel; another donor
+                          (wrong ownership) DENY; ORGANIZATION-scoped admin override succeeds
+                          (HD-IMP008-03).
+Occurrence no-retry:      a FAILED Occurrence is never automatically retried; the plan's next
+                          independently SCHEDULED occurrence is unaffected by a prior FAILED one
+                          (HD-IMP008-03, BR-11) — schema/state-only test, since the generation
+                          engine itself is out of scope.
+Guest cancellation
+  blocked:                  no public/guest-facing cancellation endpoint exists; any attempt via
+                          the admin support path without ORGANIZATION-scoped donation.cancel is
+                          denied; the admin path itself succeeds (HD-IMP008-05B).
+Guest audit actor:        a guest `donation.created` event records
+                          AuditActorKind::Unauthenticated, actor_principal_id null, and
+                          execution_context = "http:donation:guest_created"; an authenticated
+                          donor's `donation.created` event records AuditActorKind::Human with
+                          execution_context null (HD-IMP008-06, BR-14).
 Concurrency:              REAL disposable MySQL required (locking/transaction isolation is not
                           SQLite-portable) — two concurrent transition attempts on the same
                           Donation, only one succeeds. Use an explicitly disposable test database,
@@ -802,8 +1003,10 @@ Concurrency:              REAL disposable MySQL required (locking/transaction is
                           named, separately disposable IMP-008 test database if a dedicated one is
                           needed for MySQL-only concurrency tests).
 Recurring boundary:       schema/FK integrity tests only (RESTRICT, unique donation_id) — no
-                          behavioral generation-engine tests, since that engine is OUT OF SCOPE
-                          pending OQ-008-02/03.
+                          behavioral generation-engine tests, since building that engine remains a
+                          separate, deferred implementation task (its operational rules are now
+                          locked per HD-IMP008-02/03, but the engine itself is out of this IMP's
+                          scope).
 ```
 
 ## Acceptance Criteria
@@ -812,15 +1015,19 @@ Recurring boundary:       schema/FK integrity tests only (RESTRICT, unique donat
 AC-008-001
 Given an unauthenticated guest visitor and a PUBLISHED Campaign for which
   CampaignEligibilityResolver::isDonationEligible() is true
-When they submit a donation with a valid amount/currency, guest_name, and guest_email
+When they submit a donation with a valid amount/currency, guest_name, guest_email, and an
+  Idempotency-Key header
 Then a Donation row exists in PENDING status, ulid-identified, donor_principal_id null,
-  guest_name/guest_email populated, and a donation.created audit event is recorded.
+  guest_name/guest_email populated, idempotency_key stored, and a donation.created audit event is
+  recorded with actor kind Unauthenticated, actor_principal_id null, and execution_context
+  "http:donation:guest_created" (HD-IMP008-06).
 
 AC-008-002
 Given an authenticated donor and the same eligible Campaign
-When they submit a donation with a valid amount/currency
+When they submit a donation with a valid amount/currency and an Idempotency-Key header
 Then a Donation row exists in PENDING status with donor_principal_id set to their own Principal,
-  guest_name/guest_email both null, and a donation.created audit event is recorded.
+  guest_name/guest_email both null, idempotency_key stored, and a donation.created audit event is
+  recorded with actor kind Human and execution_context null.
 
 AC-008-003
 Given a Campaign in DRAFT, REVIEW, APPROVED, or CLOSED status, or PUBLISHED but outside its
@@ -887,10 +1094,11 @@ When a public read path renders it
 Then donor_display_name is present in that public response.
 
 AC-008-014
-Given two donation-creation requests carrying the identical idempotency_key
+Given two donation-creation requests carrying the identical Idempotency-Key header and identical
+  campaign_id/amount_minor/currency/donor-identity payload
 When both are submitted
-Then only the first creates a Donation row; the second is rejected with a typed conflict exception
-  (scope limited to the case where a key was actually supplied — see OQ-008-05).
+Then only the first creates a Donation row; the second returns the SAME existing Donation (no
+  second row created, no error) — legitimate replay per "Idempotency".
 
 AC-008-015
 Given an authenticated donor viewing GET /me/donations
@@ -909,6 +1117,59 @@ Given two concurrent authorized transition attempts on the same PENDING Donation
 When both execute against a real MySQL test database
 Then exactly one transition succeeds and the Donation ends in exactly one terminal-appropriate
   state; the loser observes a typed conflict exception, never a silently overwritten state.
+
+AC-008-018
+Given a donation-creation request with no Idempotency-Key header
+When it is submitted
+Then the request is rejected with a typed validation exception (BR-12) and no Donation row is
+  created.
+
+AC-008-019
+Given two donation-creation requests carrying the identical Idempotency-Key header but DIFFERENT
+  campaign_id, amount_minor, currency, or donor identity
+When both are submitted
+Then only the first creates a Donation row; the second is rejected with a typed conflict exception
+  and no row is created or returned.
+
+AC-008-020
+Given an authenticated donor with an ACTIVE Recurring Plan they own
+When they pause it (donation.recurring_plan.manage, OWN scope)
+Then the Plan transitions to PAUSED, paused_at/paused_by_principal_id are set, and a
+  donation.recurring_plan.paused audit event is recorded.
+
+AC-008-021
+Given an authenticated donor with a PAUSED Recurring Plan they own
+When they resume it
+Then the Plan transitions to ACTIVE, and a donation.recurring_plan.resumed audit event is
+  recorded.
+
+AC-008-022
+Given a Recurring Plan owned by a different donor
+When another authenticated donor (without ORGANIZATION-scoped donation.recurring_plan.manage)
+  attempts to pause/resume/cancel it
+Then the request is denied (wrong ownership/scope) and the Plan's state is unchanged.
+
+AC-008-023
+Given a staff/admin actor holding donation.recurring_plan.manage in ORGANIZATION scope
+When they pause, resume, or cancel a Recurring Plan they do not own
+Then the action succeeds (admin override, HD-IMP008-03) and the correct audit event is recorded.
+
+AC-008-024
+Given a Recurring Plan creation request with `frequency` set to any value other than `MONTHLY`
+When it is submitted
+Then the request is rejected with a typed validation exception (BR-9) and no Plan is created.
+
+AC-008-025
+Given a Recurring Occurrence in FAILED status
+When the system evaluates the Plan's next SCHEDULED occurrence
+Then no automatic retry of the FAILED occurrence is attempted, and the next SCHEDULED occurrence
+  proceeds unaffected on the Plan's normal monthly schedule (BR-11).
+
+AC-008-026
+Given a guest-owned PENDING Donation
+When any unauthenticated request attempts to cancel it via a guest-facing endpoint
+Then no such endpoint exists / the request is rejected (404 or 403); only the ORGANIZATION-scoped
+  admin cancellation path can cancel a guest Donation (HD-IMP008-05B, BR-13).
 ```
 
 ## Forbidden Changes
@@ -921,149 +1182,130 @@ No Ledger, Payment, Commission, Withdrawal, Refund, or Reconciliation table or w
 No new ScopeType value added to the closed Data Scope taxonomy.
 No display-name column added to `users` (IMP-002) — solved within Donation's own schema instead
   (see "Domain Model" rationale).
+No direct Program-level or Fund-level Donation (HD-IMP008-01A).
+No guest recurring donation; no bearer-token/magic-link authorization architecture for it
+  (HD-IMP008-01B).
+No recurring frequency other than MONTHLY implemented in v1; the allow-list mechanism itself must
+  remain extensible (HD-IMP008-02, BR-9).
+No automatic occurrence-generation retry mechanism (HD-IMP008-03, BR-11).
+No Donation creation without a client-provided Idempotency-Key (HD-IMP008-05A, BR-12).
+No guest self-service Donation cancellation endpoint or bearer-token/identifier-as-credential
+  mechanism (HD-IMP008-05B, BR-13).
+No new `AuditActorKind` enum value; no use of `AuditActorKind::System` to represent a guest actor
+  (HD-IMP008-06, BR-14, ADR-002).
+No unauthorized widening of `AuditActorKind::Unauthenticated` beyond ADR-002's exact, registered
+  scope (`identity.session.login_failed`'s original use, plus `donation.created`'s guest case
+  only) — any further use requires its own future ADR, not silent reuse.
 ```
 
 ## External Verification
 
 ```
-Recurring donation operational rules (frequency values, "hybrid" semantics, pause/resume,
-  retry/backoff for failed occurrence generation) — EXTERNAL VERIFICATION / Human Decision
-  required; see OQ-008-02, OQ-008-03.
-Client idempotency-key contract (header name, format, TTL) — EXTERNAL VERIFICATION / Human
-  Decision required; see OQ-008-05.
-Donation expiration timeout duration — EXTERNAL VERIFICATION / Human Decision required (or an
-  explicit "configurable, no default asserted" resolution mirroring Q17's retention-policy
-  pattern); see OQ-008-04.
+Donation expiration timeout DURATION VALUE — by explicit Human Decision (HD-IMP008-04), this
+  remains deliberately deferred/configurable, no default asserted, mirroring Q17's
+  retention-policy pattern. This is a resolved design choice, not a pending gap: the mechanism is
+  fully specified (see "State / Lifecycle"); only the eventual numeric config value is left to a
+  future, separate operational decision, exactly as HD-IMP008-04 intends.
 ```
 
-## Open Human Decisions
+Every other item previously listed here (recurring operational rules, idempotency-key contract)
+is now resolved by HD-IMP008-01A/01B/02/03/05A and fully specified above — no longer pending
+external verification.
+
+## Human Decisions (Resolved)
+
+All six Open Human Decisions raised in the original draft of this specification (commit `883f889`)
+are now resolved, `FINAL / LOCKED`, by explicit Human Decision. None were decided by Claude.
 
 ```
-OQ-008-01
-Question:              Must a Donation ever target a Program or Fund directly, without a specific
-                        Campaign (a "general fund" donation), or is Campaign-only correct for v1?
-                        Relatedly, must a Recurring Plan ever support a guest (non-authenticated)
-                        donor?
-Why required:           IMP-007 only built a donation-eligibility contract at Campaign granularity
-                        (CampaignEligibilityResolver); Program has no starts_at/ends_at/eligibility
-                        of its own. Guest Recurring Plans have no durable cross-session identity to
-                        resume against under the current Identity model (IMP-002).
-Existing evidence:      MASTER-REQUIREMENTS.md §6 lists "Campaign, Program, Donation, Recurring
-                        Donation" as separate domains without specifying which of Program/Fund a
-                        Donation may target directly; MODULE-OWNERSHIP.md §3/§4 keep Campaign,
-                        Program, and Donation as distinct modules without resolving this
-                        specifically.
-Options if useful:      (a) Campaign-only for v1 (this spec's current design); (b) also allow
-                        Program-level donation once/if Program gains its own eligibility contract;
-                        (c) also allow Fund-level ("general") donation.
-Architecture impact:    (b)/(c) would require either extending Program with its own eligibility
-                        contract (an IMP-007 change, out of this IMP's authority) or defining a new
-                        Fund-level eligibility rule (new architecture, needs an ADR).
-Implementation impact:  (a) requires no schema change beyond what this spec already defines; (b)/
-                        (c) would add nullable program_id/fund_id columns and additional BR/AC.
+HD-IMP008-01A — FINAL / LOCKED (resolves OQ-008-01, target-scope half)
+Decision:    Donation target scope for v1 is CAMPAIGN-ONLY. Every Donation MUST reference an
+             eligible Campaign. Program and Fund are reached only through the Campaign's existing
+             relationships. IMP-008 MUST NOT introduce direct Program-level or Fund-level
+             donations. Future direct Program/Fund donation support requires an explicit future
+             authorized extension.
+Materialized in:  §Domain Model ("Campaign relationship"), §Out of Scope, §Forbidden Changes.
 
-OQ-008-02
-Question:               What are the allowed Recurring Plan frequency values (e.g. WEEKLY,
-                        MONTHLY, others), and what specifically does "Hybrid" (Q5) add beyond a
-                        fixed-schedule recurring donation?
-Why required:           Q5 in the Human Decision Register is a one-line label ("C Hybrid Recurring
-                        Donation") with no further detail materialized anywhere in this repository
-                        (checked HUMAN-DECISION-REGISTER.md's own "Extended Decisions" sections,
-                        which only elaborate Q21-Q33; MASTER-ARCHITECTURE.md has no further
-                        mention). Guessing an enum or a "hybrid" mechanism would violate this
-                        task's explicit "do not guess" instruction.
-Existing evidence:      Q5 = "C Hybrid Recurring Donation" (one line); this task's own §11 supplies
-                        the entity chain (Recurring Plan -> Occurrence -> Donation -> Payment) but
-                        not the frequency/hybrid operational detail.
-Options if useful:      none proposed — the Human is the sole source for what "Hybrid" means here.
-Architecture impact:    Determines whether `frequency` is a small fixed enum or needs a richer
-                        "plan configuration" concept.
-Implementation impact:  Blocks building the Recurring Occurrence generation engine (schema exists
-                        regardless — see "Domain Model").
+HD-IMP008-01B — FINAL / LOCKED (resolves OQ-008-01, guest-recurring half)
+Decision:    Recurring Donation requires an AUTHENTICATED DONOR. Guest one-time Donation remains
+             allowed. Guest recurring Donation is NOT supported in v1. No guest recurring
+             bearer-token/magic-link authorization architecture is introduced.
+Materialized in:  §Domain Model ("Recurring Plan / Recurring Occurrence"), §BR-6, §Out of Scope,
+             §Forbidden Changes.
 
-OQ-008-03
-Question:               What are Recurring Plan PAUSE/RESUME/COMPLETED transition triggers and
-                        authorization, and what retry/backoff policy applies to a FAILED
-                        Occurrence?
-Why required:           Same gap as OQ-008-02 — no authoritative source defines these operational
-                        rules.
-Existing evidence:      None beyond the entity chain already cited.
-Options if useful:      none proposed.
-Architecture impact:    Determines whether pause/resume is donor-self-service, admin-only, or both.
-Implementation impact:  Blocks building the Recurring Occurrence generation engine.
+HD-IMP008-02 — FINAL / LOCKED (resolves OQ-008-02)
+Decision:    "Hybrid Recurring Donation" means: (1) a donor may make a ONE-TIME Donation; OR (2)
+             an authenticated donor may establish a RECURRING Donation Plan. For v1, the supported
+             recurring frequency is MONTHLY only. The architecture MUST permit future additional
+             frequencies through an authorized extension without redesigning the fundamental
+             Donation aggregate. Weekly/custom frequencies are NOT implemented in v1.
+Materialized in:  §Domain Model ("Recurring Plan / Recurring Occurrence"), §BR-9, §Database Impact,
+             §Out of Scope, §Forbidden Changes, AC-008-024.
 
-OQ-008-04
-Question:               What is the Donation PENDING -> EXPIRED timeout duration (or should it, per
-                        Q17's precedent for retention, remain "configurable, no default asserted
-                        here" until a future authorized policy sets it)?
-Why required:           No authoritative value exists anywhere in the reviewed documents.
-Existing evidence:      None. Q17 (Configurable Retention Policy Matrix) is the closest structural
-                        precedent for "configurable, not invented here."
-Options if useful:      (a) Human supplies an exact default (e.g. 24 hours); (b) treat as
-                        Q17-style: configurable, no default asserted, EXPIRED transition mechanism
-                        built but never fires without an explicit configured value.
-Architecture impact:    None either way — only which of (a)/(b) governs whether AC-008 acceptance
-                        testing can assert a concrete duration.
-Implementation impact:  (b) is safely implementable now without further Human input; (a) requires
-                        the exact value before AC can be finalized.
+HD-IMP008-03 — FINAL / LOCKED (resolves OQ-008-03)
+Decision:    Recurring Plan management: owning donor may PAUSE/RESUME/CANCEL their own plan;
+             authorized organization/admin authority may override for support/compliance,
+             following existing authorization/scope/audit contracts. Occurrence-generation
+             failure: NO automatic retry in v1 — a failed occurrence remains FAILED; the next
+             independently scheduled occurrence proceeds on the plan's normal monthly schedule.
+             Payment-attempt retry belongs exclusively to IMP-009.
+Materialized in:  §Domain Model, §BR-10/BR-11, §Authorization / RBAC, §Out of Scope, §Forbidden
+             Changes, AC-008-020..023/025.
 
-OQ-008-05
-Question:               Should Donation creation support/require a client-generated idempotency
-                        key (header name, format, TTL/uniqueness window), or is the narrower
-                        server-side-only guarantee (unique constraint when a key happens to be
-                        supplied) acceptable for v1? Relatedly, how does an unauthenticated guest
-                        cancel their own PENDING Donation (no account to authenticate against)?
-Why required:           No client idempotency-key contract exists anywhere in this repository as
-                        of IMP-007 (grepped for one; none found). "Do not invent implementation
-                        mechanisms prematurely... flag it explicitly" (this task's §16) applies
-                        directly. The guest-cancel gap is a direct consequence of the "do not
-                        force account creation" instruction combined with "Authorization / RBAC"
-                        requiring OWN-scope ownership, which a guest cannot satisfy without a
-                        session/token mechanism this spec does not invent.
-Existing evidence:      None for either sub-question.
-Options if useful:      Idempotency: (a) mandate a client Idempotency-Key header now; (b) defer
-                        entirely to IMP-009 (Payment), since a real duplicate-charge risk only
-                        materializes once Payment exists; (c) accept the narrower guarantee this
-                        spec already defines as sufficient for v1. Guest cancel: (a) no guest-
-                        cancel capability in v1 (guest Donations self-resolve via EXPIRED if
-                        abandoned); (b) a signed, single-use cancellation link emailed at creation.
-Architecture impact:    A signed-link mechanism (guest cancel option b) would need its own token/
-                        signing contract — new, not currently established anywhere.
-Implementation impact:  (c)/(a) for guest-cancel are both implementable without further design;
-                        (b) requires new infrastructure.
+HD-IMP008-04 — FINAL / LOCKED (resolves OQ-008-04)
+Decision:    Donation supports an independent PENDING -> EXPIRED mechanism. The expiration
+             duration MUST be configurable. No authoritative default duration is established by
+             this specification. Until an authorized configuration/policy supplies a value, the
+             expiration mechanism must not invent or silently assume a timeout. Donation
+             expiration and Payment expiration remain separate concepts.
+Materialized in:  §Domain Model ("Cancellation/expiration boundaries"), §State / Lifecycle,
+             §Database Impact (config contract), §External Verification.
 
-OQ-008-06
-Question:               What AuditActorKind applies to a donation.created event authored by an
-                        unauthenticated guest? The existing enum (per IMP-004) models Human/
-                        System/Integration; an anonymous public visitor is not cleanly any of
-                        these.
-Why required:           IMP-004's AuditActorKind is a closed, IMP-004-owned enum (Level 3/4
-                        architecture) — IMP-008 is not authorized to add a value to it unilaterally
-                        without either Human Decision or an ACR against IMP-004's own registry.
-Existing evidence:      app/Enums/AuditActorKind.php (as extended by CampaignAuditEventRegistrar's
-                        usage) currently only demonstrates Human; System/Integration exist per
-                        Principal::principal_kind but a guest-attributed audit actor kind is not
-                        evidenced anywhere.
-Options if useful:      (a) record guest donation.created events as actor kind Human with a null/
-                        guest-marker subject (if the registry's schema permits); (b) add a new
-                        AuditActorKind (e.g. Guest/Anonymous) via IMP-004 change control; (c) record
-                        as System (the platform accepting an anonymous submission), with guest_name/
-                        guest_email captured in the payload instead of the actor.
-Architecture impact:    (b) changes a locked IMP-004 enum — requires an ACR/ADR, not a unilateral
-                        IMP-008 decision.
-Implementation impact:  Blocks finalizing the exact donation.created AuditEventDefinition actor-kind
-                        list until resolved; (a)/(c) are implementable without an architecture
-                        change if the Human selects one of them.
+HD-IMP008-05A — FINAL / LOCKED (resolves OQ-008-05, idempotency half)
+Decision:    Donation creation requires a CLIENT-PROVIDED IDEMPOTENCY KEY, enforced through a
+             database uniqueness invariant and transactional application behavior, deterministic,
+             scoped to Donation creation only. IMP-008 does not define Payment/gateway idempotency
+             semantics (IMP-009's own concern).
+Materialized in:  §Idempotency (full HTTP/application contract, normalization, scope, replay
+             semantics), §BR-12, §Database Impact, §Error Handling, AC-008-001/002/014/018/019.
 
-OPEN HUMAN DECISIONS: 6
+HD-IMP008-05B — FINAL / LOCKED (resolves OQ-008-05, guest-cancel half)
+Decision:    Guest self-service Donation cancellation is NOT supported in v1. A guest Donation
+             MUST NOT use its ID/ULID, email knowledge, or another identifier as an authorization
+             secret. Guest cancellation, when legitimately required, is handled through the
+             authorized organization/admin support path. Abandoned guest PENDING Donations are
+             handled by the Donation expiration policy/mechanism. No guest cancellation
+             bearer-token architecture is introduced.
+Materialized in:  §Authorization / RBAC, §BR-13, §State / Lifecycle, §Forbidden Changes,
+             AC-008-026.
+
+HD-IMP008-06 — FINAL / LOCKED (resolves OQ-008-06)
+Decision:    Guest-originated successful Donation actions use AuditActorKind::Unauthenticated,
+             actor_principal_id = NULL, and a fixed registry-controlled execution_context
+             appropriate to the registered Donation entry point. This explicitly authorizes a
+             controlled, narrowly-scoped amendment to the locked IMP-004 audit contract so
+             Unauthenticated may represent BOTH the already-authorized failed/incomplete
+             authentication cases AND legitimate successful actions through explicitly registered
+             public unauthenticated entry points — never a generic bucket, never System
+             misrepresenting the guest, never a new GuestSubmission actor kind. The required
+             governance/change-control procedure was applied (see below) before this scope is
+             relied upon.
+Materialized in:  §BR-14, §Audit Requirements, and
+             [ADR-002](../adr/ADR-002-donation-unauthenticated-actor-scope-amendment.md), which
+             records the controlled amendment applied directly to
+             [IMP-004-audit-governance-foundation.md](IMP-004-audit-governance-foundation.md)'s
+             own "Canonical Actor (Pre-Principal Cases)" section — the contract amendment this
+             decision explicitly authorized.
 ```
+
+OPEN HUMAN DECISIONS: 0
 
 ## Traceability
 
 ```
 Requirement/Decision                    Spec Section(s)              Test/AC
-Q5  Hybrid Recurring Donation           §Domain Model (Recurring),   OQ-008-02/03 (blocks full AC)
-                                         §Open Human Decisions
+Q5  Hybrid Recurring Donation           §Domain Model (Recurring),   AC-008-024
+  (resolved by HD-IMP008-02)            §BR-9
 Q6  Public Anonymity Only               §Domain Model, §BR-4,        AC-008-012, AC-008-013
                                          §Authorization
 Q20 IDR Base + Limited Multi-Currency   §Architecture References,    AC-008-004, Money tests
@@ -1084,22 +1326,37 @@ Q26 audit fail-closed critical          §Audit Requirements          Audit test
   explicitly not in that list)
 Financial Posting Boundary              §Financial Impact, §BR-5     n/a (negative — no Ledger write
                                                                      exists to test yet)
-DATABASE-INVARIANTS.md financial        §Idempotency, §Concurrency   AC-008-014, AC-008-017
+DATABASE-INVARIANTS.md financial        §Idempotency, §Concurrency   AC-008-014, AC-008-017/018/019
   idempotency
+HD-IMP008-01A (Campaign-only)           §Domain Model, §Out of       n/a (structural — no
+                                         Scope, §Forbidden Changes    Program/Fund column exists)
+HD-IMP008-01B (auth-only recurring)     §Domain Model, §BR-6         n/a (structural)
+HD-IMP008-02 (MONTHLY only)             §Domain Model, §BR-9,        AC-008-024
+                                         §Database Impact
+HD-IMP008-03 (pause/resume/no-retry)    §Domain Model, §BR-10/11,    AC-008-020..023/025
+                                         §Authorization / RBAC
+HD-IMP008-04 (expiration, no default)   §State / Lifecycle,          n/a (config-gated; no test
+                                         §Database Impact             can assert a default that
+                                                                     does not exist)
+HD-IMP008-05A (mandatory idempotency)   §Idempotency, §BR-12         AC-008-001/002/014/018/019
+HD-IMP008-05B (no guest cancel)         §Authorization / RBAC,       AC-008-026
+                                         §BR-13
+HD-IMP008-06 (guest audit actor,        §BR-14, §Audit               AC-008-001, guest audit
+  ADR-002)                              Requirements                 actor test
 ```
 
 ## Specification Self-Review
 
-Performed before submission for Human Spec Approval, per this task's §24. Findings classified
-BLOCKER/MAJOR/MINOR/EDITORIAL; all findings below were patched into the specification text above
-before this document was finalized (none are left open in the spec body — only genuine Human
-Decisions remain open, tracked in "Open Human Decisions").
+Performed at initial submission (commit `883f889`) and re-performed after materializing
+HD-IMP008-01A..06 (this revision). Findings classified BLOCKER/MAJOR/MINOR/EDITORIAL; all findings
+below were patched into the specification text above before this document was finalized (none are
+left open in the spec body — zero Human Decisions remain open, per "Human Decisions (Resolved)").
 
 ```
 Requirement traceability:        PASS — see "Traceability" above; every Human Decision cited in
-                                  this document (Q5/Q6/Q20/Q21/Q22) and every IMP-007 contract
-                                  reused (CampaignEligibilityResolver, Money, CurrencyMinorUnits)
-                                  maps to a spec section and at least one AC or an explicit OQ.
+                                  this document (Q5/Q6/Q20/Q21/Q22, HD-IMP008-01A..06) and every
+                                  IMP-007 contract reused (CampaignEligibilityResolver, Money,
+                                  CurrencyMinorUnits) maps to a spec section and at least one AC.
 Locked architecture preservation: PASS — Donation!=Payment, Payment!=Ledger, Fund!=balance,
                                   Reconciliation!=Ledger, Commission!=Wallet all explicitly
                                   restated and enforced by BR-5/"Financial Impact"/"Out of Scope";
@@ -1120,50 +1377,67 @@ Donation/Payment separation:      PASS — the PENDING->SUCCEEDED/FAILED transit
                                   about every Payment-owned concept excluded.
 Donation/Ledger separation:      PASS — BR-5 + Financial Posting Boundary citation; no
                                   Ledger/Journal/Entry table created.
-Authorization:                    PASS (structurally) — full AND-chain applied per operation in
-                                  "Authorization / RBAC"; the one intentional exception (public
-                                  guest creation, no Authenticated term) is explicitly called out
-                                  as intentional, not an oversight, mirroring how this task's own
-                                  §14 anticipated it ("distinguish public/guest Donation entry
-                                  points where authentication is intentionally not applicable").
-                                  MINOR gap (not fixed, tracked as OQ-008-05): guest self-service
-                                  cancellation has no defined mechanism — flagged, not silently
-                                  dropped.
-Audit:                            PASS (structurally), with one explicit gap (OQ-008-06: guest
-                                  actor-kind) — flagged rather than guessed, since AuditActorKind
-                                  is a locked IMP-004 enum this document may not unilaterally
-                                  extend.
-Idempotency:                      PASS (scoped) — observable invariant defined; the mechanism gap
-                                  is explicitly flagged as OQ-008-05 rather than either invented or
-                                  silently ignored.
+Authorization:                    PASS — full AND-chain applied per operation in "Authorization /
+                                  RBAC"; the one intentional exception (public guest creation, no
+                                  Authenticated term) is explicitly called out as intentional, not
+                                  an oversight. Guest self-service cancellation — previously a
+                                  tracked MINOR gap — is now RESOLVED, not merely defined:
+                                  HD-IMP008-05B explicitly decides no such capability exists in
+                                  v1, with an explicit prohibition on using any identifier as an
+                                  authorization credential; this is a decided exclusion, not an
+                                  undefined mechanism.
+Audit:                            PASS — the guest actor-kind gap is now RESOLVED (HD-IMP008-06 /
+                                  ADR-002): AuditActorKind::Unauthenticated, scope explicitly
+                                  widened by Human-approved, narrowly-registered amendment (see
+                                  BR-14, "Audit Requirements"). No unilateral IMP-008 decision was
+                                  made — the amendment required and received explicit Human
+                                  approval and its own governance record (ADR-002).
+Idempotency:                      PASS — mechanism now fully specified (HD-IMP008-05A): mandatory
+                                  client Idempotency-Key header, database-level uniqueness,
+                                  transactional replay-or-reject semantics. No longer scoped-down
+                                  or deferred.
 Concurrency:                      PASS — locking discipline specified by analogy to Q26's existing
                                   transactional pattern; MySQL-only test requirement stated
-                                  explicitly per this task's §19 instruction.
+                                  explicitly; idempotency-key enforcement explicitly specified as
+                                  transactional insert-or-refetch, never check-then-insert.
 Database invariants:               PASS — RESTRICT FKs throughout (no CASCADE on financial-adjacent
                                   references, mirroring IMP-007's own campaigns.program_id/
                                   fund_id RESTRICT choice), CHECK-or-app-guard for the guest/
                                   authenticated XOR invariant mirroring Principal's own pattern,
-                                  unique donation_id on Occurrence preventing double-generation.
-Shared-hosting compatibility:      PASS — no new infrastructure requirement introduced (no queue-
-                                  only mechanism mandated beyond what "Tests Required" defers to
-                                  the not-yet-built generation engine, which is itself out of
-                                  scope pending OQ-008-02/03).
+                                  unique donation_id on Occurrence preventing double-generation,
+                                  idempotency_key now NOT NULL + unique (was nullable).
+Recurring contract:               PASS — frequency constrained to MONTHLY via an explicitly
+                                  extensible allow-list (BR-9), not a hard-coded single-value
+                                  check; pause/resume/cancel authorization and no-auto-retry both
+                                  fully specified (HD-IMP008-03).
+Shared-hosting compatibility:      PASS — no new infrastructure requirement introduced; the
+                                  idempotency mechanism (a header + a unique DB constraint) and
+                                  the expiration sweep (cron/Scheduler-compatible, config-gated)
+                                  both require no Redis/Supervisor/PM2/WebSocket/mandatory
+                                  worker infrastructure.
 Future IMP boundaries:             PASS — "Out of Scope" explicitly enumerates every later IMP
-                                  (009-017 and beyond) and exactly what each owns instead.
+                                  (009-017 and beyond) and exactly what each owns instead; the
+                                  Payment-vs-Donation idempotency and retry boundaries are now
+                                  explicit (HD-IMP008-03/05A) rather than implicit.
+IMP-004 amendment discipline:      PASS — ADR-002 followed the locked CHANGE-CONTROL.md AI Approval
+                                  Boundary (Human decision recorded, AI did not self-approve);
+                                  amendment is additive/narrow (no enum value added or removed, no
+                                  existing registered event's behavior changed); IMP-004's own
+                                  locked text is patched, not rewritten, with the amendment
+                                  clearly marked as such.
 
 BLOCKER:   0
 MAJOR:     0
-MINOR:     1  (guest self-service cancellation mechanism undefined — tracked as part of OQ-008-05,
-              not a silent gap)
+MINOR:     0
 EDITORIAL: 0
 ```
 
 ## Definition of Done
 
 Checklist — see [docs/00-governance/DEFINITION-OF-DONE.md](../00-governance/DEFINITION-OF-DONE.md).
-This document satisfies "Definition of Ready" (objective/scope/out-of-scope/architecture/business
-rules/security impact/DB impact/acceptance criteria are all defined above); "No unresolved Human
-Decision" is the one Definition-of-Ready item this document does NOT yet satisfy — 6 Open Human
-Decisions remain, by design, pending Human Spec Approval and resolution. Implementation
-("Definition of Done" proper) does not begin until Human Spec Approval is recorded and, for any AC
-that depends on an open decision above, that decision is resolved.
+This document now satisfies every "Definition of Ready" item, including "No unresolved Human
+Decision" (0 Open Human Decisions remain — see "Human Decisions (Resolved)"). The one remaining
+gate before implementation ("Definition of Done" proper) may begin is Human Spec Approval itself
+(see "Status" and "Implementation Ownership" above) — a distinct, separate control from resolving
+individual Open Human Decisions, per MULTI-MODEL-OWNERSHIP.md "Human Spec Approval Gate." Qwen
+Recon and Muse implementation remain NOT STARTED and must not begin before that gate closes.
