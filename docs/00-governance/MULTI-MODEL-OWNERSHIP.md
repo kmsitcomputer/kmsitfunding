@@ -6,12 +6,13 @@
 Base Amendment (V1):   FINAL / LOCKED
 Amendment V2:          PROPOSED — AWAITING INDEPENDENT CODEX AUDIT
 Amendment V3 (full
-  prospective program): PROPOSED — Codex Final Governance Audit (Pass 1) found BLOCKER 1 / MAJOR 2
-                          / MINOR 1; this document's remediation pass closes V3-GOV-B01, M01, m01
-                          (see "Amendment V3" -> "Codex Findings Remediation (Pass 1)" below) and
-                          M02 via companion patches to AI-WORKFLOW.md, IMPLEMENTATION-GOVERNANCE.md,
-                          and IMPLEMENTATION-SPEC-TEMPLATE.md. AWAITING CODEX RE-AUDIT of this
-                          remediation before Final Lock eligibility.
+  prospective program): PROPOSED — Codex Final Governance Audit Pass 1 found BLOCKER 1 / MAJOR 2 /
+                          MINOR 1, remediated (V3-GOV-B01/M01/M02/m01 CLOSED). Codex Pass 2
+                          re-audit found BLOCKER 0 / MAJOR 3 / MINOR 0 (V3-REAUDIT-M01, V3-GOV-M01
+                          residual, V3-GOV-M02 residual), remediated in turn — see "Amendment V3"
+                          -> "Codex Findings Remediation (Pass 1)" and "(Pass 2)" below.
+                          V3-GOV-B01 and V3-GOV-m01 remain CLOSED and were not reopened. AWAITING
+                          CODEX RE-AUDIT (Pass 3) of this pass before Final Lock eligibility.
 GOV-MM-005 (V3 Pipeline
   Activation, Human
   Decision):             APPROVED / ACTIVE — effective IMP-008 forward (see "GOV-MM-005" under
@@ -621,7 +622,9 @@ RESOLVED (V3-GOV-B01)" and "Model Binding Contract (V3 Roster)" below):
 ```
 CLAUDE CODE            Lead Architect — specification, contract, acceptance criteria,
                         security/financial invariants, architecture-level remediation. Not the
-                        default implementation write owner under this amendment.
+                        default implementation write owner under this amendment (Mission-Critical
+                        Claude Stages are the sole, already-locked exception — see HD-V3-R2-03
+                        under "Precedence Over the Legacy Matrix" above).
 QWEN 3.7 FLASH          Recon / cheap worker (qwen/qwen3.7-flash, VERIFIED) — repository
                         reconnaissance, file/dependency mapping, existing-contract discovery, test
                         inventory. Read-only against implementation source.
@@ -709,29 +712,43 @@ forward — see "Precedence Over the Legacy Matrix" immediately below.
 
 #### Precedence Over the Legacy Matrix
 
-Effective GOV-MM-005 (this activation), for every Fixed IMP Ownership Matrix row **from IMP-008
-forward**, the V3 pipeline's Main Developer role is the operative Primary Implementation Owner
-control, **except** for the two carve-outs this document already locked before V3 existed, which
-GOV-MM-005 does not touch or reopen:
+Effective GOV-MM-005 (this activation), **every Fixed IMP Ownership Matrix row from IMP-008
+forward is governed by the V3 pipeline** (Claude Spec -> Human Spec Approval -> Qwen Recon ->
+Implementation Write Owner -> Automated Tests -> DeepSeek Independent Technical Review ->
+remediation -> Full Regression -> Codex Closure Audit -> Human Stage Gate) — **not excluded from
+it**. What the two carve-outs below change is narrower and role-specific: *which model holds the
+Implementation Write Owner role*, not whether V3's gates apply (see HD-V3-R2-03, remediation Pass
+2, correcting a prior draft of this section that incorrectly described Mission-Critical Claude
+Stages and IMP-030 as outside V3's pipeline rather than as a role-specific exception within it):
 
 ```
 Mission-Critical Claude Stages (IMP-009, 010, 011, 014, 015, 016, 027):
-  UNCHANGED. These remain Claude Code, under GOV-MM-002 Per-IMP Model Binding, exactly as
-  "Mission-Critical Claude Stages" below already locks. V3's Main Developer role does not apply to
-  these seven rows unless a future, separate Human Decision says otherwise.
+  GOVERNED BY THE FULL V3 PIPELINE — Human Spec Approval, Qwen Recon, Automated Tests, DeepSeek
+  Independent Technical Review, remediation routing, Full Regression, Codex Closure Audit, and
+  Human Stage Gate all apply exactly as they do to every other IMP-008-forward stage. The ONLY
+  change from the V3 default: the Implementation Write Owner role is Claude Code (not Muse Spark
+  1.3 Contributor), still subject to GOV-MM-002 Per-IMP Model Binding for that implementation
+  role specifically, exactly as "Mission-Critical Claude Stages" below already locks. Remediation
+  findings route to Claude as the implementation owner (architecture/security/financial findings)
+  or per the standard Finding Routing table, as appropriate — this does not remove DeepSeek's
+  independent technical review or Codex's closure audit.
 
 IMP-030 (Audit-Only Stage):
-  UNCHANGED. Codex remains Primary Audit Owner under GOV-MM-001; IMP-030 has no Primary
-  Implementation Owner and V3's pipeline does not apply to it.
+  The sole FULL-PIPELINE EXCEPTION, because it implements nothing — see "GOV-MM-001 — IMP-030
+  Audit-Only Stage" above. Codex remains Primary Audit Owner; IMP-030 has no Implementation Write
+  Owner (Muse, Claude, or otherwise) for the V3 pipeline to assign, so the pipeline's
+  implementation-side steps (Recon through remediation/regression) do not apply — not because V3
+  is switched off for IMP-030, but because there is no implementation stage for them to attach to.
 
 Every other row IMP-008 forward (008, 012, 013, 017, 018, 019, 020, 021, 022, 023, 024, 025, 026,
 028, 029):
-  The table's listed model (Kimi K2.7 Code / Qwen 3.8 Flash / DeepSeek V4.1 Flash, per Amendment
-  V2's still-PROPOSED prospective assignment) is superseded, for the "who writes/owns
-  implementation" question specifically, by V3's Main Developer (Muse Spark 1.3 Contributor,
-  pending the model-ID-verification precondition above). The table's original model names are
-  retained unmodified in the table itself for historical/traceability continuity — they are not
-  the active assignment going forward, per this precedence note.
+  Default V3: the table's listed model (Kimi K2.7 Code / Qwen 3.8 Flash / DeepSeek V4.1 Flash, per
+  Amendment V2's still-PROPOSED prospective assignment) is superseded, for the Implementation
+  Write Owner question specifically, by V3's Main Developer, Muse Spark 1.3 Contributor
+  (meta/muse-spark-1.3-contributor, VERIFIED — see "Model Binding Contract (V3 Roster)"). The
+  table's original model names are retained unmodified in the table itself for
+  historical/traceability continuity — they are not the active assignment going forward, per this
+  precedence note.
 ```
 
 There is therefore no contradictory *active* ownership rule for IMP-008 forward: the table
@@ -830,7 +847,7 @@ current authoritative local evidence, using the same method (`cmdc --list-models
 already treats as authoritative for V1 and V2. Claude Code and Codex were already
 verified/established elsewhere in this document and are unaffected.
 
-### Human Spec Approval Gate (V3-GOV-M01 Remediation)
+### Human Spec Approval Gate (V3-GOV-M01; ordering corrected in Pass 2 — V3-REAUDIT-M01)
 
 A prior draft of this document named "Human Spec Approval" as a step in V3's canonical pipeline
 (Claude Spec -> Human Spec Approval -> Qwen Recon -> Muse Implementation -> ...) without making it
@@ -839,11 +856,20 @@ This subsection makes it one, following the same discipline this document alread
 Human Stage Gate and Human Final Lock Approval elsewhere.
 
 **Rule:** for every IMP-008-forward stage run under the V3 pipeline, implementation writing (the
-Main Developer role) **must not begin** until Human Spec Approval is recorded for that IMP's
-specification, at the exact revision approved. This is a hard gate, not a formality — Qwen Recon
-may run before or in parallel with seeking approval (it is read-only and informs the spec), but
-Muse Spark 1.3 Contributor (or whichever model holds the Main Developer role) does not write
-implementation code before this gate closes.
+Implementation Write Owner role — Muse Spark 1.3 Contributor by default, Claude Code for
+Mission-Critical Claude Stages) **must not begin** until Human Spec Approval is recorded for that
+IMP's specification, at the exact revision approved. This is a hard gate, not a formality.
+
+**Ordering (HD-V3-R2-01):** governed Qwen Recon **must not occur before or concurrently with**
+Human Spec Approval — a prior draft of this section stated the opposite ("Qwen Recon may run
+before or in parallel with seeking approval"); that statement is corrected here, not merely
+softened, because it conflicted with the canonical sequence this same document states elsewhere
+(Spec -> Human Spec Approval -> Qwen Recon -> Implementation). Recon is derived from the *approved*
+specification and maps only the repository context required by that approved contract — running it
+against an unapproved or still-changing spec risks mapping the wrong contract entirely. This does
+**not** prohibit Claude, while preparing the specification, from inspecting the minimum repository
+context necessary to write it — that is Claude's own spec-preparation activity, not governed Qwen
+Recon, and is unaffected by this rule.
 
 **Durable evidence contract** — every IMP-008-forward specification must record, alongside
 "Implementation Ownership" (see `IMPLEMENTATION-SPEC-TEMPLATE.md`, patched below):
@@ -868,19 +894,69 @@ to model identity.
 between specification and implementation, with a durable recording contract — not merely a step
 label in a diagram.
 
+### V3 Claude Lead Architect Identity Binding (V3-REAUDIT-M01 Remediation)
+
+Codex's Pass 2 re-audit found that Claude's V3 Lead Architect / Specification Owner role had no
+auditable identity mechanism of its own for ordinary IMP-008-forward stages: this document's only
+existing Claude identity control, GOV-MM-002 Per-IMP Model Binding, is scoped specifically to the
+seven Mission-Critical Claude Stages' **implementation** ownership (see "Mission-Critical Claude
+Stages" below) — extending it to describe *every* IMP's Lead Architect role, including ordinary
+stages that never touch GOV-MM-002 at all, would misstate what GOV-MM-002 actually covers. This
+subsection defines a **distinct** identity contract for that different role, so ordinary stages
+(IMP-008 included) have their own auditable mechanism without borrowing GOV-MM-002's semantics.
+
+**Rule:** before any IMP-008-forward specification can be submitted for Human Spec Approval, the
+specification must record:
+
+```
+Role:                       Claude Lead Architect / Specification Owner
+Execution Environment:      Claude Code
+Display Model:              <actual current model>
+Exact Model Identifier:     <exact identifier, when authoritative runtime/tool evidence exposes
+                            it>
+Verification Method:        <runtime/tool evidence, or Human-confirmed external evidence>
+Verification Status:        VERIFIED / EXTERNALLY HUMAN-CONFIRMED
+Specification Revision:     <commit/hash/reference>
+```
+
+**Fail-closed:** if the required Claude identity cannot be established under this contract, the
+specification does not advance to Human Spec Approval. No guessed identifier. No silent model
+substitution. A prior IMP's recorded binding is never reused as proof of the current IMP's
+binding — each specification records its own, fresh.
+
+**Relationship to GOV-MM-002:** this identity contract is separate from, and does not replace,
+GOV-MM-002. GOV-MM-002 continues to govern the Mission-Critical Claude Stages'
+**implementation-write-owner** binding specifically (see "Mission-Critical Claude Stages" below
+and "HD-V3-R2-03" under "Precedence Over the Legacy Matrix" above) — a Mission-Critical stage
+therefore records *both* this identity binding (for its Lead Architect / spec role) *and*
+GOV-MM-002's binding (for its Claude-as-Implementation-Write-Owner role), since Claude holds both
+roles on those stages. An ordinary stage (e.g. IMP-008) records only this identity binding, since
+its Implementation Write Owner is Muse Spark 1.3 Contributor under the "Model Binding Contract
+(V3 Roster)" above, not Claude.
+
+**V3-REAUDIT-M01: CLOSED.** Ordinary IMP-008-forward stages now have an auditable mechanism for
+their Claude Specification Owner identity, distinct from and not conflated with GOV-MM-002's
+narrower Mission-Critical implementation-binding scope. This document does not invent or guess a
+current binding value here — the field is defined; each IMP's own execution record fills it in
+with evidence available at that time (see `IMPLEMENTATION-SPEC-TEMPLATE.md`, patched below).
+
 ### Write Ownership Under V3 (Active, IMP-008 Forward — GOV-MM-005)
 
 Restates — and does not weaken — the existing "ONE FILE / ONE ACTIVE OWNER" and "ONE IMP / ONE
-PRIMARY IMPLEMENTATION OWNER" rules (see "Non-Concurrent Ownership Rule" below): Claude Code, Qwen
-3.7 Flash, DeepSeek V4.1 Flash, and Codex are read-only against implementation source code during
-an IMP's active build; only that IMP's designated Main Developer (Muse Spark 1.3 Contributor, per
-GOV-MM-005, for IMP-008 forward outside the Mission-Critical Claude Stages and IMP-030) writes
-implementation code, and only after the Human Spec Approval gate below is satisfied (see "Human
-Spec Approval Gate"). This rule is structurally active now; it has no governed IMP to apply to
-yet, since IMP-008 implementation itself remains unauthorized (see "Authorization Scope") — the
-model-identity gate is no longer the blocker for that (all three roles are VERIFIED, see "Model
-Binding Contract (V3 Roster)"), but IMP-008 readiness/specification/implementation authorization
-is a separate, still-outstanding Human gate.
+PRIMARY IMPLEMENTATION OWNER" rules (see "Non-Concurrent Ownership Rule" below): Qwen 3.7 Flash,
+DeepSeek V4.1 Flash, and Codex are always read-only against implementation source code; the
+Implementation Write Owner role is exclusive per IMP — **Muse Spark 1.3 Contributor by default**
+(IMP-008 forward, outside the Mission-Critical Claude Stages and IMP-030), or **Claude Code** for
+the seven Mission-Critical Claude Stages specifically (see HD-V3-R2-03 under "Precedence Over the
+Legacy Matrix" above — Claude is read-only against implementation source on every *other*
+IMP-008-forward stage, where it holds only the Lead Architect role). Whichever model holds the
+Implementation Write Owner role for a given IMP writes implementation code only after the Human
+Spec Approval gate below is satisfied (see "Human Spec Approval Gate"). This rule is structurally
+active now; it has no governed IMP to apply to yet, since IMP-008 implementation itself remains
+unauthorized (see "Authorization Scope") — the model-identity gate is no longer the blocker for
+that (all three V3-roster roles are VERIFIED, see "Model Binding Contract (V3 Roster)"), but
+IMP-008 readiness/specification/implementation authorization is a separate, still-outstanding
+Human gate.
 
 ### Finding Routing (Active, IMP-008 Forward — GOV-MM-005)
 
@@ -984,6 +1060,50 @@ V3-GOV-m01  MINOR                  DeepSeek/Codex review boundary insufficiently
 This remediation pass does not itself constitute the Codex re-audit these findings require before
 Amendment V3 (full program) can be declared `FINAL / LOCKED` — that re-audit is a separate,
 still-outstanding step (see "Approval" below).
+
+### Codex Findings Remediation (Pass 2)
+
+Codex's Pass 2 re-audit of the Pass 1 remediation found: `BLOCKER 0 / MAJOR 3 / MINOR 0 /
+GATE-IMPACT 3` — `V3 FINAL LOCK: NOT ELIGIBLE`. This narrow pass addresses only the three named
+findings; V3-GOV-B01 and V3-GOV-m01 are confirmed still `CLOSED` and were not reopened or
+re-litigated:
+
+```
+V3-REAUDIT-M01  MAJOR / GATE-IMPACT   Claude's V3 Lead Architect identity had no auditable
+                                     mechanism for ordinary stages, distinct from GOV-MM-002
+            -> CLOSED — see "V3 Claude Lead Architect Identity Binding (V3-REAUDIT-M01
+               Remediation)" above, plus the matching V3 PIPELINE STAGE field in
+               IMPLEMENTATION-SPEC-TEMPLATE.md (same commit as this patch).
+
+V3-GOV-M01 residual  MAJOR / GATE-IMPACT   Prior remediation still stated governed Qwen Recon
+                                     "may run before or in parallel with seeking approval,"
+                                     conflicting with the canonical Spec -> Approval -> Recon
+                                     order stated elsewhere in this document
+            -> CLOSED — see "Human Spec Approval Gate" -> "Ordering (HD-V3-R2-01)" above; the
+               conflicting sentence is corrected, not merely softened.
+
+V3-GOV-M02 residual  MAJOR / GATE-IMPACT   "Precedence Over the Legacy Matrix" described
+                                     Mission-Critical Claude Stages and IMP-030 as outside V3's
+                                     pipeline ("V3's Main Developer role does not apply,"
+                                     "V3's pipeline does not apply to it"), when the intended
+                                     exception is role-specific (write-owner only), not a
+                                     pipeline exclusion
+            -> CLOSED — see "Precedence Over the Legacy Matrix" above (rewritten per HD-V3-R2-03)
+               and the matching corrections to "Write Ownership Under V3" above.
+
+V3-GOV-B01 (previously CLOSED):     PRESERVED — Qwen 3.7 Flash (qwen/qwen3.7-flash), Muse Spark
+                                     1.3 Contributor (meta/muse-spark-1.3-contributor), and
+                                     DeepSeek V4.1 Flash (deepseek/deepseek-v4.1-flash) remain
+                                     VERIFIED, unchanged and untouched by this pass.
+
+V3-GOV-m01 (previously CLOSED):     PRESERVED — the DeepSeek/Codex review boundary (primary
+                                     question, focus, default context per reviewer, non-narrowing
+                                     escalation) is unchanged by this pass.
+```
+
+This pass does not redesign V3, does not start IMP-008, and does not touch application source,
+database, or IMP-000..007 evidence. A further Codex re-audit (Pass 3) of this pass is still
+required before Amendment V3 (full program) is eligible for Final Human Lock.
 
 ### Authorization Scope
 
@@ -1583,7 +1703,30 @@ Codex Findings Remediation (Pass 1):
                      Does NOT itself constitute Independent Codex Audit Pass 2 (re-audit) or Final
                      Human Lock Approval — both remain separate, still-PENDING controls below.
 
-Independent Codex Audit (Amendment V3, full program, Pass 2 — re-audit of this remediation):
+Independent Codex Audit (Amendment V3, full program, Pass 2 — re-audit of Pass 1 remediation):
+  Status:            FAIL — NOT ELIGIBLE FOR HUMAN FINAL LOCK
+  Reviewer:          Codex
+  Findings:          BLOCKER: 0; MAJOR: 3 (V3-REAUDIT-M01, V3-GOV-M01 residual, V3-GOV-M02
+                     residual); MINOR: 0; GATE-IMPACT: 3. V3-GOV-B01 and V3-GOV-m01 confirmed
+                     still CLOSED (not reopened by Codex).
+  Evidence/Reference: Findings as relayed in this session's Pass 2 remediation request; recorded
+                     exactly as received, without independently re-deriving or embellishing the
+                     audit itself.
+
+Codex Findings Remediation (Pass 2):
+  Authority:         Claude Code (governance-drafting patch), per this session's explicit
+                     instruction (HD-V3-R2-01/02/03) to remediate under PATCH — DO NOT REWRITE
+  Result:            V3-REAUDIT-M01 CLOSED, V3-GOV-M01 residual CLOSED, V3-GOV-M02 residual
+                     CLOSED — see "Codex Findings Remediation (Pass 2)" under "Amendment V3"
+                     above for the full mapping. V3-GOV-B01 and V3-GOV-m01 PRESERVED, not
+                     reopened or re-litigated.
+  Scope:             Governance documentation only (MULTI-MODEL-OWNERSHIP.md and
+                     IMPLEMENTATION-SPEC-TEMPLATE.md). Does NOT authorize IMP-008
+                     readiness/implementation, application source changes, database changes, or
+                     git push. Does NOT itself constitute Independent Codex Audit Pass 3 or Final
+                     Human Lock Approval — both remain separate, still-PENDING controls below.
+
+Independent Codex Audit (Amendment V3, full program, Pass 3 — re-audit of Pass 2 remediation):
   Status:            PENDING — REQUIRED before Final Lock eligibility
   Reviewer:
   Findings:

@@ -35,17 +35,22 @@ HUMAN                         Final Approval / Merge Authority
 > per stage has changed from implicitly-always-Claude to explicit-per-IMP, and — for IMP-008
 > forward — to Amendment V3's pipeline roles.
 >
-> **IMP-008 forward: Amendment V3 is the operative execution workflow**, per
+> **IMP-008 forward: Amendment V3 is the operative execution workflow for every stage, including
+> the Mission-Critical Claude Stages and IMP-030** (corrected in governance remediation Pass 2,
+> HD-V3-R2-03 — a prior version of this note incorrectly described those stages as excluded from
+> V3 rather than as a role-specific exception within it), per
 > [MULTI-MODEL-OWNERSHIP.md](MULTI-MODEL-OWNERSHIP.md) "Amendment V3" and GOV-MM-005: Claude Code
-> (Lead Architect / Spec) -> **Human Spec Approval** (mandatory, discrete, durably recorded — see
-> that document's "Human Spec Approval Gate") -> Qwen 3.7 Flash (Recon) -> Muse Spark 1.3
-> Contributor (Main Developer / default implementation write owner) -> Automated Tests -> DeepSeek
-> V4.1 Flash (Independent Technical Review) -> targeted remediation -> Full Regression -> Codex
-> (Final Semantic/Closure Audit) -> Human Stage Gate. This applies to every IMP-008-forward stage
-> except the Mission-Critical Claude Stages and IMP-030 (unchanged carve-outs — see that document's
-> "Precedence Over the Legacy Matrix"). The legacy roster and role descriptions below remain the
-> historical, accurate record for IMP-000 through IMP-007 and are not rewritten; agents must not
-> apply them to select an IMP-008+ implementation owner.
+> (Lead Architect / Spec) -> **Human Spec Approval** (mandatory, discrete, durably recorded, must
+> close before Recon begins — see that document's "Human Spec Approval Gate") -> Qwen 3.7 Flash
+> (Recon) -> Implementation Write Owner (**Muse Spark 1.3 Contributor by default; Claude Code
+> specifically for the Mission-Critical Claude Stages, under GOV-MM-002 Per-IMP Model Binding**)
+> -> Automated Tests -> DeepSeek V4.1 Flash (Independent Technical Review) -> targeted remediation
+> -> Full Regression -> Codex (Final Semantic/Closure Audit) -> Human Stage Gate. IMP-030 alone has
+> no Implementation Write Owner (Audit-Only, per GOV-MM-001) — see that document's "Precedence
+> Over the Legacy Matrix" for the full carve-out contract. The legacy roster and role descriptions
+> below remain the historical, accurate record for IMP-000 through IMP-007 and are not rewritten;
+> agents must not apply them to select an IMP-008+ implementation owner, Mission-Critical stages
+> included.
 
 ### ChatGPT
 
@@ -71,12 +76,16 @@ active build. Claude Code remains the assigned owner for the mission-critical st
 that document (payment, ledger, financial posting, commission, withdrawal, refund, security
 hardening) — this carve-out is unchanged by Amendment V3.
 
-**IMP-008 forward (outside the Mission-Critical Claude Stages and IMP-030):** this role is Muse
-Spark 1.3 Contributor by default, under Amendment V3 / GOV-MM-005 — see the note under "AI Role
-Assignment" above and [MULTI-MODEL-OWNERSHIP.md](MULTI-MODEL-OWNERSHIP.md) "Amendment V3." The
-description above (implements approved spec, owns the branch exclusively, etc.) still applies to
-*whichever* model currently holds the role; only the historical roster naming (Claude Code / Kimi
-K3 / Qwen 3.8 Max 0902) is superseded for those stages.
+**IMP-008 forward:** this role (renamed "Implementation Write Owner" under V3) is Muse Spark 1.3
+Contributor by default; for the Mission-Critical Claude Stages specifically it is Claude Code
+(under GOV-MM-002 Per-IMP Model Binding — the "carve-out" in the paragraph above is this
+write-owner assignment, not an exclusion from V3's pipeline, which still governs those stages —
+see MULTI-MODEL-OWNERSHIP.md "Precedence Over the Legacy Matrix"). IMP-030 has no Implementation
+Write Owner (Audit-Only). See the note under "AI Role Assignment" above and
+[MULTI-MODEL-OWNERSHIP.md](MULTI-MODEL-OWNERSHIP.md) "Amendment V3." The description above
+(implements approved spec, owns the branch exclusively, etc.) still applies to *whichever* model
+currently holds the role; only the historical roster naming (Claude Code / Kimi K3 / Qwen 3.8 Max
+0902) is superseded for IMP-008 forward.
 
 ### Codex
 
