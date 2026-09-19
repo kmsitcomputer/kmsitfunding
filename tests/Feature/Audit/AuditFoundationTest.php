@@ -104,16 +104,19 @@ class AuditFoundationTest extends TestCase
         // IMP-006-theme-engine.md section 19) + 20 IMP-007 program.*/
         // campaign.*/fund.* events (docs/implementation/
         // IMP-007-campaign-program-fund.md section 17: 7 program.* + 10
-        // campaign.* + 3 fund.*) = 81 active/target.
+        // campaign.* + 3 fund.*) + 9 IMP-008 donation.* events
+        // (docs/implementation/IMP-008-donation.md Audit Requirements,
+        // BR-14: donation.created/succeeded/failed/expired/cancelled +
+        // 4 donation.recurring_plan.*) = 90 active/target.
         // Additive-only per MULTI-MODEL-OWNERSHIP: no existing event's
         // definition changed, registered by ContentAuditEventRegistrar /
         // ThemeAuditEventRegistrar / CampaignAuditEventRegistrar via
         // AuditEventRegistry's own public register(), not by editing this
         // registry's file.
-        $this->assertCount(81, $active);
+        $this->assertCount(90, $active);
         // 5 reserved catalog events + governance.audit.purged = 6 reserved.
         $this->assertCount(6, $reserved);
-        $this->assertCount(87, $all);
+        $this->assertCount(96, $all);
 
         $this->assertNotNull($registry->find('security.authorization.denied', 1));
         $this->assertNotNull($registry->find('governance.audit.purged', 1));
