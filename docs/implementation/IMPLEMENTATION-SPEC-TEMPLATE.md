@@ -10,13 +10,16 @@ Per [docs/00-governance/MULTI-MODEL-OWNERSHIP.md](../00-governance/MULTI-MODEL-O
 no implicit/default model substitution is permitted; if the assigned model/owner is unavailable,
 stop and report rather than substituting silently.
 
-**First determine the Stage Type — this decides which block below applies. Never fill both.**
+**First determine the Stage Type — this decides which block below applies. Never fill more than
+one.**
 
 ```
-Stage Type:   NORMAL IMPLEMENTATION STAGE  /  AUDIT-ONLY STAGE (IMP-030 only, see GOV-MM-001)
+Stage Type:   NORMAL IMPLEMENTATION STAGE (historical, pre-V3)  /
+              V3 PIPELINE STAGE (IMP-008 forward, see MULTI-MODEL-OWNERSHIP.md "Amendment V3")  /
+              AUDIT-ONLY STAGE (IMP-030 only, see GOV-MM-001)
 ```
 
-### If Stage Type = NORMAL IMPLEMENTATION STAGE (every IMP except IMP-030)
+### If Stage Type = NORMAL IMPLEMENTATION STAGE (historical, pre-V3)
 
 ```
 Primary Implementation Owner:
@@ -42,6 +45,41 @@ Human Model Binding Approval:
 Binding Status:                      UNBOUND / MODEL RESOLVED / AWAITING HUMAN MODEL APPROVAL /
                                       BOUND
 Model Change Requests against this binding: none / list
+```
+
+### If Stage Type = V3 PIPELINE STAGE (IMP-008 forward)
+
+Applies to every IMP-008-forward stage except the Mission-Critical Claude Stages and IMP-030,
+which keep the "NORMAL IMPLEMENTATION STAGE" block's Claude/Codex binding fields instead (per
+MULTI-MODEL-OWNERSHIP.md "Precedence Over the Legacy Matrix"). Compact — do not expand this into a
+transcript; each field is a pointer to durable evidence, not the evidence itself.
+
+```
+Specification Owner (Claude binding):    <exact bound Claude model — see MULTI-MODEL-OWNERSHIP.md>
+Specification Revision:                  <commit/revision this spec block describes>
+
+Human Spec Approval:                     APPROVED / NOT APPROVED
+Approval Statement:                      <exact statement or durable reference — never fabricated>
+Approval Scope:                          <this IMP ID> + <specification revision above>
+Approval Evidence:                       <repository reference>
+
+Qwen Recon Binding:                      qwen/qwen3.7-flash (VERIFIED — see
+                                          MULTI-MODEL-OWNERSHIP.md "Model Binding Contract")
+RECON Evidence:                          <docs/ai-handoff/IMP-XXX/RECON.md reference>
+
+Muse Implementation Binding:             meta/muse-spark-1.3-contributor (VERIFIED)
+Implementation Commit/Diff:              <commit(s)>
+Test Evidence:                           <summary + reference>
+
+DeepSeek Independent Review Binding:     deepseek/deepseek-v4.1-flash (VERIFIED)
+Findings:                                <reference>
+Remediation Owner:                       Muse (default) / Claude (architecture findings only)
+Remediation Evidence:                    <commit(s)/reference>
+Full Regression:                         <result + reference>
+
+Codex Closure Audit:                     <PASS / FAIL + reference>
+Human Stage Gate:                        <status>
+Finalization Status:                     <READY / IN PROGRESS / REVIEW / BLOCKED / PASS>
 ```
 
 ### If Stage Type = AUDIT-ONLY STAGE (IMP-030 only)

@@ -6,12 +6,17 @@
 Base Amendment (V1):   FINAL / LOCKED
 Amendment V2:          PROPOSED — AWAITING INDEPENDENT CODEX AUDIT
 Amendment V3 (full
-  prospective program): PROPOSED — AWAITING EXACT MODEL ID VERIFICATION + INDEPENDENT CODEX AUDIT
+  prospective program): PROPOSED — Codex Final Governance Audit (Pass 1) found BLOCKER 1 / MAJOR 2
+                          / MINOR 1; this document's remediation pass closes V3-GOV-B01, M01, m01
+                          (see "Amendment V3" -> "Codex Findings Remediation (Pass 1)" below) and
+                          M02 via companion patches to AI-WORKFLOW.md, IMPLEMENTATION-GOVERNANCE.md,
+                          and IMPLEMENTATION-SPEC-TEMPLATE.md. AWAITING CODEX RE-AUDIT of this
+                          remediation before Final Lock eligibility.
 GOV-MM-005 (V3 Pipeline
   Activation, Human
   Decision):             APPROVED / ACTIVE — effective IMP-008 forward (see "GOV-MM-005" under
-                          "Amendment V3" below for scope and the outstanding model-ID-verification
-                          precondition this activation does not itself satisfy)
+                          "Amendment V3" below). Model-ID-verification precondition (V3-GOV-B01)
+                          is now RESOLVED — see "Model Binding Contract (V3 Roster)" below.
 ```
 
 The base amendment (V1 — Primary Implementation Owner as a per-IMP role, the original Kimi/Qwen/
@@ -609,24 +614,27 @@ by that activation. See "Approval" below for the exact authorization-scope recor
 drafting and the activation.
 
 Unlike V2 (which reassigns which model owns which *domain*), V3 proposes restructuring *how a
-single IMP's implementation is divided across models* into a fixed pipeline, and proposes a new
-roster not previously verified in this document:
+single IMP's implementation is divided across models* into a fixed pipeline, with a roster now
+VERIFIED against current `cmdc --list-models` evidence (see "Exact Model ID Verification Gap —
+RESOLVED (V3-GOV-B01)" and "Model Binding Contract (V3 Roster)" below):
 
 ```
 CLAUDE CODE            Lead Architect — specification, contract, acceptance criteria,
                         security/financial invariants, architecture-level remediation. Not the
                         default implementation write owner under this amendment.
-QWEN 3.7 FLASH          Recon / cheap worker — repository reconnaissance, file/dependency
-                        mapping, existing-contract discovery, test inventory. Read-only against
-                        implementation source.
+QWEN 3.7 FLASH          Recon / cheap worker (qwen/qwen3.7-flash, VERIFIED) — repository
+                        reconnaissance, file/dependency mapping, existing-contract discovery, test
+                        inventory. Read-only against implementation source.
 MUSE SPARK 1.3
-  CONTRIBUTOR           Main Developer / default implementation write owner (role ACTIVE per
-                        GOV-MM-005; exact model identity still UNVERIFIED — see "Exact Model ID
-                        Verification Gap") — implementation from approved spec + Qwen's file map,
-                        targeted remediation, implementation tests.
-DEEPSEEK V4.1           Independent Technical Checker — diff-first review: specification
-                        compliance, logic, security, transaction/concurrency/idempotency,
-                        database-constraint review. Read-only by default.
+  CONTRIBUTOR           Main Developer / default implementation write owner
+                        (meta/muse-spark-1.3-contributor, VERIFIED, provider Meta; role ACTIVE per
+                        GOV-MM-005) — implementation from approved spec + Qwen's file map, targeted
+                        remediation, implementation tests.
+DEEPSEEK V4.1 FLASH     Independent Technical Checker (deepseek/deepseek-v4.1-flash, VERIFIED,
+                        display name corrected from shorthand "DeepSeek V4.1" — see "Exact Model ID
+                        Verification Gap") — diff-first review: specification compliance, logic,
+                        security, transaction/concurrency/idempotency, database-constraint review.
+                        Read-only by default.
 CODEX                   Independent Final Semantic / Closure Auditor — final semantic contract
                         audit, cross-file invariant verification, Stage Gate readiness. Read-only;
                         does not remediate its own findings (unchanged from V1/V2's Codex role).
@@ -732,43 +740,147 @@ operative. (Open Item 2 from the original draft of this section — replace-vs-r
 resolved by GOV-MM-005 above: replace. It is retained in "Open Items" below only for traceability
 of how the question was raised and settled, not as a still-open question.)
 
-### Exact Model ID Verification Gap
+### Exact Model ID Verification Gap — RESOLVED (V3-GOV-B01)
 
 V1 and V2 each recorded every model's exact identifier verified directly against `cmdc
 --list-models` output before being treated as a real, invocable model (see "Exact Model ID
-Verification" under Amendment V2). **This session has no `cmdc --list-models` access and no other
-means to verify that "Qwen 3.7 Flash," "Muse Spark 1.3 Contributor," or "DeepSeek V4.1" are real,
-currently-listed models with those exact names**, nor their exact machine identifiers. Note also
-that these names differ from the already-recorded V2 baseline (Qwen **3.8** Flash, DeepSeek
-**V4.1 Flash**) without an explanation of whether that is an intentional further replacement or a
-drafting inconsistency. Per this document's own "Model Change Control" section, an unverified
-model must not be used for governed implementation. Accordingly:
+Verification" under Amendment V2). A prior draft of this section recorded Qwen 3.7 Flash, Muse
+Spark 1.3 Contributor, and DeepSeek V4.1 as `NOT VERIFIED` because that earlier session had no
+`cmdc --list-models` access. This session does, and ran it directly — output captured below,
+verbatim identifiers only, no invention or inference from naming convention:
 
 ```
-Qwen 3.7 Flash            — NOT VERIFIED. Exact model ID: UNRESOLVED.
-Muse Spark 1.3 Contributor — NOT VERIFIED. Not present in any prior baseline (V1 or V2).
-                             Exact model ID: UNRESOLVED. Execution environment: UNRESOLVED.
-DeepSeek V4.1              — NOT VERIFIED against V2's recorded "DeepSeek V4.1 Flash." Exact
-                             model ID: UNRESOLVED (ambiguous vs. existing baseline entry).
+$ cmdc --list-models   (72 models listed; relevant entries only)
+
+qwen/qwen3.7-flash                     fast low-cost agentic coding & reasoning
+deepseek/deepseek-v4.1-flash           V4.1 hybrid-attention reasoning with vision
+meta/muse-spark-1.3-contributor        Muse Spark 1.3 at up to 95% off
 ```
 
-**This is a BLOCKER against declaring Amendment V3 `FINAL / LOCKED`, and against using any of
-these three names for governed write-ownership of implementation source**, until each is either
-(a) verified against an actual model listing the way V1/V2 were, or (b) confirmed by Human as an
-intentionally different, newly onboarded tool/agent with its own execution environment recorded.
-Claude Code and Codex are unaffected (both already verified/established in this document).
+**Qwen 3.7 Flash** — exact, unambiguous match: `qwen/qwen3.7-flash`. One candidate only; nothing
+inferred.
+
+**Muse Spark 1.3 Contributor** — exact, unambiguous match: `meta/muse-spark-1.3-contributor`.
+Provider is **Meta** (not previously established in this document — Muse Spark is not present in
+any V1/V2 baseline). One candidate only; nothing inferred.
+
+**DeepSeek V4.1** — the listing has no bare "DeepSeek V4.1" (non-Flash) entry; the sole model
+whose version is V4.1 is `deepseek/deepseek-v4.1-flash`, identical to V2's already-established
+"DeepSeek V4.1 Flash." This is not "reusing an old identifier merely because it was historically
+used" — it is the current, freshly-run listing independently confirming the *same* identifier is
+still the only V4.1 DeepSeek model available, with zero competing candidates. The display name is
+corrected here from the shorthand "DeepSeek V4.1" to the full, listing-accurate "DeepSeek V4.1
+Flash" for this reason.
+
+**Verification status: all three VERIFIED.** None fabricated, none inferred from a naming
+pattern, none assumed from history without fresh current confirmation.
+
+### Model Binding Contract (V3 Roster)
+
+```
+ROLE:                     Recon
+DISPLAY NAME:             Qwen 3.7 Flash
+EXACT MODEL IDENTIFIER:   qwen/qwen3.7-flash
+PROVIDER:                 Alibaba (Qwen)
+EXECUTION ENVIRONMENT:    Command Code (cmdc)
+VERIFICATION METHOD:      cmdc --list-models, run directly this session
+STATUS:                   VERIFIED
+
+ROLE:                     Main Developer / default implementation write owner
+DISPLAY NAME:             Muse Spark 1.3 Contributor
+EXACT MODEL IDENTIFIER:   meta/muse-spark-1.3-contributor
+PROVIDER:                 Meta
+EXECUTION ENVIRONMENT:    Command Code (cmdc)
+VERIFICATION METHOD:      cmdc --list-models, run directly this session
+STATUS:                   VERIFIED
+
+ROLE:                     Independent Technical Checker
+DISPLAY NAME:             DeepSeek V4.1 Flash (corrected from V3's original shorthand
+                          "DeepSeek V4.1" — see above; identical identifier to V2's existing
+                          baseline entry)
+EXACT MODEL IDENTIFIER:   deepseek/deepseek-v4.1-flash
+PROVIDER:                 DeepSeek
+EXECUTION ENVIRONMENT:    Command Code (cmdc)
+VERIFICATION METHOD:      cmdc --list-models, run directly this session
+STATUS:                   VERIFIED
+
+ROLE:                     Lead Architect
+DISPLAY NAME:             Claude Code (exact bound model per-IMP, GOV-MM-002 unaffected)
+STATUS:                   Already established elsewhere in this document — unaffected by V3
+
+ROLE:                     Independent Final Semantic / Closure Auditor
+DISPLAY NAME:             Codex
+STATUS:                   Already established elsewhere in this document — unaffected by V3
+```
+
+**Fail-closed rule (unchanged principle, restated for V3):** if, at the point any of these three
+roles is actually invoked for governed IMP-008+ work, the execution environment cannot confirm the
+exact identifier above is the model actually running — the discrepancy is detected before
+governed work proceeds, not glossed over. Invocation **fails closed**: implementation/recon/review
+under that role does not proceed on an unconfirmed identity. No silent fallback to a different
+model, no silent substitution. Any replacement of a verified identifier requires the same
+governance mechanism already established in "Model Change Control" above (Model Change Request ->
+compatibility assessment -> impact assessment -> Human approval -> governance amendment), applied
+to the V3 roster exactly as it already applies to the V1/V2 roster. This verification record does
+not expire silently — if a future `cmdc --list-models` no longer lists one of these three exact
+identifiers, that is itself a Model Change Request event, not a silent continuation.
+
+**V3-GOV-B01: CLOSED.** All three previously-unresolved identities are now VERIFIED against
+current authoritative local evidence, using the same method (`cmdc --list-models`) this document
+already treats as authoritative for V1 and V2. Claude Code and Codex were already
+verified/established elsewhere in this document and are unaffected.
+
+### Human Spec Approval Gate (V3-GOV-M01 Remediation)
+
+A prior draft of this document named "Human Spec Approval" as a step in V3's canonical pipeline
+(Claude Spec -> Human Spec Approval -> Qwen Recon -> Muse Implementation -> ...) without making it
+a discrete, durable, auditable control — indistinguishable from an informal or assumed approval.
+This subsection makes it one, following the same discipline this document already applies to
+Human Stage Gate and Human Final Lock Approval elsewhere.
+
+**Rule:** for every IMP-008-forward stage run under the V3 pipeline, implementation writing (the
+Main Developer role) **must not begin** until Human Spec Approval is recorded for that IMP's
+specification, at the exact revision approved. This is a hard gate, not a formality — Qwen Recon
+may run before or in parallel with seeking approval (it is read-only and informs the spec), but
+Muse Spark 1.3 Contributor (or whichever model holds the Main Developer role) does not write
+implementation code before this gate closes.
+
+**Durable evidence contract** — every IMP-008-forward specification must record, alongside
+"Implementation Ownership" (see `IMPLEMENTATION-SPEC-TEMPLATE.md`, patched below):
+
+```
+Human Spec Approval:      APPROVED / NOT APPROVED
+Approval Statement:       <exact Human approval statement, or a durable reference to it — never
+                          fabricated, never inferred from silence or from an unrelated approval>
+Approval Scope:           <IMP identifier> + <specification revision/commit this approval covers>
+Approval Evidence:        <repository evidence/reference — e.g. the commit that records this
+                          section, or a linked docs/audits/ record>
+```
+
+This reuses the exact verbatim-quote-plus-scope discipline this document already uses for every
+other Human Decision (GOV-MM-001/002/004/005, Final Human Lock Approval) — no new evidence format
+is invented. A specification revision that changes materially after approval requires a fresh
+Human Spec Approval record scoped to the new revision; the old approval does not silently carry
+forward to different spec content, the same principle "Model Change After Binding" already applies
+to model identity.
+
+**V3-GOV-M01: CLOSED.** Human Spec Approval is now a named, mandatory, evidence-bearing gate
+between specification and implementation, with a durable recording contract — not merely a step
+label in a diagram.
 
 ### Write Ownership Under V3 (Active, IMP-008 Forward — GOV-MM-005)
 
 Restates — and does not weaken — the existing "ONE FILE / ONE ACTIVE OWNER" and "ONE IMP / ONE
 PRIMARY IMPLEMENTATION OWNER" rules (see "Non-Concurrent Ownership Rule" below): Claude Code, Qwen
-3.7 Flash, DeepSeek V4.1, and Codex are read-only against implementation source code during an
-IMP's active build; only that IMP's designated Main Developer (Muse Spark 1.3 Contributor, per
+3.7 Flash, DeepSeek V4.1 Flash, and Codex are read-only against implementation source code during
+an IMP's active build; only that IMP's designated Main Developer (Muse Spark 1.3 Contributor, per
 GOV-MM-005, for IMP-008 forward outside the Mission-Critical Claude Stages and IMP-030) writes
-implementation code, and only after Claude's spec is Human-approved. This rule is structurally
-active now; it has no governed IMP to apply to yet, since IMP-008 implementation itself remains
-unauthorized (see "Authorization Scope") and Qwen/Muse/DeepSeek remain unverified (see "Exact
-Model ID Verification Gap").
+implementation code, and only after the Human Spec Approval gate below is satisfied (see "Human
+Spec Approval Gate"). This rule is structurally active now; it has no governed IMP to apply to
+yet, since IMP-008 implementation itself remains unauthorized (see "Authorization Scope") — the
+model-identity gate is no longer the blocker for that (all three roles are VERIFIED, see "Model
+Binding Contract (V3 Roster)"), but IMP-008 readiness/specification/implementation authorization
+is a separate, still-outstanding Human gate.
 
 ### Finding Routing (Active, IMP-008 Forward — GOV-MM-005)
 
@@ -777,6 +889,51 @@ Technical implementation defect     DeepSeek / Codex  -> Main Developer   (PATCH
 Architecture / contract defect      DeepSeek / Codex  -> Claude Code
 New/unresolved business decision    any agent          -> STOP -> HUMAN DECISION (never inferred)
 ```
+
+### DeepSeek / Codex Review Boundary (V3-GOV-m01 Remediation)
+
+A prior draft left the line between DeepSeek's and Codex's review scope stated but not
+executable — both "review the implementation," without a distinguishing question or default
+context, inviting either duplicated effort or a gap neither covers. This subsection makes the
+boundary concrete without narrowing either reviewer's authority to escalate.
+
+```
+DEEPSEEK V4.1 FLASH — IMPLEMENTATION TECHNICAL REVIEW
+
+Primary question:    "Is this implementation technically correct and safe relative to the
+                      approved specification?"
+Primary focus:        changed implementation; local/cross-file logic required by the diff;
+                      specification compliance; authorization implementation; security
+                      implementation; transactions; locking/concurrency; idempotency; DB
+                      constraints; failure paths; relevant tests.
+Default context:      approved spec + RECON + implementation diff + tests.
+Output:                actionable technical findings, routed per "Finding Routing" above.
+
+CODEX — FINAL SEMANTIC / CLOSURE AUDIT
+
+Primary question:    "Is the final remediated state eligible for Human Stage Gate?"
+Primary focus:         final implementation vs approved contract; unresolved or incorrectly
+                      closed findings; cross-domain invariants; architecture boundary
+                      preservation; locked decision preservation; evidence completeness;
+                      regression evidence; scope leakage; semantic inconsistencies individual
+                      technical findings may miss.
+Default context:      approved spec + final diff + DeepSeek findings + remediation evidence +
+                      full regression evidence.
+```
+
+Codex may inspect technical, security, or financial detail when necessary to validate closure —
+this is independent final verification, not prohibited duplication of DeepSeek's pass. Both
+reviewers start from their stated default context but **either may expand context when concrete
+evidence requires it**; the CE-01..CE-10 token-efficiency rules below constrain default behavior,
+never investigation of security, financial correctness, authorization, audit, transactions,
+concurrency, locked architecture, or cross-domain invariants when evidence calls for it. Neither
+reviewer's independence is weakened by this clarification — DeepSeek remains read-only by default,
+Codex remains read-only always, and Codex still does not remediate its own findings (unchanged
+from "Codex Independence" below).
+
+**V3-GOV-m01: CLOSED.** The boundary is now a stated primary question, focus list, and default
+context per reviewer, with an explicit, non-narrowing escalation rule — executable, not merely
+descriptive.
 
 ### Context-Efficiency Rules (Active, CE-01..CE-10 — GOV-MM-005)
 
@@ -800,30 +957,64 @@ Findings / Remediation / Full Regression / Codex Closure / Human Stage Gate), no
 log. This does not replace or duplicate `docs/audits/IMP-XXX-FINALIZATION.md`, which remains the
 canonical Stage Gate record for every IMP regardless of which pipeline built it.
 
+### Codex Findings Remediation (Pass 1)
+
+Codex Final Governance Audit result against the pre-remediation state of this Amendment:
+`BLOCKER 1 / MAJOR 2 / MINOR 1 / GATE-IMPACT 3` — `NOT ELIGIBLE FOR HUMAN FINAL LOCK`. This
+remediation pass addresses all four findings using PATCH — DO NOT REWRITE, minimum sufficient
+context, no application source or database touched, IMP-008 not started:
+
+```
+V3-GOV-B01  BLOCKER / GATE-IMPACT  Model identity/execution evidence unresolved
+            -> CLOSED — see "Exact Model ID Verification Gap — RESOLVED (V3-GOV-B01)" and
+               "Model Binding Contract (V3 Roster)" above.
+
+V3-GOV-M01  MAJOR / GATE-IMPACT    Human Spec Approval not a discrete durable auditable gate
+            -> CLOSED — see "Human Spec Approval Gate (V3-GOV-M01 Remediation)" above.
+
+V3-GOV-M02  MAJOR / GATE-IMPACT    Operational governance surfaces inconsistent with V3
+            -> CLOSED — see companion patches to docs/00-governance/AI-WORKFLOW.md,
+               docs/00-governance/IMPLEMENTATION-GOVERNANCE.md, and
+               docs/implementation/IMPLEMENTATION-SPEC-TEMPLATE.md (same commit as this patch).
+
+V3-GOV-m01  MINOR                  DeepSeek/Codex review boundary insufficiently executable
+            -> CLOSED — see "DeepSeek / Codex Review Boundary (V3-GOV-m01 Remediation)" above.
+```
+
+This remediation pass does not itself constitute the Codex re-audit these findings require before
+Amendment V3 (full program) can be declared `FINAL / LOCKED` — that re-audit is a separate,
+still-outstanding step (see "Approval" below).
+
 ### Authorization Scope
 
-Governance drafting (original patch) plus GOV-MM-005 activation (pipeline structure and role
-assignment, IMP-008 forward) together still do NOT authorize: IMP-008 readiness/specification
-work, IMP-008 implementation work, invocation of Qwen 3.7 Flash / Muse Spark 1.3 Contributor /
-DeepSeek V4.1 for any governed task (pending the Exact Model ID Verification Gap above, which
-GOV-MM-005 explicitly does not resolve), application source changes, or git push. Neither reopens
-or reinterprets Amendment V2's own still-`PROPOSED` state or its IMP-004 hold conditions. IMP-000
+Governance drafting (original patch), GOV-MM-005 activation (pipeline structure and role
+assignment, IMP-008 forward), and this Codex-findings remediation pass (V3-GOV-B01/M01/M02/m01)
+together still do NOT authorize: IMP-008 readiness/specification work, IMP-008 implementation
+work, application source changes, database changes, or git push. The model-identity precondition
+on invoking Qwen 3.7 Flash / Muse Spark 1.3 Contributor / DeepSeek V4.1 Flash for governed work is
+now resolved (see "Model Binding Contract (V3 Roster)"), but that resolves only V3-GOV-B01 — it
+does not by itself authorize IMP-008 work, which remains gated on its own separate Human
+authorization exactly as before. Neither reopens or reinterprets Amendment V2's own
+still-`PROPOSED` state or its IMP-004 hold conditions. IMP-000
 through IMP-007 remain historical, `FINAL / LOCKED`, and unmodified.
 
 ### Open Items
 
 ```
-1. STILL OPEN — Exact model ID verification for Qwen 3.7 Flash, Muse Spark 1.3 Contributor,
-   DeepSeek V4.1 (or confirmation these are intentionally distinct from the V2 baseline's Qwen
-   3.8 Flash / DeepSeek V4.1 Flash, with their own execution environment). Blocks actual
-   invocation of these three roles even though GOV-MM-005 has activated the pipeline structure
-   around them — see "GOV-MM-005" above.
+1. RESOLVED (V3-GOV-B01 remediation) — Exact model ID verification for Qwen 3.7 Flash, Muse
+   Spark 1.3 Contributor, and DeepSeek V4.1 (display-corrected to "DeepSeek V4.1 Flash," the
+   only current V4.1 DeepSeek model) is now VERIFIED against fresh `cmdc --list-models` evidence
+   — see "Exact Model ID Verification Gap — RESOLVED (V3-GOV-B01)" and "Model Binding Contract
+   (V3 Roster)" above. Actual invocation of these three roles is now unblocked on this ground;
+   the fail-closed rule in "Model Binding Contract" still governs runtime identity confirmation.
 2. RESOLVED by GOV-MM-005 (see above): V3's Main Developer REPLACES the Fixed IMP Ownership
    Matrix's domain-owner assignment for IMP-008 forward (excluding the Mission-Critical Claude
    Stages and IMP-030 carve-outs), rather than running underneath it.
 3. STILL OPEN — Independent Codex audit of the full Amendment V3 program (not yet performed;
    GOV-MM-005 activated the pipeline via direct Human Decision without this step, mirroring
-   GOV-MM-004's precedent — see "GOV-MM-005" above).
+   GOV-MM-004's precedent — see "GOV-MM-005" above). A Codex re-audit of this remediation pass
+   itself (V3-GOV-B01/M01/M02/m01) is separately required before Final Lock — see "Approval"
+   below.
 4. STILL OPEN — Separate Final Human Lock Approval declaring the full Amendment V3 program
    `FINAL / LOCKED` (not yet given; distinct from GOV-MM-005's narrower activation — see
    "Approval" below).
@@ -1370,9 +1561,30 @@ GOV-MM-005 Authorization (V3 Pipeline Activation, IMP-008 Forward):
                      authorization; no application source touched)
   Push by this authorization: NOT AUTHORIZED (see "Authorization Scope" above)
 
-Independent Codex Audit (Amendment V3, full program):
-  Status:            PENDING (not required for, and not satisfied by, GOV-MM-005's narrower
-                     activation above)
+Independent Codex Audit (Amendment V3, full program, Pass 1):
+  Status:            FAIL — NOT ELIGIBLE FOR HUMAN FINAL LOCK (not required for, and not
+                     satisfied by, GOV-MM-005's narrower activation above)
+  Reviewer:          Codex
+  Findings:          BLOCKER: 1 (V3-GOV-B01); MAJOR: 2 (V3-GOV-M01, V3-GOV-M02); MINOR: 1
+                     (V3-GOV-m01); GATE-IMPACT: 3
+  Evidence/Reference: Findings as relayed in this session's remediation request; this document
+                     records the findings and their remediation exactly as received, without
+                     independently re-deriving or embellishing the audit itself.
+
+Codex Findings Remediation (Pass 1):
+  Authority:         Claude Code (governance-drafting patch), per this session's explicit
+                     instruction to remediate under PATCH — DO NOT REWRITE
+  Result:            V3-GOV-B01 CLOSED, V3-GOV-M01 CLOSED, V3-GOV-M02 CLOSED (via companion
+                     patches to AI-WORKFLOW.md, IMPLEMENTATION-GOVERNANCE.md, and
+                     IMPLEMENTATION-SPEC-TEMPLATE.md), V3-GOV-m01 CLOSED — see "Codex Findings
+                     Remediation (Pass 1)" under "Amendment V3" above for the full mapping
+  Scope:             Governance documentation only. Does NOT authorize IMP-008 readiness/
+                     implementation, application source changes, database changes, or git push.
+                     Does NOT itself constitute Independent Codex Audit Pass 2 (re-audit) or Final
+                     Human Lock Approval — both remain separate, still-PENDING controls below.
+
+Independent Codex Audit (Amendment V3, full program, Pass 2 — re-audit of this remediation):
+  Status:            PENDING — REQUIRED before Final Lock eligibility
   Reviewer:
   Findings:
   Evidence/Reference:
