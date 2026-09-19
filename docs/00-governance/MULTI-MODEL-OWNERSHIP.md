@@ -6,18 +6,22 @@
 Base Amendment (V1):   FINAL / LOCKED
 Amendment V2:          PROPOSED — AWAITING INDEPENDENT CODEX AUDIT
 Amendment V3 (full
-  prospective program): PROPOSED — Codex Final Governance Audit Pass 1 found BLOCKER 1 / MAJOR 2 /
-                          MINOR 1, remediated (V3-GOV-B01/M01/M02/m01 CLOSED). Codex Pass 2
-                          re-audit found BLOCKER 0 / MAJOR 3 / MINOR 0 (V3-REAUDIT-M01, V3-GOV-M01
-                          residual, V3-GOV-M02 residual), remediated in turn — see "Amendment V3"
-                          -> "Codex Findings Remediation (Pass 1)" and "(Pass 2)" below.
-                          V3-GOV-B01 and V3-GOV-m01 remain CLOSED and were not reopened. AWAITING
-                          CODEX RE-AUDIT (Pass 3) of this pass before Final Lock eligibility.
+  prospective program): FINAL / LOCKED — Human Final Lock Approval received (see "Approval"
+                          below). Codex Final Re-Audit (Pass 3) result: PASS — V3-GOV-B01,
+                          V3-GOV-M01, V3-GOV-M02, V3-GOV-m01, and V3-REAUDIT-M01 all CLOSED;
+                          BLOCKER 0 / MAJOR 0 / MINOR 0 / EDITORIAL 0 / GATE-IMPACT 0. Audited
+                          baseline: commit ba44336. Effective IMP-008 forward, subject to the
+                          documented Mission-Critical Claude Stages and IMP-030 exceptions (see
+                          "Amendment V3" -> "Precedence Over the Legacy Matrix" below). This lock
+                          does not itself authorize IMP-008 readiness, specification, or
+                          implementation work — that remains a separate, future Human
+                          authorization at IMP-008's own gate (see "Authorization Scope" below).
 GOV-MM-005 (V3 Pipeline
   Activation, Human
-  Decision):             APPROVED / ACTIVE — effective IMP-008 forward (see "GOV-MM-005" under
-                          "Amendment V3" below). Model-ID-verification precondition (V3-GOV-B01)
-                          is now RESOLVED — see "Model Binding Contract (V3 Roster)" below.
+  Decision):             APPROVED / ACTIVE — effective IMP-008 forward; superseded in effect by
+                          the full Amendment V3 lock above, which now covers the same pipeline
+                          under Final Lock rather than the narrower direct-Human-Decision
+                          activation this record originally used.
 ```
 
 The base amendment (V1 — Primary Implementation Owner as a per-IMP role, the original Kimi/Qwen/
@@ -604,15 +608,17 @@ continued under a different model.
 
 ## Amendment V3 — Pipeline Write-Ownership Model
 
-**Status: full amendment `PROPOSED`; pipeline structure and role assignment `APPROVED / ACTIVE`
-effective IMP-008 forward under GOV-MM-005 (Human Decision — see "GOV-MM-005" below).** Materialized
-under explicit Human authorization, received at the start of a governance-only session, to
-establish a token-efficient multi-agent pipeline "starting from IMP-008" and to draft the
-corresponding governance patch; subsequently activated, for its role/precedence structure only, by
-a direct Human Decision that does not itself constitute the Codex-audited amendment lock V1 used —
-see "GOV-MM-005" and "Exact Model ID Verification Gap" below for exactly what is and is not settled
-by that activation. See "Approval" below for the exact authorization-scope record of both the
-drafting and the activation.
+**Status: `FINAL / LOCKED`** — Human Final Lock Approval received following a passing Codex Final
+Re-Audit (Pass 3: BLOCKER 0 / MAJOR 0 / MINOR 0 / EDITORIAL 0 / GATE-IMPACT 0, all five findings
+across Pass 1 and Pass 2 CLOSED); see "Approval" below for the verbatim record. Materialized under
+explicit Human authorization, received at the start of a governance-only session, to establish a
+token-efficient multi-agent pipeline "starting from IMP-008"; first activated for its
+role/precedence structure by a direct Human Decision (GOV-MM-005) ahead of the full amendment
+lock, then remediated across two Codex findings passes (see "Codex Findings Remediation (Pass 1)"
+and "(Pass 2)" below), and now locked in full by the same Codex-audit-then-Human-Final-Lock
+sequence V1 used. Locking the amendment does not, by itself, authorize IMP-008 readiness,
+specification, or implementation work — that remains a separate, future Human authorization at
+IMP-008's own gate (see "Authorization Scope" below, unchanged by this lock).
 
 Unlike V2 (which reassigns which model owns which *domain*), V3 proposes restructuring *how a
 single IMP's implementation is divided across models* into a fixed pipeline, with a roster now
@@ -1105,18 +1111,50 @@ This pass does not redesign V3, does not start IMP-008, and does not touch appli
 database, or IMP-000..007 evidence. A further Codex re-audit (Pass 3) of this pass is still
 required before Amendment V3 (full program) is eligible for Final Human Lock.
 
+### Codex Findings Remediation (Pass 3 — Final Re-Audit) and Human Final Lock
+
+Codex's Pass 3 re-audit of the Pass 2 remediation result: `BLOCKER 0 / MAJOR 0 / MINOR 0 /
+EDITORIAL 0 / GATE-IMPACT 0` — `ELIGIBLE FOR HUMAN FINAL LOCK`. Every finding raised across both
+prior passes is confirmed CLOSED at this baseline (commit `ba44336`):
+
+```
+V3-GOV-B01        CLOSED  (Pass 1 — model identity, VERIFIED)
+V3-GOV-M01        CLOSED  (Pass 1 — Human Spec Approval discrete gate)
+V3-GOV-M02        CLOSED  (Pass 1 — operational surfaces synchronized)
+V3-GOV-m01        CLOSED  (Pass 1 — DeepSeek/Codex boundary)
+V3-REAUDIT-M01    CLOSED  (Pass 2 — Claude Lead Architect identity contract)
+```
+
+Following this PASS result, Human Final Lock Approval was given:
+
+> **Human, verbatim:**
+>
+> "Saya setuju. MULTI-AGENT WORKFLOW V3 — HUMAN FINAL LOCK APPROVED."
+
+**Amendment V3 (full prospective program) is `FINAL / LOCKED`** as of this record, per the same
+Codex-audit-then-Human-Final-Lock sequence "IMP-004 Boundary" documents V1 having used. This
+finalization step is governance materialization only — it does not itself change pipeline
+semantics, model bindings, or finding definitions (see "Preserve Final Pipeline" discipline
+implicit throughout this document; nothing in this subsection alters any prior CLOSED finding's
+substance), and it does not authorize IMP-008 readiness, specification, or implementation work,
+which remains gated on its own separate future Human authorization (see "Authorization Scope"
+below).
+
 ### Authorization Scope
 
-Governance drafting (original patch), GOV-MM-005 activation (pipeline structure and role
-assignment, IMP-008 forward), and this Codex-findings remediation pass (V3-GOV-B01/M01/M02/m01)
-together still do NOT authorize: IMP-008 readiness/specification work, IMP-008 implementation
-work, application source changes, database changes, or git push. The model-identity precondition
-on invoking Qwen 3.7 Flash / Muse Spark 1.3 Contributor / DeepSeek V4.1 Flash for governed work is
-now resolved (see "Model Binding Contract (V3 Roster)"), but that resolves only V3-GOV-B01 — it
-does not by itself authorize IMP-008 work, which remains gated on its own separate Human
-authorization exactly as before. Neither reopens or reinterprets Amendment V2's own
-still-`PROPOSED` state or its IMP-004 hold conditions. IMP-000
-through IMP-007 remain historical, `FINAL / LOCKED`, and unmodified.
+Governance drafting (original patch), GOV-MM-005 activation, the Pass 1/Pass 2 remediation passes,
+and the Pass 3 Final Lock materialization above together still do NOT authorize: IMP-008
+readiness/specification work, IMP-008 implementation work, application source changes, or database
+changes. The model-identity precondition on invoking Qwen 3.7 Flash / Muse Spark 1.3 Contributor /
+DeepSeek V4.1 Flash for governed work is resolved (see "Model Binding Contract (V3 Roster)"), and
+Amendment V3 itself is now `FINAL / LOCKED` — but locking the *governance framework* is not the
+same control as authorizing a *specific future IMP's* work under it; IMP-008 remains gated on its
+own separate Human authorization exactly as before, and remains NOT STARTED as of this
+finalization. Neither reopens or reinterprets Amendment V2's own still-`PROPOSED` state or its
+IMP-004 hold conditions. IMP-000 through IMP-007 remain historical, `FINAL / LOCKED`, and
+unmodified. Git push of this finalization commit itself is a separate, explicit Human instruction
+recorded in "Approval" below — this paragraph governs what the governance *content* authorizes,
+not the push mechanics.
 
 ### Open Items
 
@@ -1127,17 +1165,17 @@ through IMP-007 remain historical, `FINAL / LOCKED`, and unmodified.
    — see "Exact Model ID Verification Gap — RESOLVED (V3-GOV-B01)" and "Model Binding Contract
    (V3 Roster)" above. Actual invocation of these three roles is now unblocked on this ground;
    the fail-closed rule in "Model Binding Contract" still governs runtime identity confirmation.
-2. RESOLVED by GOV-MM-005 (see above): V3's Main Developer REPLACES the Fixed IMP Ownership
-   Matrix's domain-owner assignment for IMP-008 forward (excluding the Mission-Critical Claude
-   Stages and IMP-030 carve-outs), rather than running underneath it.
-3. STILL OPEN — Independent Codex audit of the full Amendment V3 program (not yet performed;
-   GOV-MM-005 activated the pipeline via direct Human Decision without this step, mirroring
-   GOV-MM-004's precedent — see "GOV-MM-005" above). A Codex re-audit of this remediation pass
-   itself (V3-GOV-B01/M01/M02/m01) is separately required before Final Lock — see "Approval"
-   below.
-4. STILL OPEN — Separate Final Human Lock Approval declaring the full Amendment V3 program
-   `FINAL / LOCKED` (not yet given; distinct from GOV-MM-005's narrower activation — see
-   "Approval" below).
+2. RESOLVED by GOV-MM-005 (see above): V3's Implementation Write Owner role REPLACES the Fixed IMP
+   Ownership Matrix's domain-owner assignment for IMP-008 forward (Muse Spark 1.3 Contributor by
+   default; Claude Code for the Mission-Critical Claude Stages specifically — both roles still
+   inside V3's full pipeline, per HD-V3-R2-03), rather than running underneath it.
+3. RESOLVED — Independent Codex audit of the full Amendment V3 program. Pass 1 found BLOCKER 1 /
+   MAJOR 2 / MINOR 1 (remediated); Pass 2 re-audit found BLOCKER 0 / MAJOR 3 / MINOR 0
+   (V3-REAUDIT-M01, V3-GOV-M01 residual, V3-GOV-M02 residual — remediated); Pass 3 re-audit
+   result: PASS, BLOCKER 0 / MAJOR 0 / MINOR 0 / EDITORIAL 0 / GATE-IMPACT 0, all findings CLOSED
+   — see "Approval" below.
+4. RESOLVED — Final Human Lock Approval declaring the full Amendment V3 program `FINAL / LOCKED`
+   given following the Pass 3 PASS result — see "Approval" below for the verbatim statement.
 ```
 
 ## Non-Concurrent Ownership Rule
@@ -1727,17 +1765,34 @@ Codex Findings Remediation (Pass 2):
                      Human Lock Approval — both remain separate, still-PENDING controls below.
 
 Independent Codex Audit (Amendment V3, full program, Pass 3 — re-audit of Pass 2 remediation):
-  Status:            PENDING — REQUIRED before Final Lock eligibility
-  Reviewer:
-  Findings:
-  Evidence/Reference:
+  Status:            PASS — ELIGIBLE FOR HUMAN FINAL LOCK
+  Reviewer:          Codex
+  Findings:          V3-GOV-B01 CLOSED; V3-GOV-M01 CLOSED; V3-GOV-M02 CLOSED; V3-GOV-m01 CLOSED;
+                     V3-REAUDIT-M01 CLOSED. BLOCKER: 0; MAJOR: 0; MINOR: 0; EDITORIAL: 0;
+                     GATE-IMPACT: 0.
+  Audited Baseline:  commit ba44336
+  Evidence/Reference: Findings as relayed in this session's finalization request; recorded exactly
+                     as received, without independently re-deriving or embellishing the audit
+                     itself — see "Codex Findings Remediation (Pass 3 — Final Re-Audit) and Human
+                     Final Lock" under "Amendment V3" above.
 
 Final Human Lock Approval (Amendment V3, full program):
-  Status:            PENDING (distinct from GOV-MM-005's activation above, which is already
-                     APPROVED / ACTIVE for its own narrower scope)
-  Human Approver:
-  Approval Date:
-  Approval Evidence:
+  Status:            APPROVED
+  Human Approver:    Human
+  Statement:         "Saya setuju. MULTI-AGENT WORKFLOW V3 — HUMAN FINAL LOCK APPROVED."
+  Scope:             Locks Amendment V3 (full prospective program) as `FINAL / LOCKED`, following
+                     the Pass 3 Codex PASS result immediately above. Effective IMP-008 forward,
+                     subject to the documented Mission-Critical Claude Stages and IMP-030
+                     exceptions (unchanged by this lock — see "Precedence Over the Legacy
+                     Matrix"). Does NOT authorize IMP-008 readiness, specification, or
+                     implementation work, application source changes, or database changes — each
+                     remains gated on its own separate future Human authorization (see
+                     "Authorization Scope" above). Does NOT reopen, redesign, or change the
+                     semantics of any already-CLOSED finding, model binding, or pipeline step
+                     recorded in Pass 1/Pass 2 above. Separately authorizes pushing this
+                     finalization commit to origin/master, per this session's explicit push
+                     instruction (distinct from the governance-content authorization above, per
+                     this document's established practice of treating push as its own control).
 
 Claude Model Binding for IMP-004 (GOV-MM-004, distinct control from owner designation above):
   Status:            BOUND
