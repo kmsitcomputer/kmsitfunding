@@ -267,7 +267,9 @@ Any later IMP:                    Chart-of-Accounts / accounting treatment mappi
                                    truth"). Partner settlement/distribution. Receipt/compliance
                                    document generation. Flutter/mobile client implementation.
                                    Stored/tokenized payment methods ("card on file") for recurring
-                                   auto-charge — see OHD-IMP009-10.
+                                   auto-charge — HD-IMP009-10, `FINAL / LOCKED`, explicitly
+                                   excludes this from IMP-009; a future auto-charge capability
+                                   requires its own separate, governed specification.
 ```
 
 ## Affected Domains
@@ -317,15 +319,50 @@ A sensitive file is never reachable through a permanent public URL (SECURITY-INV
 
 ## Human Decisions
 
-Ten genuine business/architecture ambiguities were identified that no authoritative document
-resolves (Master Requirements, locked architecture, IMP-003/004/007/008, RBAC/security docs, and
-the Human Decision Register were all checked — see "Authority"). Each is raised in full under
-"Open Human Decisions" below (OHD-IMP009-01 through OHD-IMP009-10) with a recommended default that
-this specification does NOT itself adopt as binding. No business rule in this document depends on
-an unresolved OHD being decided a particular way — where an OHD exists, the surrounding
-architecture is deliberately built to accommodate either resolution without redesign (e.g. the
-`payments` schema does not assume single-vs-multi concurrent attempts at the column level; the
-enforcement lives in a service-layer rule keyed to OHD-IMP009-01's eventual answer).
+Twelve Human Decisions govern this specification — the original ten genuine business/architecture
+ambiguities this document raised as OHD-IMP009-01 through OHD-IMP009-10 (none invented, none
+resolved by any authoritative document at initial-draft time — see "Authority"), plus two further
+decisions (HD-IMP009-11, HD-IMP009-12) the Human issued to resolve this document's own
+"Architectural Escalation" and "New ADR Required" findings. All twelve are now `FINAL / LOCKED`.
+Full text, materialization pointers, and rationale for each are recorded under "Human Decisions
+(Resolved)" below. One-line index:
+
+```
+HD-IMP009-01  Maximum ONE ACTIVE Payment Attempt per Donation, enforced at DB/domain level.
+HD-IMP009-02  A late provider outcome is never discarded; Payment records the verified fact
+              regardless; the Donation-transition request is honored only if IMP-008's own state
+              machine permits it, otherwise flagged for controlled exception/manual review.
+HD-IMP009-03  No hard-coded lifetime maximum Payment Attempts per Donation; HD-IMP009-01's
+              one-ACTIVE-at-a-time invariant still applies; abuse/rate controls may be
+              configurable.
+HD-IMP009-04  No guest self-service resume/retry mechanism keyed on any identifier/email; no new
+              guest bearer-token recovery path; an abandoned attempt is recovered only by natural
+              expiry (HD-IMP009-09) or an authorized support-controlled process.
+HD-IMP009-05  Xendit adapter baseline targets the PaymentRequest API (not the Invoice API),
+              isolated behind the provider adapter; exact endpoint/version verified against
+              Xendit's own documentation before implementation.
+HD-IMP009-06  Proof-of-transfer evidence is MANDATORY for a Manual Transfer Payment to be
+              manually approved.
+HD-IMP009-07  Manual Transfer amount mismatch (over/under-payment) never auto-produces SUCCEEDED
+              Donation treatment; Payment amount stays immutable; mismatch enters a controlled
+              exception/manual-review path; no refund/credit/balance/allocation/amount-mutation
+              is invented in IMP-009.
+HD-IMP009-08  Manual Transfer evidence MAY be resubmitted while the Payment remains in an
+              evidence-eligible state; each submission is immutable/auditable; terminal/
+              ineligible states reject resubmission.
+HD-IMP009-09  Payment expiry fallback is configurable, no hard-coded business duration; provider-
+              supplied expiry is preserved/normalized when present.
+HD-IMP009-10  Recurring Donation v1 is MANUAL-PER-CYCLE; no stored/reusable payment credentials,
+              mandates, or off-session/automatic charging in IMP-009.
+HD-IMP009-11  Payment success/failure requests a Donation transition ONLY through IMP-008's
+              existing canonical transition surface, via the applicable registered System
+              Principal; Payment never bypasses or directly mutates Donation state; this does not
+              authorize Ledger posting (IMP-010/IMP-011 boundaries intact).
+HD-IMP009-12  A new, narrowly-scoped ADR (ADR-003) — not a generic ADR-002 broadening — governs
+              AuditActorKind::Unauthenticated for exactly two IMP-009 guest events.
+```
+
+No business rule in this document depends on an unresolved decision — all twelve are now binding.
 
 ## Domain Model
 
@@ -348,9 +385,11 @@ Identity:                  BIGINT PK (internal) + ulid CHAR(26) unique (public-s
 
 Donation relationship:     donation_id (FK donations.id, RESTRICT, NOT NULL). Every Payment
                             targets exactly one Donation. A Donation may have MANY Payments over
-                            time (MASTER-REQUIREMENTS.md §9: "Payment may have multiple
-                            intents/attempts") — see "Concurrency" for how many may be
-                            simultaneously ACTIVE (OHD-IMP009-01).
+                            its lifetime (MASTER-REQUIREMENTS.md §9: "Payment may have multiple
+                            intents/attempts"), but at most ONE may be ACTIVE (PENDING or
+                            REQUIRES_ACTION) at any moment — `FINAL / LOCKED`, HD-IMP009-01 — see
+                            "Concurrency" and "Database Impact" for the DB-level enforcement
+                            mechanism.
 
 Provider relationship:     provider (VARCHAR 32, NOT NULL) — one of 'manual_transfer' | 'tripay'
                             | 'xendit' | 'stripe', validated against a closed, registry-driven
@@ -437,6 +476,25 @@ Immutable vs mutable:       donation_id, provider, amount_minor, currency, idemp
                              instructions_payload, status (+ companion *_at), verified_by_
                              principal_id, cancelled_by_principal_id, failure_reason, expires_at
                              transition/populate over the Payment's lifecycle per "State Machines".
+
+One-ACTIVE-attempt
+  enforcement (HD-IMP009-01,
+  `FINAL / LOCKED`):          active_slot (TINYINT, NULLABLE, GENERATED — see "Database Impact"
+                             for the exact generated-column expression) — a DB-level mechanism,
+                             not merely a service-layer rule, since HD-IMP009-01 explicitly
+                             requires enforcement "at DB/domain level." MySQL 8 has no native
+                             partial-unique-index syntax (unlike PostgreSQL), so the same effect is
+                             achieved via a generated column that evaluates to a constant (`1`)
+                             while `status IN ('PENDING','REQUIRES_ACTION')` and to `NULL`
+                             otherwise, paired with `UNIQUE(donation_id, active_slot)` — MySQL's
+                             standard NULL-distinct unique-index semantics mean any number of
+                             terminal (NULL-`active_slot`) rows may coexist per `donation_id`, but
+                             at most one row with `active_slot = 1` (i.e. one ACTIVE attempt) may
+                             exist per `donation_id` at a time. This is the SAME NULL-distinct
+                             technique IMP-004 already relies on for its own
+                             `source_domain`/`source_event_id`/`event_type` composite uniqueness
+                             (see "Authority"), applied here to a single-column generated-value
+                             case instead of a composite key.
 ```
 
 ### `payment_provider_events` (Provider Event, per MODULE-OWNERSHIP.md §8)
@@ -457,7 +515,7 @@ Provider identity:          provider (VARCHAR 32, NOT NULL), provider_event_id (
                             provider supplies one (Xendit and Stripe both do; Tripay's callback
                             has no independent event ID beyond the transaction reference itself —
                             adapter-specific, see per-provider sections).
-Processing outcome:         signature_valid (BOOLEAN, NOT NULL), processing_result (VARCHAR 24,
+Processing outcome:         signature_valid (BOOLEAN, NOT NULL), processing_result (VARCHAR 32,
                             NOT NULL) — one of: ACCEPTED, REJECTED_INVALID_SIGNATURE,
                             REJECTED_UNKNOWN_REFERENCE, REJECTED_AMOUNT_MISMATCH,
                             REJECTED_CURRENCY_MISMATCH, REJECTED_MALFORMED, DUPLICATE.
@@ -499,16 +557,27 @@ Donor-declared evidence:     declared_amount_minor (BIGINT UNSIGNED, NULLABLE), 
                             never assumed equal to payments.amount_minor/currency (see
                             "Manual Bank Transfer" for the reconciliation-at-review contract).
 Review outcome:              reviewed_by_principal_id (FK principals.id, RESTRICT, NULLABLE),
-                            reviewed_at (DATETIME, NULLABLE), review_outcome (VARCHAR 16,
-                            NULLABLE) — APPROVED | REJECTED, review_notes (VARCHAR 1000,
-                            NULLABLE).
+                            reviewed_at (DATETIME, NULLABLE), review_outcome (VARCHAR 24,
+                            NULLABLE) — APPROVED | REJECTED | AMOUNT_MISMATCH_HOLD (the third
+                            value is `FINAL / LOCKED` per HD-IMP009-07: a declared/observed
+                            transferred amount that does not exactly equal `payments.amount_minor`
+                            MUST NOT be resolved as an ordinary APPROVED outcome — it is routed to
+                            this distinct, escalated outcome, never silently approved or
+                            auto-corrected; see "Manual Transfer" — "Amount mismatch"),
+                            review_notes (VARCHAR 1000, NULLABLE).
 timestamps.
 
 Immutable vs mutable:       file_path, mime_type, size_bytes, declared_* fields are set at
-                            submission and never mutated (a resubmission creates a NEW row — see
-                            OHD-IMP009-08). reviewed_by_principal_id/reviewed_at/review_outcome/
-                            review_notes are set exactly once, at review time, and never mutated
-                            afterward (mirrors Donation's own single-transition-per-field rule).
+                            submission and never mutated. A resubmission is ALWAYS a NEW,
+                            additional row — `FINAL / LOCKED` per HD-IMP009-08: resubmission is
+                            permitted while the owning Payment remains in an evidence-eligible
+                            state (PENDING, no recorded review_outcome yet); a Payment already
+                            terminal or already carrying a recorded review_outcome rejects any
+                            further submission (see "Manual Transfer" — "Duplicate proof"). No
+                            historical `manual_transfer_evidence` row is ever overwritten.
+                            reviewed_by_principal_id/reviewed_at/review_outcome/review_notes are
+                            set exactly once per row, at review time, and never mutated afterward
+                            (mirrors Donation's own single-transition-per-field rule).
 
 Unique: ulid. Indexes: payment_id, reviewed_by_principal_id.
 ```
@@ -633,10 +702,12 @@ REQUIRES_ACTION -> CANCELLED          donor/guest abandons the attempt before an
 SUCCEEDED, FAILED,
 EXPIRED, CANCELLED -> (terminal)      no further transition, ever. A donor who wants to try again
                                        creates a NEW Payment row against the same (still-PENDING)
-                                       Donation (see "Idempotency" / "Concurrency" /
-                                       OHD-IMP009-01/03) — never resurrects a terminal Payment row,
+                                       Donation, now that this attempt's terminal state has freed
+                                       HD-IMP009-01's one-ACTIVE-attempt slot (see "Idempotency" /
+                                       "Concurrency") — never resurrects a terminal Payment row,
                                        mirroring IMP-008's own terminal-Donation-state immutability
-                                       (BR-7) applied here by the same principle.
+                                       (BR-7) applied here by the same principle. No lifetime
+                                       maximum attempt count applies (HD-IMP009-03).
 ```
 
 All other transitions (e.g. SUCCEEDED -> anything, EXPIRED -> SUCCEEDED, any transition FROM a
@@ -669,8 +740,24 @@ Manual Bank Transfer (no provider callback — internal-only, admin-driven):
                                                       beyond the original proof submission)
   APPROVED (admin decision)                       -> canonical SUCCEEDED
   REJECTED (admin decision)                       -> canonical FAILED
+  AMOUNT_MISMATCH_HOLD (admin decision,
+    HD-IMP009-07, `FINAL / LOCKED`)                -> canonical PENDING, UNCHANGED — this outcome
+                                                      is recorded at the `manual_transfer_evidence.
+                                                      review_outcome` layer only (see "Manual
+                                                      Transfer" — "Amount mismatch"); it does NOT
+                                                      transition `payments.status`, since neither a
+                                                      SUCCEEDED nor a FAILED canonical outcome is
+                                                      accurate for a genuine-but-mismatched
+                                                      transfer. The Payment remains PENDING,
+                                                      escalated for later governed resolution, and
+                                                      the owning Donation correspondingly remains
+                                                      untouched (no premature SUCCEEDED/FAILED
+                                                      transition is requested — see "Donation
+                                                      Integration").
   (window closed, no evidence ever submitted, or
-    submitted but never reviewed)                 -> canonical EXPIRED
+    submitted but never reviewed, or held at
+    AMOUNT_MISMATCH_HOLD past the Payment's own
+    expiry window)                                 -> canonical EXPIRED
 
 Tripay (reference: Tripay's own status vocabulary as commonly documented — UNPAID/PAID/EXPIRED/
   FAILED/REFUND; adapter MUST verify the exact current vocabulary against Tripay's own API
@@ -685,15 +772,26 @@ Tripay (reference: Tripay's own status vocabulary as commonly documented — UNP
                        (`payment_provider_events`) but MUST NOT transition `payments.status` in
                        response to it.
 
-Xendit (adapter shape depends on OHD-IMP009-05 — Invoice API vs PaymentRequest API; mapping below
-  assumes the Invoice API's documented status vocabulary as the illustrative default per the
-  recommended-default direction in OHD-IMP009-05, NOT a locked choice):
-  PENDING          -> canonical PENDING
-  PAID / SETTLED   -> canonical SUCCEEDED
-  EXPIRED          -> canonical EXPIRED
-  (Invoice API has no explicit "FAILED" for a card decline within the hosted page — a declined
-    card retry stays PENDING until the invoice itself expires; the adapter MUST NOT invent a
-    FAILED mapping the provider does not actually emit)
+Xendit (adapter baseline is the PaymentRequest API — `FINAL / LOCKED`, HD-IMP009-05, NOT the
+  Invoice API; the mapping below reflects the PaymentRequest API's own documented `status`
+  vocabulary as commonly published at drafting time — the adapter MUST re-verify the exact current
+  field/value set against Xendit's own authoritative documentation before implementation,
+  per HD-IMP009-05's own explicit instruction, since Xendit may revise this vocabulary):
+  PENDING                                          -> canonical PENDING (PaymentRequest created,
+                                                       awaiting completion)
+  REQUIRES_ACTION                                  -> canonical REQUIRES_ACTION (e.g. a channel
+                                                       requiring redirect/OTP/3-D-Secure-equivalent
+                                                       completion)
+  SUCCEEDED                                        -> canonical SUCCEEDED
+  FAILED                                           -> canonical FAILED
+  EXPIRED                                          -> canonical EXPIRED
+  CANCELED                                         -> canonical CANCELLED
+  (the PaymentRequest API's status vocabulary maps far more directly onto this specification's own
+    canonical state names than the older Invoice API's did — this is a consequence of HD-IMP009-05's
+    choice, not a coincidence this specification relies on; the adapter still MUST implement this
+    as an explicit, reviewable allow-list, never a bare pass-through of the provider's own string,
+    since Xendit's exact value set remains subject to "External Verification" at implementation
+    time)
 
 Stripe (PaymentIntent status vocabulary):
   requires_payment_method,
@@ -702,9 +800,10 @@ Stripe (PaymentIntent status vocabulary):
   requires_action                                  -> canonical REQUIRES_ACTION (3-D Secure/OTP)
   succeeded                                        -> canonical SUCCEEDED
   canceled                                         -> canonical CANCELLED
-  (Stripe PaymentIntents have no native "expired" status equivalent to Tripay/Xendit's invoice
-    expiry — EXPIRED is reached exclusively through IMP-009's OWN internal expiry sweep, see
-    "Expiration" / OHD-IMP009-09, never inferred from a Stripe-reported status)
+  (Stripe PaymentIntents have no native "expired" status equivalent to Tripay/Xendit's own expiry
+    field — EXPIRED is reached exclusively through IMP-009's OWN internal expiry sweep, per
+    HD-IMP009-09's confirmed configurable-fallback mechanism, see "Expiration", never inferred
+    from a Stripe-reported status)
 ```
 
 ## Provider Adapter Architecture
@@ -805,13 +904,14 @@ Unique payment/reference
                               Moota, not a mechanism this spec invents for a manual, human-verified
                               flow.
 
-Proof-of-transfer upload:     See OHD-IMP009-06 (mandatory vs optional) — NOT decided by this
-                              specification. The schema (`manual_transfer_evidence`) supports
-                              EITHER outcome without redesign: if mandatory, the Payment-creation
-                              flow simply requires at least one `manual_transfer_evidence` row
-                              before the Payment can move out of PENDING toward admin review; if
-                              optional, an admin may approve directly against bank-statement
-                              matching alone.
+Proof-of-transfer upload:     MANDATORY — `FINAL / LOCKED`, HD-IMP009-06. A Payment cannot be
+                              manually APPROVED through the verification flow without at least one
+                              `manual_transfer_evidence` row present. The Payment-creation-to-
+                              verification flow requires at least one such row to exist before an
+                              admin's APPROVE action is even offered; an admin holding
+                              `payment.manual_transfer.verify` may still REJECT with zero evidence
+                              present (e.g. an abandoned Payment with no evidence ever submitted,
+                              swept toward FAILED/EXPIRED per "Expiration" rather than reviewed).
 
 Manual verification /
   approval authority:         An authorized admin/staff actor holding `payment.manual_transfer.verify`
@@ -819,37 +919,60 @@ Manual verification /
                               Type (the closest fit in the CLOSED Authority Type taxonomy —
                               BUSINESS-AUTHORITY-MODEL.md; no new `payment_verifier`/
                               `payment_approver` Authority Type is invented — see "Authorization").
-                              Reviews `manual_transfer_evidence` (if present) plus out-of-band bank
-                              statement information, then records review_outcome = APPROVED or
-                              REJECTED (see "Domain Model").
+                              Reviews the required `manual_transfer_evidence` row(s) (HD-IMP009-06)
+                              plus out-of-band bank statement information, then records
+                              review_outcome = APPROVED, REJECTED, or AMOUNT_MISMATCH_HOLD (see
+                              "Amount mismatch" below, HD-IMP009-07).
 
 Rejection:                    Payment -> FAILED, failure_reason = 'MANUAL_REJECTED',
                               review_notes captured. Donor/guest is not automatically offered a
                               retry path beyond creating a new Payment Attempt against the still-
-                              PENDING Donation (subject to OHD-IMP009-01/03).
+                              PENDING Donation, once this attempt's FAILED terminal state has freed
+                              the HD-IMP009-01 one-ACTIVE-attempt slot; no lifetime attempt limit
+                              applies (HD-IMP009-03).
 
-Expiration:                   See "Expiration" / OHD-IMP009-09 — Manual Transfer has no provider-
-                              supplied expiry; the internal fallback config value is REQUIRED for
+Expiration:                   See "Expiration" — Manual Transfer has no provider-supplied expiry;
+                              per HD-IMP009-09, the internal fallback config value is REQUIRED for
                               this provider specifically (there is no other signal that would ever
-                              move an unreviewed Manual Transfer Payment to EXPIRED).
+                              move an unreviewed Manual Transfer Payment to EXPIRED) — while that
+                              configuration is unset, an unreviewed Manual Transfer Payment remains
+                              PENDING indefinitely, exactly mirroring HD-IMP008-04's own posture.
 
-Duplicate proof:              See OHD-IMP009-08 — NOT decided by this specification (resubmission-
-                              allowed vs one-shot-immutable-evidence). The schema supports either:
-                              `manual_transfer_evidence` is an append-only table (a resubmission is
-                              always a NEW row, never an UPDATE of a prior row's file_path/
-                              declared_* fields — those are immutable per "Domain Model" already);
-                              OHD-IMP009-08 only decides whether the SERVICE LAYER permits creating
-                              a second row against the same Payment at all.
+Duplicate proof:              Resubmission IS PERMITTED — `FINAL / LOCKED`, HD-IMP009-08 — while
+                              the owning Payment remains in an evidence-eligible state (PENDING,
+                              no recorded review_outcome yet). `manual_transfer_evidence` is an
+                              append-only table: a resubmission is always a NEW row, NEVER an
+                              UPDATE of a prior row's file_path/declared_*/reviewed_* fields (all
+                              immutable per "Domain Model"). Once the Payment reaches a terminal
+                              status, OR already carries a recorded review_outcome
+                              (APPROVED/REJECTED/AMOUNT_MISMATCH_HOLD), further evidence submission
+                              is rejected — there is no "reopen review" path for a Payment already
+                              decided.
 
 Amount mismatch (over/under-
-  payment):                   See OHD-IMP009-07 — NOT decided by this specification. Whatever the
-                              resolution, the mechanism MUST NOT mutate `payments.amount_minor`
-                              or `donations.amount_minor` (both immutable per their own domain
-                              models) — a mismatch is recorded via
+  payment):                   `FINAL / LOCKED`, HD-IMP009-07. When a reviewing admin observes that
+                              the donor-declared or bank-statement-confirmed transferred amount
+                              does NOT exactly equal `payments.amount_minor`, the admin records
+                              review_outcome = AMOUNT_MISMATCH_HOLD — a THIRD, distinct outcome
+                              from ordinary APPROVED/REJECTED. This outcome does NOT drive the
+                              Payment to SUCCEEDED (no automatic PAID/successful Donation
+                              treatment for a mismatched amount) and does NOT drive it to FAILED
+                              either (a genuine transfer clearly occurred, just not for the exact
+                              expected amount — treating it as an ordinary rejection would be
+                              inaccurate). The Payment instead remains in a held, escalated state
+                              pending a LATER, governed resolution this specification does not
+                              itself define — no refund, credit, balance, allocation, or
+                              donation-amount mutation is invented here (HD-IMP009-07 explicitly
+                              forbids it); resolving an AMOUNT_MISMATCH_HOLD case is out of
+                              IMP-009's own scope, deferred to whichever later governed domain
+                              (e.g. a future Refund/Reconciliation-adjacent mechanism) is
+                              authorized to handle it. `payments.amount_minor` and
+                              `donations.amount_minor` are NEVER mutated to match the actual
+                              transferred amount — both remain immutable exactly as their own
+                              domain models require. The mismatch itself is recorded via
                               `manual_transfer_evidence.declared_amount_minor` (the donor's claim)
-                              versus `payments.amount_minor` (the authoritative expected amount),
-                              and resolved exclusively through the APPROVED/REJECTED review
-                              decision, never a silent amount correction.
+                              versus `payments.amount_minor` (the authoritative expected amount)
+                              for the later governed resolution to consult.
 
 Security of uploaded
   evidence:                    See "File Security".
@@ -939,31 +1062,43 @@ Credential configuration:     Xendit secret API key in `payment_provider_credent
                               "Configuration".
 
 Provider transaction
-  identifier:                  Xendit's invoice/payment-request `id` -> `payments.provider_reference`.
+  identifier:                  Xendit's PaymentRequest `id` -> `payments.provider_reference`
+                              (`FINAL / LOCKED` adapter baseline, HD-IMP009-05 — not an Invoice
+                              `id`).
 
-Payment creation:              `createTransaction()` calls Xendit's create-transaction endpoint
-                              (exact endpoint shape depends on OHD-IMP009-05).
+Payment creation:              `createTransaction()` calls Xendit's PaymentRequest creation
+                              endpoint. The exact request/response field shape MUST be verified
+                              against Xendit's own current authoritative documentation before
+                              implementation (HD-IMP009-05, "External Verification") — this
+                              specification does not freeze a field-level contract that belongs to
+                              Xendit's own API surface.
 
 Callback/webhook
-  verification:                 Xendit signs callbacks via an `x-callback-token` header compared
-                              against a configured callback verification token (a second secret,
-                              distinct from the API key, stored alongside it in
+  verification:                 Xendit signs webhooks via an `x-callback-token` header (or its
+                              PaymentRequest-API-current equivalent — verified at implementation
+                              time) compared against a configured callback verification token (a
+                              second secret, distinct from the API key, stored alongside it in
                               `payment_provider_credentials` or a dedicated column — implementation
                               detail, but MUST be a secret, never a request-supplied value trusted
                               at face value). Constant-time comparison, same requirement as Tripay.
 
-Status mapping:                See "State Machines" per-provider mapping (illustrative, pending
-                              OHD-IMP009-05).
+Status mapping:                See "State Machines" per-provider mapping — the PaymentRequest
+                              API's own `status` vocabulary (PENDING/REQUIRES_ACTION/SUCCEEDED/
+                              FAILED/EXPIRED/CANCELED), re-verified against Xendit's current
+                              documentation before implementation.
 
 Amount/currency
-  verification:                 same contract as Tripay: callback-reported amount/currency MUST
+  verification:                 same contract as Tripay: webhook-reported amount/currency MUST
                               equal `payments.amount_minor`/`currency` before any transition;
                               mismatch -> `REJECTED_AMOUNT_MISMATCH`/`REJECTED_CURRENCY_MISMATCH`.
 
-Expiration:                    Xendit invoices carry their own `expiry_date` ->
-                              `payments.expires_at` directly.
+Expiration:                    the PaymentRequest API's own expiry field (verified against current
+                              documentation at implementation time — the exact field name may
+                              differ from the Invoice API's `expiry_date`) -> `payments.expires_at`
+                              directly, per the same "provider-supplied expiry preserved/
+                              normalized when present" contract HD-IMP009-09 confirms.
 
-Duplicate webhook:              Xendit's callback carries its own `id` (the invoice/event id) —
+Duplicate webhook:              Xendit's webhook payload carries its own event/notification `id` —
                               used as `provider_event_id` for the `payment_provider_events`
                               composite-unique dedupe (see "Idempotency").
 
@@ -978,12 +1113,13 @@ Sensitive payload handling:      the callback token and API key are never logged
                               "Configuration" / "Security Requirements."
 ```
 
-**OHD-IMP009-05** governs which Xendit API generation (hosted Invoice API vs the newer
-per-channel Payment Methods/PaymentRequest API) this adapter targets — see "Open Human Decisions."
-This specification's architecture (provider-neutral canonical states, adapter-isolated
-provider-specific detail, `channel` as a free-form display field) accommodates either choice
-without redesign; only the adapter's internal `createTransaction()`/`normalizeStatus()`
-implementation differs.
+The Xendit adapter's baseline is the **PaymentRequest API** — `FINAL / LOCKED`, HD-IMP009-05 (not
+the hosted Invoice API this document's initial draft had recommended as a default). This
+specification's architecture (provider-neutral canonical states, adapter-isolated provider-
+specific detail, `channel` as a free-form display field) required no redesign to accommodate this
+choice — only the adapter's internal `createTransaction()`/`normalizeStatus()` implementation
+detail and the "State Machines" per-provider mapping table (updated above) differ from what an
+Invoice-API-targeted adapter would have looked like.
 
 ## Stripe
 
@@ -1028,8 +1164,9 @@ Out-of-order webhook:            Stripe explicitly documents that webhook delive
 
 Expiration/cancellation
   where applicable:               Stripe PaymentIntents do not natively "expire" the way
-                              Tripay/Xendit invoices do (see "State Machines" note) — EXPIRED is
-                              reached only via IMP-009's own internal sweep (OHD-IMP009-09). A
+                              Tripay/Xendit's own expiry fields do (see "State Machines" note) —
+                              EXPIRED is reached only via IMP-009's own internal fallback sweep,
+                              per HD-IMP009-09's confirmed configurable-fallback mechanism. A
                               Stripe-side `canceled` PaymentIntent status maps to canonical
                               CANCELLED, never EXPIRED.
 
@@ -1188,8 +1325,8 @@ Enforcement:       DB-level UNIQUE constraint as the deterministic backstop; the
 — used where the provider natively supports it (Stripe; verify at implementation time whether
 Tripay/Xendit offer an equivalent create-transaction dedupe key), as a SECOND, provider-native
 layer on top of this platform's own key, never a substitute for it (a provider without native
-support relies solely on this platform's own key + the single-active-attempt policy per
-OHD-IMP009-01).
+support relies solely on this platform's own key + HD-IMP009-01's one-ACTIVE-attempt-at-a-time
+invariant).
 
 **Webhook/callback idempotency**: see "Webhook Security" step 7 and the `payment_provider_events`
 composite-unique constraint — a DIFFERENT idempotency concept from Payment-creation idempotency
@@ -1214,9 +1351,18 @@ Callback idempotency:             see "Webhook Security" step 7 (a wholly separa
 
 ```
 Payment (Attempt) creation:    a Donation-row lock (SELECT ... FOR UPDATE) is acquired FIRST,
-                                before evaluating how many ACTIVE Payment Attempts already exist
-                                against it (see OHD-IMP009-01) and before the Payment row itself
-                                is inserted — this fixed lock ORDER (Donation, then Payment) is
+                                before evaluating whether an ACTIVE Payment Attempt already exists
+                                against it — `FINAL / LOCKED`, HD-IMP009-01: at most ONE row per
+                                donation_id may be ACTIVE (PENDING/REQUIRES_ACTION) at a time,
+                                enforced BOTH by this locked pre-check AND, as HD-IMP009-01
+                                explicitly requires, at the DB level via the `active_slot`
+                                generated column + `UNIQUE(donation_id, active_slot)` constraint
+                                (see "Domain Model" / "Database Impact") — the lock prevents the
+                                race a bare unique constraint alone would still let through (two
+                                concurrent requests both observing "no active attempt exists" a
+                                moment before either commits); the unique constraint is the
+                                deterministic backstop if the lock discipline is ever
+                                circumvented. This fixed lock ORDER (Donation, then Payment) is
                                 mandatory throughout this specification's every multi-row
                                 operation, to prevent deadlock between a concurrent
                                 webhook-processing transaction (which also locks Donation-then-
@@ -1246,26 +1392,36 @@ Callback vs expiration:         the expiry sweep job (see "Expiration") acquires
                                 that now-terminal row is a no-op per "State Machines"); a sweep
                                 that acquires the lock first wins (Payment -> EXPIRED; a
                                 subsequently-arriving "success" webhook is handled per
-                                OHD-IMP009-02, the orphaned-payment case).
-Payment retry vs late success:   creating a new Payment Attempt (retry) while an OLDER Payment
-                                Attempt against the same Donation is still capable of reaching
-                                SUCCEEDED is exactly the scenario OHD-IMP009-01 governs — the
-                                locking discipline above is identical regardless of that policy's
-                                eventual resolution; only the BUSINESS RULE of how many
-                                simultaneously-PENDING/REQUIRES_ACTION Payments may exist changes.
+                                HD-IMP009-02 — the fact is recorded, the Donation is left
+                                untouched, the case is flagged for controlled exception/manual
+                                review; see "Failure Semantics").
+Payment retry vs late success:   HD-IMP009-01 makes this race structurally impossible in the
+                                normal case: a new Payment Attempt cannot be CREATED while an
+                                older one is still ACTIVE (the `active_slot` unique constraint
+                                blocks it). A "late success" therefore only ever arrives for an
+                                attempt that is either still the sole ACTIVE attempt (ordinary
+                                path, handled by "Callback vs expiration" above) or one that has
+                                ALREADY reached a terminal state before a newer attempt was
+                                created (HD-IMP009-02's late-outcome case, not a live race against
+                                a concurrently-active sibling).
 Manual verification vs
-  expiration:                    an admin's APPROVE/REJECT decision (see "Manual Transfer")
-                                acquires the same Donation-then-Payment lock order; if the expiry
-                                sweep already moved the Payment to EXPIRED before the admin's
-                                decision commits, the admin's action is rejected as an invalid
-                                transition (see "State Machines") and the admin UI must surface
-                                this as a stale-state conflict, not silently overwrite EXPIRED.
+  expiration:                    an admin's APPROVE/REJECT/AMOUNT_MISMATCH_HOLD decision (see
+                                "Manual Transfer") acquires the same Donation-then-Payment lock
+                                order; if the expiry sweep already moved the Payment to EXPIRED
+                                before the admin's decision commits, the admin's action is
+                                rejected as an invalid transition (see "State Machines") and the
+                                admin UI must surface this as a stale-state conflict, not silently
+                                overwrite EXPIRED.
 Duplicate payment creation
   request:                       see "Idempotency" — the idempotency-key UNIQUE constraint is the
-                                primary defense; the Donation-row lock acquired during creation
-                                (above) additionally prevents a genuine race between two
-                                DIFFERENTLY-keyed concurrent creation requests from both passing
-                                an OHD-IMP009-01 "how many active attempts" check simultaneously.
+                                primary defense for a request REPLAY; the Donation-row lock
+                                acquired during creation (above), combined with the
+                                `UNIQUE(donation_id, active_slot)` constraint, is the primary
+                                defense for a DIFFERENTLY-keyed concurrent creation request racing
+                                against HD-IMP009-01's one-ACTIVE-attempt invariant — both
+                                requests cannot simultaneously observe "no active attempt exists"
+                                and both succeed; the loser observes the now-active sibling and is
+                                rejected with a typed conflict.
 Donation expiration vs
   Payment success:                Donation's OWN sweep (IMP-008, entirely separate job/config from
                                 Payment's own expiry sweep) acquires ITS OWN Donation-row lock
@@ -1274,7 +1430,8 @@ Donation expiration vs
                                 "Donation Integration") is resolved by ordinary row-level locking:
                                 whichever transaction commits first wins; the loser observes the
                                 Donation already in a terminal state and is handled per BR-7
-                                (IMP-008) / OHD-IMP009-02 (orphaned payment) as applicable.
+                                (IMP-008) / HD-IMP009-02 (the Payment fact is still recorded, no
+                                forced Donation transition, flagged for review) as applicable.
 ```
 
 All of the above requires REAL MySQL row-level locking/transaction-isolation semantics — SQLite is
@@ -1289,39 +1446,50 @@ expiration (this specification's own `payments.expires_at`) are two INDEPENDENT 
 as a hard boundary IMP-009 may not weaken:
 
 ```
-Payment expiration source:     provider-supplied (Tripay `expired_time`, Xendit `expiry_date`) is
-                                authoritative when present -> `payments.expires_at` set directly
-                                from the provider's own value at creation time.
+Payment expiration source:     provider-supplied (Tripay `expired_time`, Xendit's PaymentRequest
+                                expiry field) is authoritative when present -> `payments.expires_at`
+                                set directly from the provider's own value at creation time —
+                                `FINAL / LOCKED`, HD-IMP009-09 ("preserve/normalize" the
+                                provider-supplied value).
 Internal fallback expiration:   REQUIRED for Manual Transfer (no provider signal exists at all) and
                                 for any provider/scenario where no provider-supplied expiry is
-                                returned (Stripe PaymentIntents — see "Stripe"). Mirrors IMP-008's
-                                own HD-IMP008-04 pattern EXACTLY: a single, nullable configuration
-                                value (e.g. `config('payment.pending_expiry_minutes')`, default
-                                `null`) gates the sweep — while unset, no Payment of that
-                                kind/provider is ever swept to EXPIRED. No numeric default is
-                                asserted by this specification (see OHD-IMP009-09).
+                                returned (Stripe PaymentIntents — see "Stripe"). `FINAL / LOCKED`,
+                                HD-IMP009-09: configurable, no hard-coded business duration in the
+                                domain contract — mirrors IMP-008's own HD-IMP008-04 pattern
+                                exactly: a single, nullable configuration value (e.g.
+                                `config('payment.pending_expiry_minutes')`, default `null`) gates
+                                the sweep — while unset, no Payment of that kind/provider is ever
+                                swept to EXPIRED. No numeric default is asserted by this
+                                specification; deployment MUST supply valid configuration before
+                                the fallback sweep can act on affected flows/providers.
 Late callback after Payment
   expiration:                    a provider webhook reporting SUCCEEDED/FAILED for an
                                 ALREADY-EXPIRED Payment is an invalid transition per "State
-                                Machines" (EXPIRED is terminal) — this is exactly the same shape of
-                                problem as OHD-IMP009-02's Donation-level orphaned-payment case,
-                                one layer down (a late success at the PAYMENT layer, arriving after
+                                Machines" (EXPIRED is terminal) — this is the SAME shape of problem
+                                HD-IMP009-02 resolves at the Donation layer, applied here one layer
+                                down (a late success at the PAYMENT layer, arriving after
                                 Payment-level expiry, rather than at the DONATION layer, arriving
-                                after Donation-level expiry). Both cases are governed by
-                                OHD-IMP009-02's eventual resolution, applied consistently at
-                                whichever layer the lateness actually occurs.
+                                after Donation-level expiry): the fact is still recorded
+                                (`payment_provider_events`, `processing_result = ACCEPTED` but no
+                                state mutation per "State Machines" duplicate/terminal rules), no
+                                forced reopening of the EXPIRED Payment occurs, and the case is
+                                flagged consistently with HD-IMP009-02's controlled-exception
+                                posture.
 Late success after Donation
-  expiration:                    see OHD-IMP009-02 directly — this IS that scenario.
+  expiration:                    see HD-IMP009-02 directly (§"Human Decisions (Resolved)",
+                                §"Donation Integration") — this IS that scenario.
 Manual transfer expiration:      see "Manual Transfer" — governed by the same internal-fallback
-                                config value; while unset, an unreviewed Manual Transfer Payment
-                                never auto-expires (an admin must still act, or it remains PENDING
-                                indefinitely — the same "no invented default" posture IMP-008 took
-                                for Donation).
+                                config value (HD-IMP009-09); while unset, an unreviewed Manual
+                                Transfer Payment never auto-expires (an admin must still act, or it
+                                remains PENDING indefinitely — the same "no invented default"
+                                posture IMP-008 took for Donation).
 Retry after expiration:          creating a NEW Payment Attempt against a Donation that is STILL
                                 PENDING (Donation itself has not expired) after a PRIOR Payment
-                                Attempt reached EXPIRED is always permitted, subject to
-                                OHD-IMP009-01/03 — Payment-level expiration never terminates the
-                                Donation itself; only Donation's OWN sweep (IMP-008) can do that.
+                                Attempt reached EXPIRED is always permitted, now that the prior
+                                attempt's terminal state has freed HD-IMP009-01's one-ACTIVE-
+                                attempt slot; no lifetime attempt limit applies (HD-IMP009-03).
+                                Payment-level expiration never terminates the Donation itself; only
+                                Donation's OWN sweep (IMP-008) can do that.
 ```
 
 The Payment expiry sweep job (Laravel Scheduler + Cron, DB queue — see "Shared Hosting") runs
@@ -1399,11 +1567,16 @@ Public/guest Payment
                                 exception (IMP-008-donation.md:558-564) applied consistently: a
                                 guest who was allowed to create the Donation without an account
                                 must also be able to attempt payment for it without one. Still
-                                subject to: the target Donation must exist, be PENDING, and (for a
-                                guest Donation) the request must be within the SAME response/
-                                redirect cycle the Donation-creation flow produced — see
-                                OHD-IMP009-04 for the exact resume/retry boundary this
-                                specification does NOT invent unilaterally.
+                                subject to: the target Donation must exist, be PENDING, and (per
+                                HD-IMP009-01) have no other ACTIVE Payment Attempt already. Once
+                                the guest leaves the provider's own hosted checkout page, no
+                                platform-level guest resume/retry mechanism exists — `FINAL /
+                                LOCKED`, HD-IMP009-04: no identifier (Donation ID, Payment ID,
+                                ULID, email) ever functions as a resume credential. Recovery is
+                                only via the abandoned attempt's own natural expiry
+                                (HD-IMP009-09), which frees the HD-IMP009-01 slot for a genuinely
+                                new attempt, or an authorized organization-scoped support-
+                                controlled process (see "Donor/admin cancelling" below).
 
 Authenticated donor Payment
   creation (own Donation):      Authenticated AND permission `payment.create` AND scope OWN
@@ -1417,10 +1590,9 @@ Donor/guest viewing own
                                 guest has the same "no durable way to list past guest activity"
                                 limitation IMP-008 already established (no account) — viewing a
                                 guest Payment's live status is only possible within the original
-                                response/redirect flow (see OHD-IMP009-04), never through a
-                                bearer-token/identifier-as-credential mechanism (mirrors
-                                HD-IMP008-05B's identical prohibition, applied here by the same
-                                principle).
+                                response/redirect flow, never through a bearer-token/identifier-
+                                as-credential mechanism (`FINAL / LOCKED`, HD-IMP009-04, mirroring
+                                HD-IMP008-05B's identical prohibition by the same principle).
 
 Admin/staff viewing Payments:    Authenticated AND permission `payment.view` AND scope
                                 ORGANIZATION.
@@ -1428,8 +1600,11 @@ Admin/staff viewing Payments:    Authenticated AND permission `payment.view` AND
 Payment retry (new Attempt
   against an existing PENDING
   Donation):                     same authorization shape as Payment creation above (guest or
-                                authenticated, ownership-gated), subject to OHD-IMP009-01/03's
-                                eventual resolution for HOW MANY/how often.
+                                authenticated, ownership-gated), additionally gated by
+                                HD-IMP009-01: the prior Payment Attempt against this Donation MUST
+                                already be in a terminal (non-ACTIVE) state — enforced at the DB
+                                level (see "Concurrency" / "Database Impact"). No lifetime attempt
+                                limit applies (HD-IMP009-03).
 
 Donor/admin cancelling a
   PENDING/REQUIRES_ACTION
@@ -1438,17 +1613,23 @@ Donor/admin cancelling a
                                 REQUIRES_ACTION — mirrors Donation's own cancel-authorization shape
                                 (IMP-008 §Authorization/RBAC) exactly. Guest self-service
                                 cancellation of a Payment is NOT supported, mirroring HD-IMP008-05B
-                                by the same principle (no guest bearer-token/identifier-as-
-                                credential mechanism is introduced here either).
+                                by the same principle. This ORGANIZATION-scoped admin path is also
+                                the authorized support-controlled process HD-IMP009-04 permits for
+                                freeing an abandoned guest Payment's ACTIVE slot before its own
+                                natural expiry — no guest bearer-token/identifier-as-credential
+                                mechanism is introduced for this or any other purpose.
 
 Manual transfer evidence
   submission (donor/guest,
-  own Payment):                   same ownership/guest-access shape as Payment creation — subject
-                                to OHD-IMP009-06 (mandatory or not) and OHD-IMP009-08 (resubmission
-                                policy).
+  own Payment):                   same ownership/guest-access shape as Payment creation.
+                                Mandatory per HD-IMP009-06 (at least one evidence row is required
+                                before an admin may APPROVE); resubmission is permitted per
+                                HD-IMP009-08 while the Payment remains evidence-eligible (see
+                                "Manual Transfer").
 
 Manual transfer verification
-  (approve/reject):               Authenticated AND permission `payment.manual_transfer.verify`
+  (approve/reject/amount-
+  mismatch-hold):                 Authenticated AND permission `payment.manual_transfer.verify`
                                 AND scope ORGANIZATION AND Business Authority `financial_approver`
                                 (the closest fit in the CLOSED Authority Type taxonomy —
                                 BUSINESS-AUTHORITY-MODEL.md lists `financial_approver`,
@@ -1458,8 +1639,11 @@ Manual transfer verification
                                 `financial_approver` is the documented, no-new-taxonomy choice,
                                 exactly as IMP-008 reused OWN/ORGANIZATION scope rather than
                                 inventing a new ScopeType) AND resource state: the target Payment
-                                is PENDING with at least the mandatory evidence present (if
-                                OHD-IMP009-06 resolves to mandatory).
+                                is PENDING with at least one `manual_transfer_evidence` row present
+                                (`FINAL / LOCKED`, HD-IMP009-06 — mandatory evidence). The
+                                AMOUNT_MISMATCH_HOLD outcome (HD-IMP009-07) uses the identical
+                                authorization gate as APPROVED/REJECTED — it is not a lesser- or
+                                greater-privileged action.
 
 System/provider-outcome
   transition (Payment ->
@@ -1575,6 +1759,17 @@ payment.expired                   NonCritical | financial reference: true | acto
                                    actually moved, no financial consequence triggered.
 payment.cancelled                 NonCritical | financial reference: true | actor: Human |
                                    payload: payment_ulid, cancelled_by_principal_id.
+payment.donation_transition_rejected CRITICAL / MUTATION_ATOMIC | financial reference: true |
+                                   actor: System | payload: payment_ulid, donation_ulid,
+                                   attempted_outcome (SUCCEEDED|FAILED), donation_status_observed
+                                   — `FINAL / LOCKED` per HD-IMP009-02: recorded whenever a
+                                   terminal Payment outcome's requested Donation transition is
+                                   rejected because the Donation is already in an incompatible
+                                   terminal state (the "late success/failure" case). CRITICAL
+                                   because it is the durable trigger for the "mandatory human/
+                                   admin review" HD-IMP009-02 requires — an audit-append failure
+                                   here must not silently drop the ONE record that flags this case
+                                   for review.
 webhook.received                  NonCritical | financial reference: false | actor: Integration |
                                    payload: provider, processing_result (see
                                    `payment_provider_events` — this event is the audit-layer
@@ -1598,22 +1793,32 @@ manual_transfer.approved          CRITICAL / MUTATION_ATOMIC | financial referen
 manual_transfer.rejected          CRITICAL / MUTATION_ATOMIC | financial reference: true | actor:
                                    Human | payload: payment_ulid, verified_by_principal_id,
                                    review_notes — same reasoning as approved.
+manual_transfer.amount_mismatch_held CRITICAL / MUTATION_ATOMIC | financial reference: true |
+                                   actor: Human | payload: payment_ulid, verified_by_principal_id,
+                                   payments.amount_minor, declared_amount_minor — `FINAL / LOCKED`
+                                   per HD-IMP009-07: recorded when an admin records the
+                                   AMOUNT_MISMATCH_HOLD review outcome; same critical-category
+                                   reasoning as manual_transfer.approved/rejected (a human
+                                   financial-approval-adjacent decision).
 provider_config.credential_changed CRITICAL / MUTATION_ATOMIC | financial reference: false | actor:
                                    Human | payload: provider, mode, is_enabled (NEVER the secret
                                    value itself) — a "privileged governance/security operation"
                                    per Q26's explicit critical-category list.
 ```
 
-Guest-actor events (`payment.attempt_created`, `manual_transfer.evidence_submitted`) follow
-EXACTLY ADR-002's established mechanism (`AuditActorKind::Unauthenticated`, `actor_principal_id =
-NULL`, a fixed registered `execution_context`) — but ADR-002's own text explicitly scopes its
-widening to "the failed/incomplete authentication cases... plus `donation.created`'s guest case
-only... no other IMP-008 event uses this widened category... any further use requires its own
-future ADR, not silent reuse" (IMP-008-donation.md:1197-1199). **IMP-009 therefore requires its
-OWN new ADR (or an amendment to ADR-002) authorizing `Unauthenticated` for
-`payment.attempt_created` and `manual_transfer.evidence_submitted` before implementation** — this
-specification does not perform that amendment itself (see "Implementation Handoff Requirements"
-and the final report's "New ADR Required" field).
+Guest-actor events (`payment.attempt_created`, `manual_transfer.evidence_submitted`) use
+`AuditActorKind::Unauthenticated`, `actor_principal_id = NULL`, and a fixed registered
+`execution_context`, following ADR-002's established mechanism in SHAPE — but ADR-002's own text
+explicitly scopes its widening to "the failed/incomplete authentication cases... plus
+`donation.created`'s guest case only... no other IMP-008 event uses this widened category... any
+further use requires its own future ADR, not silent reuse" (IMP-008-donation.md:1197-1199).
+**`FINAL / LOCKED` per HD-IMP009-12: this authorization is granted by
+[ADR-003](../adr/ADR-003-payment-hub-unauthenticated-actor-scope-amendment.md) — a new, narrowly-
+scoped ADR enumerating exactly these two (event_type, execution_context) pairs
+(`http:payment:guest_attempt_created`, `http:payment:guest_manual_transfer_evidence_submitted`) —
+never a generic broadening of ADR-002 itself.** ADR-003 is a prerequisite recorded under
+"Implementation Handoff Requirements", alongside Human Spec Approval and the GOV-MM-002 model
+binding.
 
 No `payment.*`/`manual_transfer.*`/`webhook.*` event ever logs a provider secret, API key, webhook
 signing secret, or raw card data (see "Security Requirements" / "Configuration").
@@ -1712,22 +1917,30 @@ Retention:                        governed by a future, separately authorized re
 
 ## Donation Integration
 
-Precise relationship between Donation (IMP-008) and Payment (this IMP), derived exclusively from
-what IMP-008's LOCKED contract already determines, with every genuinely undetermined point raised
-as an OHD rather than invented:
+Precise relationship between Donation (IMP-008) and Payment (this IMP), derived from IMP-008's
+LOCKED contract plus the twelve Human Decisions resolved under "Human Decisions (Resolved)":
 
 ```
-One Donation may have MULTIPLE Payment attempts:      YES — MASTER-REQUIREMENTS.md §9 ("Payment
-                                                        may have multiple intents/attempts") is
-                                                        directly authoritative; `payments.donation_id`
-                                                        is a plain FK with no uniqueness
-                                                        constraint (see "Domain Model").
+One Donation may have MULTIPLE Payment attempts:      YES, over its LIFETIME — MASTER-REQUIREMENTS.md
+                                                        §9 ("Payment may have multiple intents/
+                                                        attempts") is directly authoritative;
+                                                        `payments.donation_id` is a plain FK with
+                                                        no uniqueness constraint (see "Domain
+                                                        Model"). AT MOST ONE may be ACTIVE at a
+                                                        time — see below.
 Payment retry creates a new Payment record:            YES, always a NEW `payments` row (see "State
                                                         Machines" terminal-state rule, "Provider
                                                         Adapter Architecture" retryBehavior) —
                                                         never mutates a terminal Payment row.
-How many attempts may be simultaneously ACTIVE:        NOT determined by any authoritative source
-                                                        — see OHD-IMP009-01.
+How many attempts may be simultaneously ACTIVE:        EXACTLY ONE — `FINAL / LOCKED`, HD-IMP009-01.
+                                                        A new Payment Attempt may be created only
+                                                        after the prior attempt against the same
+                                                        Donation reaches a terminal (non-ACTIVE)
+                                                        state; enforced at the DB level via the
+                                                        `active_slot` generated column + unique
+                                                        constraint (see "Domain Model" /
+                                                        "Concurrency"). No lifetime maximum COUNT of
+                                                        (sequential) attempts applies (HD-IMP009-03).
 Payment status vs Donation status:                     INDEPENDENT state machines. Donation's
                                                         PENDING/SUCCEEDED/FAILED/CANCELLED/EXPIRED
                                                         (IMP-008) is the donor-facing intent
@@ -1736,51 +1949,79 @@ Payment status vs Donation status:                     INDEPENDENT state machine
                                                         CANCELLED (this IMP) is the per-attempt
                                                         provider-transaction lifecycle. A Donation
                                                         remains PENDING through zero, one, or many
-                                                        non-terminal-for-Donation-purposes Payment
-                                                        attempts, until exactly ONE Payment attempt
-                                                        reaches a terminal outcome that IMP-009
-                                                        forwards to Donation's transition surface
-                                                        (see below) — or until Donation's OWN
-                                                        independent expiry sweep (IMP-008) fires
-                                                        first.
+                                                        SEQUENTIAL (never concurrent, per
+                                                        HD-IMP009-01) terminal Payment attempts,
+                                                        until exactly ONE Payment attempt reaches a
+                                                        terminal outcome that IMP-009 forwards to
+                                                        Donation's transition surface (see below) —
+                                                        or until Donation's OWN independent expiry
+                                                        sweep (IMP-008) fires first.
 How a successful Payment affects
-  Donation:                                              a Payment reaching SUCCEEDED, within the
-                                                        SAME database transaction (see
-                                                        "Concurrency"), invokes Donation's existing
-                                                        System-Principal-gated
+  Donation:                                              `FINAL / LOCKED`, HD-IMP009-02/HD-IMP009-11.
+                                                        A Payment reaching SUCCEEDED always FIRST
+                                                        records that verified provider fact on the
+                                                        Payment row itself (`payments.status =
+                                                        SUCCEEDED`, `succeeded_at` set) — this write
+                                                        happens regardless of the Donation's current
+                                                        state. Within the SAME database transaction
+                                                        (see "Concurrency"), IMP-009 then REQUESTS a
+                                                        Donation transition ONLY through Donation's
+                                                        existing System-Principal-gated
                                                         PENDING -> SUCCEEDED transition surface
                                                         (IMP-008-donation.md:605-614), using the
-                                                        `system.payment-outcome-consequence`
-                                                        System Principal (see "System Principal").
-                                                        If the Donation is NOT in PENDING status at
-                                                        that moment (already terminal, e.g. already
-                                                        EXPIRED or CANCELLED), the transition
-                                                        invocation is rejected by Donation's own
-                                                        BR-7 — this is exactly OHD-IMP009-02's
-                                                        orphaned-payment scenario, NOT silently
-                                                        overridden here.
-Failed Payment behavior:                                symmetric: a Payment reaching FAILED
-                                                        invokes the SAME transition surface with a
+                                                        `system.payment-outcome-consequence` System
+                                                        Principal (see "System Principal") — Payment
+                                                        never bypasses this surface or mutates
+                                                        `donations` directly (HD-IMP009-11). If the
+                                                        Donation IS in PENDING status at that
+                                                        moment, the transition succeeds normally. If
+                                                        the Donation is NOT in PENDING status
+                                                        (already terminal, e.g. already EXPIRED or
+                                                        CANCELLED, or already SUCCEEDED/FAILED from
+                                                        a PRIOR sequential Payment attempt), the
+                                                        transition invocation is rejected by
+                                                        Donation's own BR-7 — this rejection is
+                                                        caught and recorded, NEVER forced, reopened,
+                                                        or worked around, and the case is flagged
+                                                        for controlled exception/manual review
+                                                        (HD-IMP009-02) — see "Failure Semantics".
+                                                        This does not authorize any Ledger posting
+                                                        (HD-IMP009-11; IMP-010/IMP-011 boundaries
+                                                        intact).
+Failed Payment behavior:                                symmetric to the above: a Payment reaching
+                                                        FAILED always records that fact first, then
+                                                        requests the SAME transition surface with a
                                                         failure outcome (Donation
                                                         PENDING -> FAILED), same same-transaction/
-                                                        same-Principal/same OHD-IMP009-02 caveat.
-                                                        Critically: a FAILED Payment attempt does
-                                                        NOT, by itself, mean the Donation should
-                                                        fail if the donor may still retry — see
-                                                        "Failure Semantics" for the exact boundary
-                                                        (a Payment FAILED does not automatically
-                                                        drive the Donation to FAILED unless/until
-                                                        the donor has no further retry path; this
-                                                        is governed jointly by OHD-IMP009-01/03).
+                                                        same-Principal/same HD-IMP009-02
+                                                        record-first-request-second discipline, same
+                                                        BR-7 rejection-and-flag behavior if the
+                                                        Donation is already terminal. A FAILED
+                                                        Payment Attempt does NOT, by itself,
+                                                        necessarily drive the Donation to FAILED —
+                                                        see "Failure Semantics" for the exact
+                                                        boundary between "this specific attempt
+                                                        failed" (Payment-level fact, always
+                                                        recorded) and "the Donation itself should be
+                                                        considered FAILED" (a decision the owning
+                                                        application flow makes about whether the
+                                                        donor is offered a retry — HD-IMP009-01/03
+                                                        permit an unlimited number of SEQUENTIAL
+                                                        retry attempts, so a single FAILED attempt
+                                                        is ordinarily NOT sufficient by itself to
+                                                        drive Donation to FAILED unless the Donation
+                                                        itself independently expires or the donor/
+                                                        admin cancels it).
 Expired Donation interaction:                            see "Expiration" — the two clocks are
-                                                        independent; a Payment attempt created
-                                                        against a Donation that expires mid-attempt
-                                                        is handled per OHD-IMP009-02's late-outcome
-                                                        resolution, and no NEW Payment attempt may
-                                                        ever be created against an already-EXPIRED
-                                                        (or otherwise terminal) Donation (validated
-                                                        at Payment-creation time, resource state
-                                                        PENDING required — see "Authorization").
+                                                        independent; a Payment attempt in flight
+                                                        when its Donation independently expires is
+                                                        handled per HD-IMP009-02's record-first,
+                                                        flag-if-terminal resolution, and no NEW
+                                                        Payment attempt may ever be created against
+                                                        an already-EXPIRED (or otherwise terminal)
+                                                        Donation (validated at Payment-creation
+                                                        time, resource state PENDING required — see
+                                                        "Authorization").
 Recurring Donation occurrence
   interaction:                                            EACH Recurring Occurrence's generated
                                                         Donation (IMP-008 — the generation ENGINE
@@ -1789,12 +2030,16 @@ Recurring Donation occurrence
                                                         ordinary Donation from Payment's point of
                                                         view — it goes through the identical
                                                         Payment-creation/lifecycle contract as any
-                                                        one-time Donation. Whether a Recurring
-                                                        Plan pre-selects/stores a payment method for
-                                                        automatic future charging (vs requiring
-                                                        manual per-cycle payment) is NOT determined
-                                                        by any authoritative source — see
-                                                        OHD-IMP009-10.
+                                                        one-time Donation. `FINAL / LOCKED`,
+                                                        HD-IMP009-10: Recurring Donation v1 is
+                                                        MANUAL-PER-CYCLE — no Recurring Plan
+                                                        pre-selects or durably stores a payment
+                                                        method; IMP-009 stores no reusable/tokenized
+                                                        payment credential, mandate, or off-session
+                                                        charge authorization, and implements no
+                                                        automatic/background charging. A future
+                                                        auto-charge capability requires its own
+                                                        separate, governed specification.
 Idempotency boundary:                                    see "Idempotency" — Donation's own
                                                         idempotency key (HD-IMP008-05A) and
                                                         Payment's own idempotency key (this IMP)
@@ -1803,8 +2048,9 @@ Idempotency boundary:                                    see "Idempotency" — D
                                                         points.
 Guest Donation payment behavior:                          see "Authorization" — guest Payment
                                                         creation is allowed (mirrors guest Donation
-                                                        creation), subject to OHD-IMP009-04's
-                                                        resume/retry boundary.
+                                                        creation), subject to HD-IMP009-04's
+                                                        no-self-service-resume boundary and
+                                                        HD-IMP009-01's one-ACTIVE-attempt invariant.
 Authenticated Donation payment
   behavior:                                                Authenticated AND OWN-scope ownership,
                                                         identical shape to Donation's own
@@ -1822,20 +2068,31 @@ Campaign eligibility re-check
 
 ## Financial Boundary
 
+This specification's initial submission (commit `21fef30`) flagged its own reading of the
+canonical posting chain — that IMP-009 is the correct caller of IMP-008's Donation transition
+surface — as an "Architectural Escalation" requiring Human confirmation before being relied upon.
+**HD-IMP009-11 (`FINAL / LOCKED`) resolves this explicitly**: the design below is Human-authorized,
+not merely an AI-authored interpretation.
+
 ```
 IMP-009 MUST NOT own double-entry Ledger posting, Journal Entries, financial accounting balances,
-  commission accounting, withdrawal accounting, or refund accounting (per task instruction,
-  restated as binding).
+  commission accounting, withdrawal accounting, or refund accounting (restated as binding by
+  HD-IMP009-11's own text: "This decision does NOT authorize Ledger posting... IMP-010/IMP-011
+  boundaries remain intact").
 IMP-009 DOES own: the Payment aggregate itself, its state machine, and the invocation of
   Donation's (IMP-008's) already-defined System-Principal-gated Business State Transition surface
-  upon a terminal Payment outcome (see "Donation Integration"). This IS the "Business Event ->
-  Domain Validation -> Business State Transition" portion of the canonical posting chain
-  (FINANCIAL-POSTING-BOUNDARY.md) — a webhook/callback IS the "Provider Event," its verification
-  pipeline (see "Webhook Security") IS "Normalize / Validate," the Payment status write IS the
-  "Owning Application Use Case" + "Domain Validation," and the resulting Donation transition IS
-  the "Business State Transition." The chain STOPS there for IMP-009 — "Authorized Financial
-  Consequence" onward (Ledger Posting Contract, Double-Entry Ledger) is entirely IMP-011/IMP-010's
-  own, later concern.
+  upon a terminal Payment outcome (see "Donation Integration") — `FINAL / LOCKED`, HD-IMP009-11:
+  "Payment success/failure may request Donation state transition through the EXISTING CANONICAL
+  IMP-008 transition surface using the applicable registered System Principal/execution context.
+  Payment MUST NOT directly update Donation state or bypass the IMP-008 state machine." This IS
+  the "Business Event -> Domain Validation -> Business State Transition" portion of the canonical
+  posting chain (FINANCIAL-POSTING-BOUNDARY.md) — a webhook/callback IS the "Provider Event," its
+  verification pipeline (see "Webhook Security") IS "Normalize / Validate," the Payment status
+  write IS the "Owning Application Use Case" + "Domain Validation," and the resulting REQUESTED
+  Donation transition (always attempted, honored only when Donation's own state permits it per
+  HD-IMP009-02) IS the "Business State Transition." The chain STOPS there for IMP-009 —
+  "Authorized Financial Consequence" onward (Ledger Posting Contract, Double-Entry Ledger) is
+  entirely IMP-011/IMP-010's own, later concern, exactly as HD-IMP009-11 confirms.
 IMP-009 emits a `payment.succeeded`/`payment.failed` domain event (see "Audit") that a FUTURE
   IMP-011 subscriber consumes to construct its own Authorized Financial Consequence — IMP-009 does
   not construct that Consequence object, does not know its shape, and does not call into any
@@ -1907,10 +2164,17 @@ payments
   verified_by_principal_id (FK principals.id, RESTRICT, NULLABLE)
   cancelled_by_principal_id (FK principals.id, RESTRICT, NULLABLE)
   failure_reason (VARCHAR 255, NULLABLE)
+  active_slot (TINYINT, NULLABLE, GENERATED ALWAYS AS (CASE WHEN status IN ('PENDING',
+    'REQUIRES_ACTION') THEN 1 ELSE NULL END) STORED) — `FINAL / LOCKED`, HD-IMP009-01; see
+    "Domain Model"
   timestamps
 
   Indexes: donation_id, provider, status, provider_reference, expires_at
-  Unique: ulid, idempotency_key, (provider, provider_reference) WHERE provider_reference IS NOT NULL
+  Unique: ulid, idempotency_key, (provider, provider_reference) WHERE provider_reference IS NOT NULL,
+    (donation_id, active_slot) — the DB-level "at most one ACTIVE Payment Attempt per Donation"
+    enforcement (HD-IMP009-01); NULL-distinct MySQL unique-index semantics mean terminal rows
+    (active_slot NULL) never collide, only concurrently-ACTIVE rows for the same donation_id would
+    — which this constraint makes impossible
   CHECK (app-level guard always; DB-level CHECK where the driver supports it, mirroring
     `donations`' own migration pattern): amount_minor equal to the owning Donation's amount_minor
     at creation time (enforced at the service layer at INSERT time, since a cross-table CHECK
@@ -1924,7 +2188,7 @@ payment_provider_events
   provider_event_id (VARCHAR 191, NULLABLE)
   event_type (VARCHAR 64, NOT NULL)
   signature_valid (BOOLEAN, NOT NULL)
-  processing_result (VARCHAR 24, NOT NULL)
+  processing_result (VARCHAR 32, NOT NULL)
   raw_payload_ciphertext (LONGTEXT, NULLABLE)
   received_at (DATETIME, NOT NULL)
   timestamps
@@ -1941,7 +2205,8 @@ manual_transfer_evidence
   declared_amount_minor (BIGINT UNSIGNED, NULLABLE), declared_currency (CHAR 3, NULLABLE),
     declared_transferred_at (DATETIME, NULLABLE)
   reviewed_by_principal_id (FK principals.id, RESTRICT, NULLABLE), reviewed_at (DATETIME,
-    NULLABLE), review_outcome (VARCHAR 16, NULLABLE), review_notes (VARCHAR 1000, NULLABLE)
+    NULLABLE), review_outcome (VARCHAR 24, NULLABLE) — APPROVED | REJECTED |
+    AMOUNT_MISMATCH_HOLD (HD-IMP009-07), review_notes (VARCHAR 1000, NULLABLE)
   timestamps
 
   Indexes: payment_id, reviewed_by_principal_id
@@ -2101,16 +2366,20 @@ Provider create-transaction call
                                   available.
 Donation transition invocation
   fails (Donation already
-  terminal — OHD-IMP009-02):       the Payment's own status write (SUCCEEDED/FAILED) still
-                                  commits (it accurately records what the PROVIDER reported); the
+  terminal — `FINAL / LOCKED`,
+  HD-IMP009-02):                   the Payment's own status write (SUCCEEDED/FAILED) still
+                                  commits (it accurately records what the PROVIDER reported — a
+                                  late provider outcome is NEVER discarded, per HD-IMP009-02); the
                                   Donation transition invocation's rejection is caught, and the
-                                  outcome is recorded distinctly (e.g. a
+                                  outcome is recorded distinctly (a
                                   `payment.donation_transition_rejected` audit event, CRITICAL,
                                   never silently swallowed) for the mandatory admin/manual review
-                                  OHD-IMP009-02's recommended default calls for — this is NOT
-                                  treated as a Payment-processing error (the Payment truthfully
-                                  succeeded/failed at the provider); it is a Donation-state
-                                  conflict, flagged for human attention.
+                                  HD-IMP009-02 requires — this is NOT treated as a
+                                  Payment-processing error (the Payment truthfully succeeded/
+                                  failed at the provider); it is a Donation-state conflict, flagged
+                                  for human attention. No accounting treatment (refund, credit,
+                                  reinstatement) is invented here — HD-IMP009-02 explicitly leaves
+                                  resolution to a later governed domain.
 Invalid/ineligible currency for
   chosen provider (Money /
   Currency violation):              typed validation exception, Payment NOT created.
@@ -2168,10 +2437,12 @@ BR-6   A terminal Payment state (SUCCEEDED/FAILED/EXPIRED/CANCELLED) is never mu
        PENDING/REQUIRES_ACTION or to any other terminal state (mirrors IMP-008 BR-7).
 BR-7   payments.donation_id, provider, amount_minor, currency, idempotency_key are immutable
        after creation (see "Domain Model").
-BR-8   A terminal Payment outcome (SUCCEEDED/FAILED) invokes Donation's existing System-Principal-
-       gated transition surface (IMP-008) within the SAME database transaction as the Payment's
-       own status write and audit append — never as a separate, later, best-effort step (see
-       "Concurrency" / "Webhook Security" step 8-12).
+BR-8   A terminal Payment outcome (SUCCEEDED/FAILED) always records that outcome on the Payment
+       row first, then REQUESTS Donation's existing System-Principal-gated transition surface
+       (IMP-008) within the SAME database transaction as the Payment's own status write and audit
+       append — never as a separate, later, best-effort step, and never a direct mutation of
+       `donations` bypassing that surface (`FINAL / LOCKED`, HD-IMP009-02/HD-IMP009-11 — see
+       "Concurrency" / "Webhook Security" step 8-12 / "Donation Integration").
 BR-9   A webhook/callback is processed only after successful, constant-time signature/authenticity
        verification specific to its provider (see "Webhook Security" step 3) — no exception, no
        "trust in development mode" bypass may exist in the shipped implementation.
@@ -2181,9 +2452,10 @@ BR-10  An inbound webhook/callback event with an amount/currency mismatch agains
 BR-11  Payment creation MUST include a client-provided idempotency key, scoped independently from
        Donation's own idempotency key (see "Idempotency"); a request without one is rejected
        before any Payment row is created.
-BR-12  No manual-transfer approval/rejection may mutate payments.amount_minor or
-       donations.amount_minor (see "Manual Transfer" / OHD-IMP009-07) — both remain immutable
-       regardless of any donor-declared or admin-observed transferred amount.
+BR-12  No manual-transfer review decision (APPROVED/REJECTED/AMOUNT_MISMATCH_HOLD) may mutate
+       payments.amount_minor or donations.amount_minor (`FINAL / LOCKED`, HD-IMP009-07 — see
+       "Manual Transfer") — both remain immutable regardless of any donor-declared or
+       admin-observed transferred amount.
 BR-13  No `payments`/`payment_provider_events`/`manual_transfer_evidence` row is ever created or
        mutated by an inbound webhook for a `provider_reference` that does not resolve to exactly
        one existing Payment row (see "Webhook Security" step 5) — a webhook NEVER creates a
@@ -2194,15 +2466,40 @@ BR-15  No component in this specification writes directly to any Ledger-related 
        yet at this IMP) — restated as a forward-binding constraint on the implementation (see
        "Financial Boundary" / "Ledger Boundary").
 BR-16  A guest-originated `payment.attempt_created`/`manual_transfer.evidence_submitted` audit
-       event records actor kind `AuditActorKind::Unauthenticated`, consistent with ADR-002's
-       mechanism — contingent on IMP-009's own required ADR amendment authorizing this specific,
-       new use of that mechanism (see "Audit" — this is a Change-Control precondition, not an
-       Open Human Decision on substance).
+       event records actor kind `AuditActorKind::Unauthenticated`, `actor_principal_id = NULL`,
+       and its own fixed, registered `execution_context`, authorized by
+       [ADR-003](../adr/ADR-003-payment-hub-unauthenticated-actor-scope-amendment.md)
+       (`FINAL / LOCKED`, HD-IMP009-12) — never any other IMP-009 event, and never a generic
+       broadening of ADR-002 itself (see "Audit").
 BR-17  No new Business Authority Type, ScopeType, or AuditActorKind value is invented by this
        specification (see "Authorization" / "Audit" / "Forbidden Changes").
 BR-18  Every Payment expiry/window value (per-provider fallback config, Manual Transfer's own
-       window) defaults to `null`/unset and MUST NOT act while unset — mirrors HD-IMP008-04's
-       identical "no invented default" contract (see "Expiration" / OHD-IMP009-09).
+       window) defaults to `null`/unset and MUST NOT act while unset (`FINAL / LOCKED`,
+       HD-IMP009-09 — mirrors HD-IMP008-04's identical "no invented default" contract; see
+       "Expiration").
+BR-19  At most ONE Payment Attempt per Donation may be ACTIVE (PENDING or REQUIRES_ACTION) at any
+       moment (`FINAL / LOCKED`, HD-IMP009-01), enforced at the DB level via the `active_slot`
+       generated column + `UNIQUE(donation_id, active_slot)` constraint (see "Domain Model" /
+       "Database Impact"), not merely a service-layer check. No lifetime maximum COUNT of
+       sequential Payment Attempts per Donation applies (`FINAL / LOCKED`, HD-IMP009-03).
+BR-20  A terminal Payment outcome whose requested Donation transition is rejected because the
+       Donation is already in an incompatible terminal state MUST NOT be forced, retried against
+       Donation directly, or silently dropped — it is recorded via a
+       `payment.donation_transition_rejected` audit event (CRITICAL) for mandatory human/admin
+       review, and no refund/credit/reinstatement/accounting treatment is invented in response
+       (`FINAL / LOCKED`, HD-IMP009-02 — see "Donation Integration" / "Failure Semantics").
+BR-21  A Manual Bank Transfer Payment cannot be recorded with review_outcome = APPROVED unless at
+       least one `manual_transfer_evidence` row exists against it (`FINAL / LOCKED`, HD-IMP009-06
+       — see "Manual Transfer").
+BR-22  A Manual Bank Transfer amount mismatch (declared/observed transferred amount !=
+       payments.amount_minor) is recorded as review_outcome = AMOUNT_MISMATCH_HOLD, never as an
+       automatic APPROVED or REJECTED outcome (`FINAL / LOCKED`, HD-IMP009-07 — see "Manual
+       Transfer").
+BR-23  `manual_transfer_evidence` resubmission is permitted only while the owning Payment remains
+       in an evidence-eligible state (PENDING, no recorded review_outcome); a terminal or
+       already-reviewed Payment rejects further evidence submission, and no existing
+       `manual_transfer_evidence` row is ever overwritten (`FINAL / LOCKED`, HD-IMP009-08 — see
+       "Manual Transfer").
 ```
 
 ## Testing Requirements
@@ -2252,11 +2549,15 @@ Money:                     unregistered-currency rejection at Payment creation; 
 Donation Integration:      a SUCCEEDED Payment drives the owning PENDING Donation to SUCCEEDED
                            (same transaction, verified via a single-transaction integration test
                            against IMP-008's real transition surface, not a mock); a FAILED
-                           Payment drives the owning PENDING Donation to FAILED; an attempted
-                           transition against an already-terminal Donation is rejected and
-                           recorded distinctly (OHD-IMP009-02 scenario — test asserts the
-                           documented "recorded for review, not silently dropped or forced"
-                           behavior, whatever OHD-IMP009-02's eventual resolution specifies).
+                           Payment drives the owning PENDING Donation to FAILED; a terminal Payment
+                           outcome against an already-terminal Donation is rejected by IMP-008's
+                           BR-7, the Payment's own status write still commits, and a
+                           `payment.donation_transition_rejected` audit event is recorded
+                           (`FINAL / LOCKED` HD-IMP009-02 scenario — test asserts exactly this
+                           "recorded for review, never silently dropped or forced" behavior); the
+                           Donation transition is requested only through IMP-008's System-
+                           Principal-gated surface, never a direct `donations` mutation
+                           (HD-IMP009-11, direct test that no other write path exists).
 Authorization:             every RBAC row in "Authorization" — authorized ALLOW, unauthenticated
                            DENY (where auth is required), wrong permission DENY, correct
                            permission wrong scope DENY (donor A cannot view/cancel/retry donor
@@ -2282,7 +2583,34 @@ File Security:             manual-transfer evidence upload rejects disallowed MI
 Manual Transfer:           evidence submission -> admin approval -> Payment SUCCEEDED -> Donation
                            SUCCEEDED, full path; evidence submission -> admin rejection -> Payment
                            FAILED -> Donation FAILED, full path; unauthorized (non-
-                           `financial_approver`) verification attempt denied.
+                           `financial_approver`) verification attempt denied; APPROVE attempted
+                           with zero evidence rows present is rejected (HD-IMP009-06); a second
+                           evidence row submitted while the Payment remains eligible succeeds,
+                           neither row is overwritten (HD-IMP009-08); evidence submission attempted
+                           against a terminal or already-reviewed Payment is rejected; a
+                           declared_amount_minor != payments.amount_minor is recorded as
+                           review_outcome = AMOUNT_MISMATCH_HOLD, Payment remains PENDING, Donation
+                           is untouched, and `payments.amount_minor`/`donations.amount_minor` are
+                           unchanged (HD-IMP009-07).
+One-ACTIVE-attempt
+  invariant (HD-IMP009-01):   creating a second Payment Attempt while a PENDING/REQUIRES_ACTION
+                           sibling exists against the same Donation is rejected at the DB level
+                           (raw query proving the `UNIQUE(donation_id, active_slot)` constraint,
+                           bypassing the service layer, mirroring AC-007-009/010); creating a new
+                           attempt succeeds once the prior attempt reaches any terminal state; no
+                           lifetime count limit rejects an Nth sequential attempt (HD-IMP009-03).
+Xendit PaymentRequest
+  mapping (HD-IMP009-05):     every documented PaymentRequest API status value in "State Machines"
+                           normalizes to its documented canonical state; an unmapped/unexpected
+                           Xendit status value is rejected, never silently defaulted.
+Guest audit actor
+  (HD-IMP009-12 / ADR-003):    a guest `payment.attempt_created` event records
+                           AuditActorKind::Unauthenticated, actor_principal_id null, and
+                           execution_context = "http:payment:guest_attempt_created"; a guest
+                           `manual_transfer.evidence_submitted` event records the same actor kind
+                           with execution_context =
+                           "http:payment:guest_manual_transfer_evidence_submitted"; no other
+                           IMP-009 event ever uses AuditActorKind::Unauthenticated.
 Duplicate provider event:  mandatory per DEFINITION-OF-DONE.md's Financial Test list — same
                            provider_event_id delivered twice produces one state change.
 Duplicate job retry:        the expiry sweep job processing the same candidate Payment twice
@@ -2296,8 +2624,9 @@ Provider callback out-of-
   order:                       see "Webhook Security" out-of-order rule, direct test.
 Payment retry:              mandatory per DEFINITION-OF-DONE.md's Financial Test list — a FAILED
                            or EXPIRED Payment attempt does not block a NEW Payment attempt against
-                           the still-PENDING Donation (subject to OHD-IMP009-01/03's eventual
-                           resolution — test asserts whatever the resolved policy specifies).
+                           the still-PENDING Donation once HD-IMP009-01's one-ACTIVE-attempt slot
+                           is freed; an attempt WHILE the prior one is still ACTIVE is rejected
+                           (see "One-ACTIVE-attempt invariant" above).
 MySQL uniqueness/locking/
   constraint behavior:         RESTRICT on donation_id/payment_id/etc. deletion attempts (raw
                            query, bypassing the service layer, mirroring AC-007-009/010/
@@ -2437,6 +2766,47 @@ Given a webhook-driven or sweep-driven Payment transition
 When the resulting audit event's actor is inspected
 Then it records the correct, distinct Integration Principal (webhook) or System Principal
   (sweep/consequence-invocation) identity — never a human Principal, never the two conflated.
+
+AC-009-021
+Given a Donation with an existing PENDING Payment Attempt
+When any actor (donor, guest, admin, or a concurrent duplicate request) attempts to create a
+  second Payment Attempt against the same Donation
+Then the request is rejected at the DB level (`UNIQUE(donation_id, active_slot)` — HD-IMP009-01,
+  `FINAL / LOCKED`) and no second row is created; once the first attempt reaches ANY terminal
+  state, a subsequent creation request succeeds.
+
+AC-009-022
+Given a Payment whose owning Donation has already reached a terminal state (EXPIRED, CANCELLED,
+  or SUCCEEDED via a prior sequential Payment Attempt)
+When a provider (webhook or poll) reports a late SUCCEEDED or FAILED outcome for this Payment
+Then the Payment's own status is updated to reflect the verified provider fact, the Donation is
+  NOT mutated, and a `payment.donation_transition_rejected` audit event (CRITICAL) is recorded for
+  mandatory human/admin review (`FINAL / LOCKED`, HD-IMP009-02) — no refund, credit, or
+  reinstatement is invented.
+
+AC-009-023
+Given a Manual Bank Transfer Payment with zero `manual_transfer_evidence` rows
+When an actor holding `payment.manual_transfer.verify` attempts to record review_outcome =
+  APPROVED
+Then the request is rejected (`FINAL / LOCKED`, HD-IMP009-06 — evidence is mandatory) and the
+  Payment remains unchanged; the same actor MAY still record REJECTED with zero evidence rows
+  present.
+
+AC-009-024
+Given a Manual Bank Transfer Payment with submitted evidence whose declared_amount_minor does not
+  equal payments.amount_minor
+When an authorized actor reviews it
+Then the only valid outcome recorded is AMOUNT_MISMATCH_HOLD (`FINAL / LOCKED`, HD-IMP009-07); the
+  Payment remains PENDING, the owning Donation is untouched, and neither payments.amount_minor
+  nor donations.amount_minor is mutated.
+
+AC-009-025
+Given a Manual Bank Transfer Payment still in an evidence-eligible state (PENDING, no recorded
+  review_outcome)
+When the same donor/guest submits a SECOND `manual_transfer_evidence` row
+Then the submission succeeds as a new, additional row (`FINAL / LOCKED`, HD-IMP009-08); the first
+  row is not overwritten; once the Payment reaches a terminal state or already carries a recorded
+  review_outcome, a further submission attempt is rejected.
 ```
 
 ## Forbidden Changes
@@ -2451,9 +2821,12 @@ No new ScopeType value added to the closed Data Scope taxonomy.
 No new Business Authority Type added to the closed taxonomy (`financial_approver` reused for
   manual-transfer verification, not a new `payment_verifier`/`payment_approver` type).
 No new `AuditActorKind` enum value; no use of `AuditActorKind::System` to represent a guest actor.
-No unauthorized reuse of ADR-002's `Unauthenticated`-widening beyond its own explicitly stated
-  scope — IMP-009's guest-actor events require their OWN new ADR/amendment before implementation
-  (see "Audit" — BR-16, "Implementation Handoff Requirements").
+No unauthorized reuse of `AuditActorKind::Unauthenticated` beyond
+[ADR-003](../adr/ADR-003-payment-hub-unauthenticated-actor-scope-amendment.md)'s own explicitly
+  enumerated two-event scope (`payment.attempt_created`, `manual_transfer.evidence_submitted`) —
+  `FINAL / LOCKED`, HD-IMP009-12; a third IMP-009 event, or reuse by any other future IMP, requires
+  its own further ADR amendment, never silent analogy. ADR-002 itself is NOT broadened generically
+  (see "Audit" — BR-16).
 No re-introduction of a Campaign-eligibility re-check at Payment-success time — IMP-008's BR-1
   (creation-time-only check) is preserved exactly.
 No Midtrans adapter or reference without an approved ACR (MASTER-REQUIREMENTS.md §9).
@@ -2461,6 +2834,22 @@ No automated Moota-to-Payment matching mechanism (IMP-017's own, later concern).
 No card PAN/CVV/expiry collection, transmission, or storage through this platform's own backend.
 No mandatory Redis/Supervisor/PM2/WebSocket/Node runtime introduced for any Payment Hub concern.
 No provider secret/credential ever stored in plaintext, logged, or returned via any API response.
+No more than ONE ACTIVE (PENDING/REQUIRES_ACTION) Payment Attempt per Donation, ever (`FINAL /
+  LOCKED`, HD-IMP009-01) — no service-layer-only enforcement without the DB-level constraint.
+No guest bearer-token, magic-link, or identifier-as-credential resume/retry mechanism of any kind
+  (`FINAL / LOCKED`, HD-IMP009-04, mirroring HD-IMP008-05B).
+No stored/tokenized payment method, payment mandate, or off-session/automatic recurring charge
+  capability (`FINAL / LOCKED`, HD-IMP009-10).
+No automatic APPROVED/REJECTED resolution of a Manual Transfer amount mismatch, and no refund/
+  credit/balance/allocation/amount-mutation invented in response to one (`FINAL / LOCKED`,
+  HD-IMP009-07).
+No Manual Transfer approval without at least one submitted evidence row (`FINAL / LOCKED`,
+  HD-IMP009-06).
+No forced, reopened, or directly-mutated Donation transition when Donation is already in an
+  incompatible terminal state at the time a terminal Payment outcome arrives (`FINAL / LOCKED`,
+  HD-IMP009-02/HD-IMP009-11) — the Payment fact is still always recorded.
+No Ledger posting, Journal Entry, or Authorized Financial Consequence construction authorized by
+  HD-IMP009-11 — IMP-010/IMP-011 boundaries remain fully intact.
 ```
 
 ## External Verification
@@ -2479,251 +2868,195 @@ File upload MIME allow-list and size-limit exact values — implementation-time 
   invented here without evidence.
 ```
 
+## Human Decisions (Resolved)
+
+All twelve Human Decisions raised by this specification (the original ten Open Human Decisions,
+OHD-IMP009-01 through OHD-IMP009-10, from this document's initial submission for Human Spec
+Approval, commit `21fef30`) are now resolved, `FINAL / LOCKED`, by explicit Human Decision. None
+were decided by Claude.
+
+```
+HD-IMP009-01 — FINAL / LOCKED (resolves OHD-IMP009-01)
+Decision:    Maximum ONE ACTIVE Payment Attempt (status PENDING or REQUIRES_ACTION) per Donation.
+             A new Payment Attempt may be created only after the previous attempt reaches an
+             eligible terminal/non-active state (SUCCEEDED, FAILED, EXPIRED, or CANCELLED).
+             Concurrency MUST enforce this invariant at DB/domain level, not merely a
+             service-layer check.
+Materialized in:  §Domain Model ("Donation relationship", "One-ACTIVE-attempt enforcement" —
+             the `active_slot` generated column + `UNIQUE(donation_id, active_slot)` mechanism),
+             §Database Impact (`payments` schema), §Concurrency, §Authorization ("Payment retry"),
+             §Donation Integration, §Business Rules BR-19, §Testing Requirements, AC-009-021.
+
+HD-IMP009-02 — FINAL / LOCKED (resolves OHD-IMP009-02)
+Decision:    A late provider success or failure MUST NOT be discarded. The Payment records the
+             verified provider fact (SUCCEEDED or FAILED) regardless of the owning Donation's
+             current state. The Donation-transition request is made ONLY through the canonical
+             IMP-008 transition surface, and succeeds only when Donation's own state machine
+             permits it (i.e. Donation is still PENDING). If the Donation is already in an
+             incompatible terminal state, Payment MUST NOT force, reopen, or directly mutate
+             Donation — the condition is recorded and raised for controlled exception/manual
+             review instead. No accounting treatment (refund, credit, reinstatement, ledger
+             adjustment) is invented by IMP-009 for this case.
+Materialized in:  §State Machines (duplicate/out-of-order-event rules), §Donation Integration
+             ("How a successful Payment affects Donation", "Failed Payment behavior"),
+             §Financial Boundary, §Failure Semantics ("Donation transition invocation fails"),
+             §Audit (`payment.donation_transition_rejected`), §Business Rules BR-8/BR-20,
+             §Testing Requirements, AC-009-018/022.
+
+HD-IMP009-03 — FINAL / LOCKED (resolves OHD-IMP009-03)
+Decision:    No hard-coded lifetime maximum number of Payment Attempts per Donation. Abuse/rate
+             controls MAY be configurable (an operational, not domain-contract, concern).
+             HD-IMP009-01's one-ACTIVE-attempt-at-a-time invariant still applies regardless of how
+             many total (terminal) attempts have accumulated.
+Materialized in:  §Domain Model, §Donation Integration, §Authorization, §Business Rules BR-19.
+
+HD-IMP009-04 — FINAL / LOCKED (resolves OHD-IMP009-04)
+Decision:    No guest self-service resume/retry mechanism based solely on Donation ID, Payment
+             ID, ULID, email, or any other identifier — none of these are authentication secrets.
+             IMP-009 SHALL NOT introduce a new guest bearer-token/magic-link recovery mechanism.
+             An abandoned guest attempt is recovered only by: (a) the still-ACTIVE Payment Attempt
+             naturally reaching EXPIRED via the Payment expiry sweep (HD-IMP009-09), which then
+             frees the HD-IMP009-01 one-ACTIVE-attempt slot for a new attempt; or (b) an authorized
+             organization-scoped support-controlled process (the SAME `payment.cancel` ORGANIZATION-
+             scope admin path already defined in "Authorization"), where already supported —
+             never a new guest-facing mechanism.
+Materialized in:  §Authorization ("Public/guest Payment creation", "Donor/guest viewing own
+             Payment(s)"), §Donation Integration, §Concurrency ("Payment retry vs late success"),
+             §Forbidden Changes.
+
+HD-IMP009-05 — FINAL / LOCKED (resolves OHD-IMP009-05)
+Decision:    The Xendit adapter baseline targets the **PaymentRequest API** (Xendit's newer,
+             unified, per-channel API), not the hosted Invoice API. Xendit-specific concepts
+             (Payment Request, Payment Method, Payment Session, capture semantics) remain fully
+             isolated behind the provider adapter interface — no Xendit-specific state or
+             vocabulary leaks into the canonical Payment state machine. The concrete current
+             endpoint/version/field requirements MUST be verified against Xendit's own
+             authoritative API documentation at implementation time, not assumed frozen by this
+             specification.
+Materialized in:  §Xendit (status-normalization mapping revised — see below), §External
+             Verification, §Provider Adapter Architecture.
+
+HD-IMP009-06 — FINAL / LOCKED (resolves OHD-IMP009-06)
+Decision:    Proof-of-transfer evidence is MANDATORY for any Manual Bank Transfer flow that
+             requires human verification — a Payment cannot be manually APPROVED through that
+             verification flow without at least one `manual_transfer_evidence` row present.
+             Evidence remains private and access-controlled (see "File Security").
+Materialized in:  §Manual Transfer, §Domain Model, §Authorization ("Manual transfer verification"),
+             §Business Rules BR-21, AC-009-023.
+
+HD-IMP009-07 — FINAL / LOCKED (resolves OHD-IMP009-07)
+Decision:    Manual Transfer underpayment or overpayment (declared/observed transferred amount
+             != `payments.amount_minor`) MUST NOT automatically produce canonical SUCCEEDED/PAID
+             Donation treatment. `payments.amount_minor` (and `donations.amount_minor`) remain
+             immutable — no amount is ever adjusted to match an actual transferred amount. An
+             amount mismatch enters a controlled exception/manual-review path, distinct from an
+             ordinary APPROVE/REJECT decision. IMP-009 MUST NOT invent refund, credit, balance,
+             allocation, donation-amount mutation, or accounting treatment for this case — those
+             consequences belong entirely to later governed domains (IMP-016 Refund and/or a
+             future authorized reconciliation-adjacent mechanism).
+Materialized in:  §Manual Transfer ("Amount mismatch"), §Domain Model
+             (`manual_transfer_evidence.review_outcome` third value), §Business Rules BR-12/BR-22,
+             §Failure Semantics, §Testing Requirements, AC-009-024.
+
+HD-IMP009-08 — FINAL / LOCKED (resolves OHD-IMP009-08)
+Decision:    Manual Transfer evidence MAY be resubmitted while the owning Payment remains in a
+             state eligible for evidence submission (PENDING, evidence not yet reviewed/approved/
+             rejected). Each submission is its own immutable, auditable
+             `manual_transfer_evidence` row — a resubmission NEVER overwrites historical evidence.
+             A Payment in a terminal or otherwise ineligible state (already SUCCEEDED, FAILED,
+             EXPIRED, CANCELLED, or already under a recorded APPROVED/REJECTED review outcome)
+             rejects any further evidence submission.
+Materialized in:  §Manual Transfer ("Duplicate proof"), §Domain Model (`manual_transfer_evidence`
+             — already an append-only, multi-row-per-Payment table by design), §Authorization,
+             §Business Rules BR-23, AC-009-025.
+
+HD-IMP009-09 — FINAL / LOCKED (resolves OHD-IMP009-09)
+Decision:    Payment expiry fallback duration is CONFIGURABLE — no hard-coded business duration
+             belongs in the domain contract. When a provider supplies an authoritative expiry
+             (Tripay `expired_time`, Xendit's own PaymentRequest expiry field), it is preserved/
+             normalized as-is. For flows/providers requiring the internal fallback (Manual
+             Transfer; Stripe, which has no native expiry), the deployment MUST supply valid
+             configuration before the sweep acts — no numeric default is asserted by this
+             specification. Donation expiration (IMP-008) remains entirely separate from Payment
+             expiration (this IMP) — the two clocks are never conflated.
+Materialized in:  §Expiration (mechanism already specified exactly this way — this decision
+             confirms the recommended default without change), §Manual Transfer, §Stripe,
+             §Database Impact (`config('payment.pending_expiry_minutes')`).
+
+HD-IMP009-10 — FINAL / LOCKED (resolves OHD-IMP009-10)
+Decision:    Recurring Donation v1 is MANUAL-PER-CYCLE from the Payment Hub's perspective — every
+             Recurring Occurrence's generated Donation goes through the ordinary donor-initiated
+             Payment-creation flow, identical to a one-time Donation. IMP-009 SHALL NOT store
+             reusable/tokenized payment credentials, payment mandates, or any off-session charge
+             authorization, and SHALL NOT implement automatic/background recurring charging.
+             Future auto-charge capability requires its own separate, explicitly governed
+             specification and change control — it is not a silent future extension of this IMP.
+Materialized in:  §Donation Integration ("Recurring Donation occurrence interaction"), §Out of
+             Scope, §Forbidden Changes, §Stripe ("No card data storage" — reinforced, not
+             loosened, by this decision).
+
+HD-IMP009-11 — FINAL / LOCKED (new decision — resolves this specification's own "Architectural
+Escalation" finding from its initial submission)
+Decision:    Payment success/failure MAY request a Donation state transition ONLY through the
+             EXISTING canonical IMP-008 transition surface, invoked using the applicable
+             registered System Principal (`system.payment-outcome-consequence`) or, where the
+             triggering event is itself a verified provider webhook, the applicable registered
+             Integration Principal for the receipt step and the System Principal for the
+             transition-invocation step, kept distinct per "System Principal". Payment MUST NOT
+             directly update `donations.status` or any other Donation column, and MUST NOT bypass
+             IMP-008's own state machine/validation. The canonical posting chain's ordering is
+             confirmed exactly as this specification already described: Business State Transition
+             (this invocation) remains strictly BEFORE Authorized Financial Consequence
+             (IMP-011's own, later construct). This decision does NOT authorize Ledger posting of
+             any kind — IMP-010/IMP-011's boundaries remain fully intact; IMP-009 continues to
+             construct no Ledger-related object and call no Ledger-related code.
+Materialized in:  §Financial Boundary (escalation formally resolved — see note below), §Donation
+             Integration, §System Principal, §Ledger Boundary, §Business Rules BR-8.
+
+HD-IMP009-12 — FINAL / LOCKED (new decision — resolves this specification's own "New ADR Required"
+finding from its initial submission)
+Decision:    A new, narrowly-scoped ADR — [ADR-003](../adr/ADR-003-payment-hub-unauthenticated-actor-scope-amendment.md)
+             — governs `AuditActorKind::Unauthenticated` for exactly two explicitly enumerated
+             IMP-009 guest events (`payment.attempt_created`,
+             `manual_transfer.evidence_submitted`), each with its own fixed, registered
+             `execution_context` constant, `actor_principal_id = NULL`, consistent with IMP-004's
+             existing mechanism and ADR-002's established Category-2 pattern. This is explicitly
+             NOT a generic broadening of ADR-002 itself, and it MUST NOT become a generic
+             unauthenticated-audit bucket applicable to unrelated domains — any further IMP-009
+             event, or any other future IMP's event, needing this treatment requires its own
+             further ADR amendment, never silent reuse.
+Materialized in:  [ADR-003](../adr/ADR-003-payment-hub-unauthenticated-actor-scope-amendment.md)
+             (full decision record); §Audit (guest-actor events section), §Business Rules BR-16,
+             §Forbidden Changes.
+```
+
+**Architectural Escalation — RESOLVED.** HD-IMP009-11 confirms, as an explicit Human Decision
+rather than an AI-authored interpretation, that IMP-009 is the correct caller of IMP-008's
+System-Principal-gated Donation transition surface (see "Financial Boundary", "Donation
+Integration"). No change to this specification's already-designed mechanism was required — the
+decision authorizes the design as drafted.
+
+**New ADR Required — RESOLVED.** [ADR-003](../adr/ADR-003-payment-hub-unauthenticated-actor-scope-amendment.md)
+is created, narrowly scoped to exactly the two events HD-IMP009-12 enumerates, and is a
+prerequisite recorded under "Implementation Handoff Requirements" alongside the other gating
+steps.
+
 ## Open Human Decisions
 
-Ten genuine, unresolved business/architecture ambiguities. None is decided by this specification.
-Each recommended default is a suggestion only — the Human decides.
-
-```
-OHD-IMP009-01
-QUESTION:              How many Payment Attempts against the SAME Donation may be simultaneously
-                        ACTIVE (PENDING or REQUIRES_ACTION, i.e. not yet terminal)?
-WHY IT MATTERS:          Determines whether creating a new Payment Attempt must first
-                        cancel/supersede any existing active attempt, or whether multiple
-                        concurrent attempts (e.g. a donor opening the payment page in two tabs, or
-                        switching provider mid-flow) may race to succeed independently — directly
-                        shapes the Payment-creation service logic and the "Concurrency" locking
-                        contract's business-rule layer (the locking MECHANISM is the same either
-                        way; only the rule it enforces differs).
-EXISTING CONTRACT:       MASTER-REQUIREMENTS.md §9 states only "Payment may have multiple
-                        intents/attempts" — over the DONATION'S lifetime, not a statement about
-                        simultaneous concurrency.
-OPTIONS:                 (a) exactly one ACTIVE attempt at a time — creating a new one
-                        auto-cancels any prior active attempt; (b) multiple concurrent active
-                        attempts permitted, first terminal outcome to arrive wins, the rest are
-                        auto-cancelled at that point; (c) unlimited, no automatic cancellation,
-                        left to donor/UI discipline.
-ARCHITECTURAL CONSEQUENCE: (a) is simplest and lowest financial risk (impossible for two provider
-                        transactions to both succeed for one Donation) but requires an explicit
-                        auto-cancel step on new-attempt creation; (b)/(c) require the
-                        Donation-transition invocation (BR-8) to correctly handle "the Donation is
-                        already SUCCEEDED from a DIFFERENT sibling Payment" as a first-class,
-                        expected outcome, not merely the OHD-IMP009-02 orphaned-payment edge case.
-RECOMMENDED DEFAULT:      (a) — single active attempt at a time, auto-cancelling a prior active
-                        attempt when a new one is created.
-
-OHD-IMP009-02
-QUESTION:              What happens when a provider reports a terminal SUCCEEDED (or FAILED)
-                        outcome for a Payment whose owning Donation has ALREADY reached a
-                        different terminal state (e.g. Donation already EXPIRED via its own
-                        independent sweep, or already SUCCEEDED via a sibling Payment)?
-WHY IT MATTERS:          This is the single highest financial-risk ambiguity in this
-                        specification — it is the exact scenario where real money may have moved
-                        at the provider but the platform's own Donation record can no longer
-                        reflect it through the normal transition path (Donation is terminal, BR-7
-                        forbids further transition).
-EXISTING CONTRACT:       IMP-008 BR-7 makes Donation terminal states absolutely immutable — IMP-009
-                        may not violate this. No authoritative source decides what happens to the
-                        MONEY/record in this case.
-OPTIONS:                 (a) record the Payment as SUCCEEDED/FAILED truthfully (it reflects what
-                        the PROVIDER reported), leave the Donation in its terminal state
-                        unchanged, and flag the case for MANDATORY human/admin review (a distinct
-                        audit event + admin worklist item) — no automatic reinstatement, no
-                        automatic refund; (b) automatically reinstate the Donation to SUCCEEDED
-                        regardless of its prior terminal state (violates BR-7, rejected as an
-                        option by this specification's own constraints, listed only for
-                        completeness); (c) automatically trigger a refund-initiation signal
-                        (premature — Refund is IMP-016's own workflow).
-ARCHITECTURAL CONSEQUENCE: (a) requires an explicit "orphaned payment" audit event/admin surface;
-                        does not touch Ledger/Refund. (c) would require IMP-009 to reach into
-                        IMP-016's scope prematurely.
-RECOMMENDED DEFAULT:      (a).
-
-OHD-IMP009-03
-QUESTION:              Is there a maximum number of Payment Attempts allowed against a single
-                        PENDING Donation over its lifetime?
-WHY IT MATTERS:          Bounds both abuse risk (unlimited retry attempts against one Donation)
-                        and the operational cost of unlimited provider-transaction creation.
-EXISTING CONTRACT:       None. HD-IMP008-04 mirrors this exact "no invented default" posture for a
-                        different value (Donation expiry duration).
-OPTIONS:                 (a) unlimited attempts, implicitly bounded only by the Donation's own
-                        expiry (IMP-008); (b) a configurable maximum count (unset by default,
-                        mirroring HD-IMP008-04's pattern exactly).
-ARCHITECTURAL CONSEQUENCE: (b) requires an additional counter/check at Payment-creation time; (a)
-                        requires none beyond what "Authorization"/"Donation Integration" already
-                        specify (Donation must be PENDING).
-RECOMMENDED DEFAULT:      (a) — unlimited, since no authoritative source names a limit and
-                        Donation's own expiry already bounds the total abuse window.
-
-OHD-IMP009-04
-QUESTION:              How does a GUEST donor resume or retry a Payment Attempt after leaving the
-                        original response/redirect flow (e.g. closing the browser mid-Tripay
-                        checkout), given HD-IMP008-05B's absolute prohibition on any
-                        bearer-token/identifier-as-credential guest access mechanism?
-WHY IT MATTERS:          Without SOME resume mechanism, an abandoned guest Payment Attempt is
-                        permanently unrecoverable by that guest (they would need to create an
-                        entirely new Donation), which may be an acceptable trade-off or may be a
-                        real product gap — this is a genuine, unresolved product/security
-                        trade-off, not an engineering detail.
-EXISTING CONTRACT:       HD-IMP008-05B (IMP-008, `FINAL/LOCKED`) forbids any guest
-                        bearer-token/magic-link/identifier-as-credential mechanism for Donation
-                        cancellation; this specification treats the same prohibition as applying
-                        by the same principle to Payment resume/retry, absent a Human decision
-                        saying otherwise.
-OPTIONS:                 (a) no durable resume path exists at the platform level — a guest who
-                        abandons the flow must create a brand-new Payment Attempt (new
-                        idempotency key) against the still-PENDING Donation, discovered only by
-                        navigating the original page flow again from the Donation's own
-                        (equally non-durable) reference; (b) the PROVIDER's own hosted checkout
-                        URL/session (Tripay/Xendit's own redirect URL, Stripe's own client_secret-
-                        backed page) is treated as the resume mechanism, since it is a
-                        provider-issued, time-boxed artifact, not a platform-issued credential —
-                        the platform itself still exposes no separate guest bearer token; (c) a
-                        future, explicitly authorized extension (e.g. an email-delivered
-                        magic-link) is designed later, out of this IMP's scope entirely.
-ARCHITECTURAL CONSEQUENCE: (b) requires no new platform-level auth mechanism at all — it relies
-                        entirely on providers' own existing session handling; (c) would require
-                        its own dedicated security review before any implementation.
-RECOMMENDED DEFAULT:      (b).
-
-OHD-IMP009-05
-QUESTION:              Which Xendit API generation does the Xendit adapter target — the
-                        hosted Invoice API (single hosted checkout page) or the newer, more
-                        granular Payment Methods / PaymentRequest API (per-channel
-                        token/charge flow)?
-WHY IT MATTERS:          These are materially different integration shapes (hosted-page redirect
-                        vs granular per-channel API calls with different webhook event
-                        vocabularies) — the choice affects the Xendit adapter's internal design
-                        substantially, though not this specification's provider-neutral canonical
-                        model (see "Xendit").
-EXISTING CONTRACT:       None — MASTER-REQUIREMENTS.md §9 names "Xendit" only, no API generation.
-OPTIONS:                 (a) Invoice API (hosted checkout page, closer in integration shape to
-                        Tripay's own hosted-checkout model, minimizes UI-surface exposure); (b)
-                        Payment Methods/PaymentRequest API (more granular per-channel control,
-                        closer in shape to Stripe's own PaymentIntent model, more implementation
-                        surface).
-ARCHITECTURAL CONSEQUENCE: (a) is simpler to implement and audit given this platform's
-                        shared-hosting/minimal-surface constraints; (b) offers more UX control at
-                        the cost of significantly more adapter complexity and a wider webhook
-                        event vocabulary to normalize.
-RECOMMENDED DEFAULT:      (a) — Invoice API.
-
-OHD-IMP009-06
-QUESTION:              Is proof-of-transfer (evidence) upload MANDATORY before a Manual Bank
-                        Transfer Payment can be submitted for admin verification, or OPTIONAL
-                        (an admin may verify by bank-statement matching alone)?
-WHY IT MATTERS:          Directly shapes the Manual Transfer donor-facing flow and the admin
-                        verification workflow's required inputs; the task's own instructions
-                        explicitly caution against inventing this as mandatory without raising it.
-EXISTING CONTRACT:       None.
-OPTIONS:                 (a) mandatory — the strongest evidentiary anchor for a human-verified
-                        flow; (b) optional — admin may approve/reject using out-of-band bank
-                        statement information alone; (c) configurable per bank account/currency.
-ARCHITECTURAL CONSEQUENCE: (a) requires the Payment-creation-to-verification flow to gate on at
-                        least one `manual_transfer_evidence` row existing; (b)/(c) require the
-                        admin verification UI to support approval with zero evidence rows present.
-                        The schema (see "Domain Model") supports all three without redesign.
-RECOMMENDED DEFAULT:      (a) — mandatory.
-
-OHD-IMP009-07
-QUESTION:              When a Manual Bank Transfer's donor-declared or bank-statement-observed
-                        transferred amount does NOT match payments.amount_minor (over- or
-                        under-payment), what does the admin verification action do?
-WHY IT MATTERS:          This is a genuine financial-integrity decision directly touching
-                        Donation's own LOCKED immutable amount_minor (IMP-008 BR-8) — no resolution
-                        may silently "fix" either amount, so the decision materially shapes the
-                        admin workflow and what a mismatch even MEANS operationally.
-EXISTING CONTRACT:       IMP-008 BR-8 makes donations.amount_minor immutable; this specification's
-                        own BR-2/BR-12 make payments.amount_minor immutable too — neither may be
-                        adjusted to match an actual transferred amount.
-OPTIONS:                 (a) reject/hold — an admin CANNOT approve a mismatched amount; the
-                        Payment must be REJECTED and the donor/guest referred to support (a new
-                        Payment Attempt, or a support-mediated resolution outside this
-                        specification's scope, would be needed); (b) approve at the Payment's
-                        OWN amount_minor regardless of the actual transferred amount (treats a
-                        minor discrepancy as immaterial — risks silently absorbing a real
-                        shortfall/overage with no accounting trail for the difference); (c)
-                        approve only within a configurable tolerance band (e.g. rounding/fee
-                        differences), reject outside it.
-ARCHITECTURAL CONSEQUENCE: (a) is simplest and safest but may create donor-support friction for
-                        trivial rounding differences; (c) requires a new configuration value and
-                        explicit tolerance-comparison logic in the admin approval path.
-RECOMMENDED DEFAULT:      (a) — reject/hold outside exact match, refer to support.
-
-OHD-IMP009-08
-QUESTION:              May a donor/guest submit MULTIPLE proof-of-transfer evidence rows against
-                        the SAME Manual Transfer Payment (e.g. correcting a blurry photo), or is
-                        evidence submission a one-shot action (a resubmission requires a NEW
-                        Payment Attempt)?
-WHY IT MATTERS:          Affects the donor-facing UX and the admin review queue's shape (reviewing
-                        one vs potentially many evidence rows per Payment); also has a support-
-                        workload dimension.
-EXISTING CONTRACT:       None.
-OPTIONS:                 (a) resubmission allowed — multiple `manual_transfer_evidence` rows may
-                        exist per Payment while it is still PENDING/unreviewed, admin reviews the
-                        most recent (or all); (b) one-shot — the first submission is final;
-                        correcting a mistake requires a NEW Payment Attempt (mirrors "posted
-                        financial evidence is immutable, corrections via a new record" applied
-                        here).
-ARCHITECTURAL CONSEQUENCE: (a) requires the admin UI to handle multiple evidence rows per Payment
-                        and a "which one is current" convention; (b) is simpler but pushes minor
-                        correction friction onto the donor (a whole new Payment Attempt for a
-                        photo re-upload).
-RECOMMENDED DEFAULT:      (b) — one-shot, mirroring the platform's general immutable-evidence
-                        posture.
-
-OHD-IMP009-09
-QUESTION:              What Payment expiry fallback DURATION applies for Manual Transfer and any
-                        provider without a native expiry signal (Stripe)?
-WHY IT MATTERS:          Directly mirrors HD-IMP008-04's own resolved pattern for Donation expiry
-                        — the MECHANISM is fully specified by this document (see "Expiration"),
-                        only the numeric value is undetermined, and inventing one would violate
-                        this platform's own established "no invented default" precedent.
-EXISTING CONTRACT:       HD-IMP008-04 (IMP-008) establishes the exact precedent pattern this OHD
-                        mirrors at the Payment layer.
-OPTIONS:                 any specific duration is a Human/operator decision; the mechanism itself
-                        (a single nullable config value, gating the sweep, `null` by default,
-                        never acting while unset) is not itself in question.
-ARCHITECTURAL CONSEQUENCE: none beyond what "Expiration" already specifies — this OHD exists
-                        purely to avoid this specification silently asserting a number.
-RECOMMENDED DEFAULT:      no default asserted (mirrors HD-IMP008-04 exactly) — value remains
-                        unset until an operator/Human supplies one via ordinary configuration.
-
-OHD-IMP009-10
-QUESTION:              Does a Recurring Plan (IMP-008) pre-select and durably store a payment
-                        method (e.g. a tokenized/saved card via Stripe) for automatic future
-                        charging of each generated Occurrence's Donation, or does every
-                        Occurrence require the donor to manually complete payment each cycle (no
-                        stored payment method, no auto-charge)?
-WHY IT MATTERS:          This is a materially different architecture — a stored/tokenized payment
-                        method introduces card-on-file storage, its own PCI-scope considerations
-                        (even tokenized), a "charge on schedule" background job, and failure/
-                        retry semantics for an AUTOMATIC charge attempt with no donor present to
-                        react to a REQUIRES_ACTION (3-D Secure) challenge. IMP-008 explicitly
-                        deferred ALL Payment-attempt concerns for recurring Donations to IMP-009
-                        without deciding this question itself.
-EXISTING CONTRACT:       None. IMP-008's Recurring Occurrence model (IMP-008-donation.md:354,
-                        "Recurring Plan -> Occurrence -> Donation -> Payment") only guarantees a
-                        Donation is generated on schedule — it says nothing about how that
-                        Donation's Payment gets completed.
-OPTIONS:                 (a) manual-per-cycle in v1 — no stored payment method, no auto-charge;
-                        each generated Occurrence's Donation goes through the ordinary donor-
-                        initiated Payment-creation flow like any one-time Donation (the donor is
-                        notified — via a future IMP-024 mechanism — and completes payment
-                        manually each cycle); (b) stored payment method / card-on-file auto-charge
-                        (Stripe-only realistically, since Tripay/Xendit/Manual Transfer have no
-                        equivalent tokenization model for this platform), with its own background
-                        charge job, retry policy, and 3-D-Secure-challenge-with-no-donor-present
-                        handling.
-ARCHITECTURAL CONSEQUENCE: (a) requires no new entity beyond what this specification already
-                        defines and no PCI-tokenization scope expansion; (b) requires a new stored-
-                        payment-method entity, explicit tokenization-scope authorization, and a
-                        materially larger adapter surface for Stripe specifically (and an explicit
-                        decision that Recurring Donation via Tripay/Xendit/Manual Transfer simply
-                        cannot auto-charge, if (b) is chosen only for Stripe).
-RECOMMENDED DEFAULT:      (a) — manual-per-cycle, no stored payment method, since no authorization
-                        exists for the additional tokenization/PCI scope (b) would introduce.
-```
+**NONE.** All twelve Human Decisions raised by this specification (HD-IMP009-01 through
+HD-IMP009-12) are resolved — see "Human Decisions (Resolved)" above. A full re-audit of this
+document (per the integration task's required checklist: one-ACTIVE-attempt invariant,
+late-success behavior, guest security, Payment idempotency, manual-transfer evidence lifecycle,
+amount-mismatch behavior, Payment expiry, recurring manual-per-cycle boundary, Donation-transition
+boundary, Donation != Payment, Payment != Ledger, Refund boundary, Reconciliation/Moota boundary,
+audit actor semantics, shared-hosting compatibility) found no genuine NEW unresolved business
+ambiguity introduced by integrating HD-IMP009-01..12 — each decision's own text was specific
+enough to close the corresponding OHD without leaving a residual gap (see the cross-references in
+each entry above, and the corresponding updates throughout "Domain Model", "Manual Transfer",
+"Xendit", "Concurrency", "Donation Integration", "Business Rules", "Testing Requirements", and
+"Acceptance Criteria"). This specification therefore satisfies
+[docs/00-governance/DEFINITION-OF-DONE.md](../00-governance/DEFINITION-OF-DONE.md)'s "Definition
+of Ready" checklist item "No unresolved Human Decision" in full.
 
 ## Out of Scope
 
@@ -2753,21 +3086,23 @@ Before Muse/Claude Code implementation of this specification may proceed:
 1. Human Spec Approval of this document (see "Implementation Ownership").
 2. GOV-MM-002 Claude Per-IMP Model Binding for IMP-009 recorded as BOUND
    (MULTI-MODEL-OWNERSHIP.md "Mission-Critical Claude Stages").
-3. All ten Open Human Decisions (OHD-IMP009-01 through -10) resolved by explicit Human Decision —
-   mirroring IMP-008's own precedent of resolving every OHD before implementation began. This
-   specification's architecture accommodates either resolution of each OHD without structural
-   redesign (see each OHD's "Architectural Consequence"), but the SERVICE-LAYER business rules
-   these OHDs govern cannot be implemented against an unresolved question.
-4. A new ADR (or an amendment to ADR-002) explicitly authorizing `AuditActorKind::Unauthenticated`
-   for `payment.attempt_created` and `manual_transfer.evidence_submitted` (see "Audit" — BR-16),
-   following the same Change-Control procedure ADR-002 itself followed
+3. DONE — all twelve Human Decisions (HD-IMP009-01 through -12) are resolved by explicit Human
+   Decision (see "Human Decisions (Resolved)"); no unresolved Human Decision remains (see "Open
+   Human Decisions": NONE).
+4. DONE — [ADR-003](../adr/ADR-003-payment-hub-unauthenticated-actor-scope-amendment.md) is
+   created and ACCEPTED, explicitly authorizing `AuditActorKind::Unauthenticated` for
+   `payment.attempt_created` and `manual_transfer.evidence_submitted` (HD-IMP009-12, see "Audit" —
+   BR-16), following the same Change-Control procedure ADR-002 itself followed
    (docs/00-governance/CHANGE-CONTROL.md).
 5. Qwen Recon pass over the resulting BOUND/approved state (per V3 pipeline — MUST NOT run before
-   or concurrently with Human Spec Approval, HD-V3-R2-01).
-6. Exact per-provider status vocabulary (Tripay/Xendit/Stripe) verified against each provider's
-   own current API documentation at implementation time (see "External Verification").
+   or concurrently with Human Spec Approval, HD-V3-R2-01) — still pending; not performed by this
+   integration task.
+6. Exact per-provider status vocabulary (Tripay/Xendit's PaymentRequest API per HD-IMP009-05/
+   Stripe) verified against each provider's own current API documentation at implementation time
+   (see "External Verification").
 7. File-upload MIME allow-list, size limit, and the Payment expiry fallback duration value(s)
-   supplied as ordinary application configuration (see "External Verification").
+   (HD-IMP009-09 — configurable, no default asserted) supplied as ordinary application
+   configuration (see "External Verification").
 ```
 
 ## Definition of Done
