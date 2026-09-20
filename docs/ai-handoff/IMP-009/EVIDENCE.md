@@ -30,7 +30,7 @@ transcription slip, not a different commit. Baseline accepted.
 
 ```
 feat(imp-009): implement payment hub
-SHA: <filled at commit time>
+SHA: a30ca7fd0bf99376301d57b78550c8097b2ab438
 ```
 
 Working tree ends CLEAN. No push. No merge.
