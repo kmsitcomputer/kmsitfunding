@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\Admin\AdminPaymentController;
+use App\Http\Controllers\Admin\AdminPaymentProviderConfigController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\ConfirmablePasswordController;
 use App\Http\Controllers\Auth\EmailChangeController;
@@ -18,13 +20,18 @@ use App\Http\Controllers\Cms\ArticleController;
 use App\Http\Controllers\Cms\HomepageController;
 use App\Http\Controllers\Cms\MediaController;
 use App\Http\Controllers\Cms\PageController;
+use App\Http\Controllers\DashboardPaymentController;
 use App\Http\Controllers\Donation\AdminDonationController;
 use App\Http\Controllers\Donation\DashboardDonationController;
 use App\Http\Controllers\PublicCampaignController;
 use App\Http\Controllers\PublicContentController;
 use App\Http\Controllers\PublicDonationController;
+use App\Http\Controllers\PublicPaymentController;
 use App\Http\Controllers\PublicProgramController;
 use App\Http\Controllers\Theme\ThemeController;
+use App\Http\Controllers\Webhooks\StripeWebhookController;
+use App\Http\Controllers\Webhooks\TripayWebhookController;
+use App\Http\Controllers\Webhooks\XenditWebhookController;
 use App\Models\Campaign\Campaign;
 use App\Models\Campaign\Fund;
 use App\Models\Campaign\Program;
@@ -264,6 +271,36 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::post('/{plan}/resume', [AdminDonationController::class, 'resumePlan'])->name('resume');
         Route::post('/{plan}/cancel', [AdminDonationController::class, 'cancelPlan'])->name('cancel');
     });
+
+    // IMP-009 — donor-owned Payment views/actions (docs/implementation/
+    // IMP-009-payment-hub.md "Routes / API Boundary"). {donation}/
+    // {payment} are bound by ULID, never the internal BIGINT id.
+    // Authenticated-only: guest has no listing path (HD-IMP009-04).
+    Route::prefix('me/donations/{donation}/payments')->name('payments.')->group(function () {
+        Route::get('/', [DashboardPaymentController::class, 'index'])->name('index');
+        Route::get('/{payment}', [DashboardPaymentController::class, 'show'])->name('show');
+        Route::post('/{payment}/cancel', [DashboardPaymentController::class, 'cancel'])->name('cancel');
+        Route::post('/{payment}/manual-transfer/evidence', [DashboardPaymentController::class, 'storeEvidence'])->name('evidence.store');
+        Route::get('/{payment}/manual-transfer/evidence/{evidence}', [DashboardPaymentController::class, 'showEvidence'])->name('evidence.show');
+    });
+
+    // IMP-009 — admin/backoffice Payment views and manual-transfer
+    // verification (ORGANIZATION scope + financial_approver for
+    // verify actions). Mirrors the admin/donation/* convention.
+    Route::prefix('admin/payment/payments')->name('payment.admin.')->group(function () {
+        Route::get('/', [AdminPaymentController::class, 'index'])->name('index');
+        Route::get('/{payment}', [AdminPaymentController::class, 'show'])->name('show');
+        Route::post('/{payment}/manual-transfer/approve', [AdminPaymentController::class, 'approve'])->name('approve');
+        Route::post('/{payment}/manual-transfer/reject', [AdminPaymentController::class, 'reject'])->name('reject');
+        Route::post('/{payment}/manual-transfer/hold', [AdminPaymentController::class, 'hold'])->name('hold');
+    });
+
+    Route::prefix('admin/payment/provider-config')->name('payment.admin.')->group(function () {
+        Route::get('/', [AdminPaymentProviderConfigController::class, 'index'])->name('provider-config');
+        Route::post('/{provider}', [AdminPaymentProviderConfigController::class, 'updateCredential'])->name('provider-config.update');
+        Route::post('/bank-accounts', [AdminPaymentProviderConfigController::class, 'storeBankAccount'])->name('bank-accounts.store');
+        Route::post('/bank-accounts/{account}/toggle', [AdminPaymentProviderConfigController::class, 'toggleBankAccount'])->name('bank-accounts.toggle');
+    });
 });
 
 // IMP-007 — public Program/Campaign routes (docs/implementation/
@@ -282,6 +319,30 @@ Route::get('/campaigns/{campaign:slug}/donate', [PublicDonationController::class
 Route::post('/campaigns/{campaign:slug}/donations', [PublicDonationController::class, 'store'])
     ->middleware('throttle:6,1')
     ->name('public.donations.store');
+
+// IMP-009 — public Payment entry point (docs/implementation/
+// IMP-009-payment-hub.md "Routes / API Boundary": POST
+// /donations/{ulid}/payments — the intentional
+// guest-or-authenticated creation endpoint, plus the live-status
+// read within the original response/redirect flow — never a
+// bearer-token/identifier-as-credential mechanism, HD-IMP009-04).
+// Idempotency-Key header REQUIRED. Registered before the IMP-006
+// catch-all below.
+//
+// Provider webhooks (one route per provider, the ONE narrowly-scoped
+// CSRF exemption — see bootstrap/app.php): provider identity comes
+// from the route itself, never payload-shape inference.
+Route::post('/donations/{donation}/payments', [PublicPaymentController::class, 'store'])
+    ->middleware('throttle:6,1')
+    ->name('public.payments.store');
+Route::get('/donations/{donation}/payments/{payment}', [PublicPaymentController::class, 'show'])
+    ->name('public.payments.show');
+
+Route::prefix('webhooks/payments')->name('webhooks.payments.')->group(function () {
+    Route::post('/tripay', [TripayWebhookController::class, 'handle'])->name('tripay');
+    Route::post('/xendit', [XenditWebhookController::class, 'handle'])->name('xendit');
+    Route::post('/stripe', [StripeWebhookController::class, 'handle'])->name('stripe');
+});
 
 // IMP-006 — the public content catch-all (docs/implementation/
 // IMP-006-theme-engine.md section 13), registered LAST so every

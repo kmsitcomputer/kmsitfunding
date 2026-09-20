@@ -29,3 +29,11 @@ Schedule::command('content:cleanup-media')->hourly()->withoutOverlapping();
 // generation SCHEDULING/EXECUTION engine is explicitly deferred (spec
 // "Out of Scope") — no generator is scheduled here.
 Schedule::command('donation:expire-pending')->everyMinute()->withoutOverlapping();
+
+// IMP-009 — Payment expiration sweep (HD-IMP009-09, config-gated: no-op
+// for fallback-window payments while payment.pending_expiry_minutes is
+// null; provider-supplied expires_at windows always apply). Laravel
+// Scheduler + Cron, shared-hosting compatible. withoutOverlapping() is
+// a courtesy only: the command's own per-row locking already makes
+// overlapping runs safe by construction.
+Schedule::command('payment:expire-pending')->everyMinute()->withoutOverlapping();

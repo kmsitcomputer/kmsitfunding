@@ -126,6 +126,31 @@ class PermissionRegistry
 
     public const DONATION_RECURRING_PLAN_MANAGE = 'donation.recurring_plan.manage';
 
+    // IMP-009 Payment Hub permission family (docs/implementation/
+    // IMP-009-payment-hub.md "Authorization"). payment.create covers guest
+    // self-service (no auth, PENDING Donation) AND authenticated donor
+    // self-service (OWN scope); payment.cancel covers donor self-service
+    // (OWN scope) AND admin support-path cancellation of abandoned guest
+    // attempts (ORGANIZATION scope, HD-IMP009-04) — same permission, scope
+    // distinguishes the path. payment.manual_transfer.verify additionally
+    // requires financial_approver Business Authority (no new Authority
+    // Type invented). payment.provider_config.manage is GLOBAL_PLATFORM
+    // (a provider is platform-wide). Included in the super_admin bulk
+    // grant below like every other non-audit permission — no bypass
+    // (Super Admin still needs the explicit grant, and financial
+    // authority is never implied by role name).
+    public const PAYMENT_VIEW = 'payment.view';
+
+    public const PAYMENT_CREATE = 'payment.create';
+
+    public const PAYMENT_CANCEL = 'payment.cancel';
+
+    public const PAYMENT_MANUAL_TRANSFER_SUBMIT_EVIDENCE = 'payment.manual_transfer.submit_evidence';
+
+    public const PAYMENT_MANUAL_TRANSFER_VERIFY = 'payment.manual_transfer.verify';
+
+    public const PAYMENT_PROVIDER_CONFIG_MANAGE = 'payment.provider_config.manage';
+
     /**
      * @return array<string, array{description: string, module: string}>
      */
@@ -314,6 +339,30 @@ class PermissionRegistry
             self::DONATION_RECURRING_PLAN_MANAGE => [
                 'description' => 'Create, pause, resume, or cancel a Recurring Donation Plan (donor self-service at OWN scope; admin override at ORGANIZATION scope).',
                 'module' => 'donation',
+            ],
+            self::PAYMENT_VIEW => [
+                'description' => 'Read/manage-list Payments (donor self-service at OWN scope via the owning Donation; admin at ORGANIZATION scope).',
+                'module' => 'payment',
+            ],
+            self::PAYMENT_CREATE => [
+                'description' => 'Create a Payment Attempt against a PENDING Donation (guest self-service without authentication; authenticated donor at OWN scope).',
+                'module' => 'payment',
+            ],
+            self::PAYMENT_CANCEL => [
+                'description' => 'Cancel a PENDING/REQUIRES_ACTION Payment (donor self-service at OWN scope; admin support path at ORGANIZATION scope).',
+                'module' => 'payment',
+            ],
+            self::PAYMENT_MANUAL_TRANSFER_SUBMIT_EVIDENCE => [
+                'description' => 'Submit Manual Bank Transfer proof-of-transfer evidence for an own Payment (guest or authenticated donor).',
+                'module' => 'payment',
+            ],
+            self::PAYMENT_MANUAL_TRANSFER_VERIFY => [
+                'description' => 'Approve/reject/hold Manual Bank Transfer evidence (ORGANIZATION scope plus financial_approver Business Authority).',
+                'module' => 'payment',
+            ],
+            self::PAYMENT_PROVIDER_CONFIG_MANAGE => [
+                'description' => 'Manage provider credentials, enable/disable flags, modes, and Manual Transfer bank accounts (GLOBAL_PLATFORM scope).',
+                'module' => 'payment',
             ],
         ];
     }

@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
             RbacRoleSeeder::class,
             CmsSystemPrincipalSeeder::class,
             DonationSystemPrincipalSeeder::class,
+            PaymentSystemPrincipalSeeder::class,
             ThemeSystemDefaultSeeder::class,
         ]);
     }

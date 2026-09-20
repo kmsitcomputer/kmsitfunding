@@ -14,6 +14,7 @@ use App\Services\Content\ContentScopeResolver;
 use App\Services\Donation\DonationAuditEventRegistrar;
 use App\Services\Donation\DonationScopeResolver;
 use App\Services\Donation\RecurringPlanScopeResolver;
+use App\Services\Payment\PaymentAuditEventRegistrar;
 use App\Services\Rbac\OwnUserScopeResolver;
 use App\Services\Rbac\ScopeResolverRegistry;
 use App\Services\Theme\ThemeAuditEventRegistrar;
@@ -77,12 +78,16 @@ class AppServiceProvider extends ServiceProvider
         // IMP-007: the program.*/campaign.*/fund.* events are registered
         // the same way.
         // IMP-008: the donation.* events are registered the same way.
+        // IMP-009: the payment, manual_transfer, webhook, and
+        // provider_config domain events are registered
+        // the same way.
         $this->app->singleton(AuditEventRegistry::class, function () {
             $registry = new AuditEventRegistry;
             (new ContentAuditEventRegistrar)->register($registry);
             (new ThemeAuditEventRegistrar)->register($registry);
             (new CampaignAuditEventRegistrar)->register($registry);
             (new DonationAuditEventRegistrar)->register($registry);
+            (new PaymentAuditEventRegistrar)->register($registry);
 
             return $registry;
         });
