@@ -43,7 +43,7 @@ final class ProviderAmountConverter
     /**
      * @var array<string>
      */
-    private const STRIPE_THREE_DECIMAL = ['BHD', 'JOD', 'KWD', 'OMD', 'TND'];
+    private const STRIPE_THREE_DECIMAL = ['BHD', 'JOD', 'KWD', 'OMR', 'TND'];
 
     public static function toProviderUnits(int $canonicalMinor, string $currency, string $provider): int
     {

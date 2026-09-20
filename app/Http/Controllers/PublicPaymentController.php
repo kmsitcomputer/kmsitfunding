@@ -15,6 +15,7 @@ use App\Services\Payment\PaymentCreationService;
 use App\Services\Rbac\PrincipalService;
 use App\Support\Money\Exceptions\UnknownCurrencyException;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -32,11 +33,18 @@ use Illuminate\Validation\ValidationException;
  * (HD-IMP009-04): identifiers are never credentials.
  *
  * F-04/F-05 in-flow guest access: the creation response binds the new
- * Payment to THIS browser session (server-side, unguessable session
- * id — never a ULID/email bearer token). The identifier-keyed GET
+ * Payment to THIS browser session via persistent server-side session
+ * possession (session()->put() of the created Payment ULIDs — never
+ * flash state, never a ULID/email bearer token, never the server-side
+ * session id as a credential). The identifier-keyed GET
  * and the guest evidence POST below are reachable ONLY through that
- * session binding: knowing ULIDs alone exposes nothing, and no
- * permanent bearer capability is ever minted.
+ * session binding: knowing ULIDs alone exposes nothing, a different
+ * anonymous session exposes nothing, and no
+ * permanent bearer capability is ever minted. The binding is a
+ * per-session set (Payment ULIDs created by THAT session only), so a
+ * later legitimate guest Payment in the same session never invalidates
+ * an earlier one; there is no cross-device/cross-session recovery
+ * (HD-IMP009-04).
  */
 class PublicPaymentController extends Controller
 {
@@ -83,25 +91,38 @@ class PublicPaymentController extends Controller
             throw ValidationException::withMessages(['idempotency_key' => $e->getMessage()]);
         }
 
+        $this->rememberGuestPayment($request, $payment);
+
         return redirect()->route('public.payments.show', [
             'donation' => $donation->ulid,
             'payment' => $payment->ulid,
-        ])->with('status', 'payment-created')
-            ->with('payment_created_ulid', $payment->ulid);
+        ])->with('status', 'payment-created');
     }
 
-    public function show(Donation $donation, Payment $payment)
+    public function show(Request $request, Donation $donation, Payment $payment, PaymentPolicy $policy, PrincipalService $principals)
     {
         abort_unless($payment->donation_id === $donation->id, 404);
 
-        // F-04: this identifier-keyed GET is in-flow creation-response
-        // information ONLY — reachable through the creation session
-        // binding, never through ULID knowledge alone. Without the
-        // binding (a later visit, another browser, a leaked URL) this
-        // is 404: no Payment state, no instructions, and in particular
-        // no Stripe client_secret, ever leaks through an unrestricted
-        // identifier-keyed GET.
-        abort_unless(session('payment_created_ulid') === $payment->ulid, 404);
+        $user = $request->user();
+
+        if ($user !== null) {
+            // Authenticated reads stay policy-based (OWN scope via the
+            // owning Donation): no session possession is consulted or
+            // required for a signed-in donor.
+            $actor = $principals->forUser($user);
+            abort_unless($policy->viewOwn($actor, $payment), 404);
+        } else {
+            // F-04: this identifier-keyed GET is creation-flow
+            // information ONLY — reachable through the persistent
+            // creation session binding, never through ULID knowledge
+            // alone (a later visit, another browser, a leaked URL is
+            // 404). Guest-owned Payment only, bound to a Payment this
+            // session created. No Payment state, no instructions, and
+            // in particular no Stripe client_secret, ever leaks
+            // through an unrestricted identifier-keyed GET.
+            abort_unless($donation->donor_principal_id === null, 404);
+            abort_unless($this->sessionOwnsGuestPayment($request, $payment), 404);
+        }
 
         return response()->json(self::publicPayload($payment));
     }
@@ -125,13 +146,17 @@ class PublicPaymentController extends Controller
             // F-05: guest evidence submission — the exact approved
             // guest-access shape, no bearer token invented: guest-owned
             // Payment only (donation without an authenticated owner),
-            // reached through the creation session binding only (same
-            // browser flow that created the Payment). Eligibility
-            // (manual-transfer provider, PENDING, unreviewed,
-            // evidence-required flow) stays enforced by
+            // reached through the persistent creation session binding
+            // only (the same browser session that created the
+            // Payment — possession survives ordinary intermediate
+            // requests such as viewing instructions, performing the
+            // transfer, and returning to upload evidence — but never
+            // another session, never ULID knowledge alone).
+            // Eligibility (manual-transfer provider, PENDING,
+            // unreviewed, evidence-required flow) stays enforced by
             // ManualTransferEvidenceService itself.
             abort_unless($donation->donor_principal_id === null, 403);
-            abort_unless(session('payment_created_ulid') === $payment->ulid, 403);
+            abort_unless($this->sessionOwnsGuestPayment($request, $payment), 403);
             $actor = null;
         }
 
@@ -152,8 +177,7 @@ class PublicPaymentController extends Controller
         return redirect()->route('public.payments.show', [
             'donation' => $donation->ulid,
             'payment' => $payment->ulid,
-        ])->with('status', 'evidence-submitted')
-            ->with('payment_created_ulid', $payment->ulid);
+        ])->with('status', 'evidence-submitted');
     }
 
     /**
@@ -183,5 +207,44 @@ class PublicPaymentController extends Controller
         if ($credential === null || ! $credential->is_enabled) {
             throw ValidationException::withMessages(['provider' => 'This payment method is currently unavailable.']);
         }
+    }
+
+    /**
+     * NEW-F-01 persistent guest session possession: the ULIDs of the
+     * guest Payments THIS server-side session created. A set (never a
+     * single slot) so a second legitimate guest Payment in the same
+     * session never invalidates the first. Stored with session()->put()
+     * — persistent across ordinary subsequent requests — never flash
+     * state, never a bearer token, never an identifier-as-secret: the
+     * ULID is only meaningful when presented from the possessing
+     * session, alongside the guest-ownership gate at each call site.
+     *
+     * @return array<int, string>
+     */
+    private function guestPaymentUlids(Request $request): array
+    {
+        $ulids = $request->session()->get('guest_payment_ulids', []);
+
+        return is_array($ulids) ? array_values(array_filter($ulids, 'is_string')) : [];
+    }
+
+    private function rememberGuestPayment(Request $request, Payment $payment): void
+    {
+        if ($request->user() !== null) {
+            return;
+        }
+
+        $ulids = $this->guestPaymentUlids($request);
+
+        if (! in_array($payment->ulid, $ulids, true)) {
+            $ulids[] = $payment->ulid;
+        }
+
+        $request->session()->put('guest_payment_ulids', $ulids);
+    }
+
+    private function sessionOwnsGuestPayment(Request $request, Payment $payment): bool
+    {
+        return in_array($payment->ulid, $this->guestPaymentUlids($request), true);
     }
 }

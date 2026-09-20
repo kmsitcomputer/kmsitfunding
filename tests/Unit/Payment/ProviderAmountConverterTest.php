@@ -80,6 +80,7 @@ class ProviderAmountConverterTest extends TestCase
     {
         $this->assertSame(0, ProviderAmountConverter::stripeDecimalsFor('JPY'));
         $this->assertSame(3, ProviderAmountConverter::stripeDecimalsFor('KWD'));
+        $this->assertSame(3, ProviderAmountConverter::stripeDecimalsFor('OMR'));
         $this->assertSame(2, ProviderAmountConverter::stripeDecimalsFor('IDR'));
         $this->assertSame(2, ProviderAmountConverter::stripeDecimalsFor('USD'));
     }

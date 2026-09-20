@@ -171,10 +171,19 @@ UP/DOWN/UP: all PASS (tables above).
 
 NOT RUN as a single full-suite invocation. Upstream modules directly affected by
 IMP-009's shared-file touches (Donation, Rbac, Audit, Campaign) were run in full
-and pass (see table). `tests/Feature/Cms` fails identically (3 errors + 28
-failures) with and without this implementation (verified via `git stash -u`
-A/B run) — pre-existing breakage, unrelated to IMP-009, no architecture change
-required of this IMP; reported, not modified.
+and pass (see table).
+
+Historical note on `tests/Feature/Cms`: the "3 errors + 28 failures
+(pre-existing)" observation recorded during the implementation phase was a
+contaminated/harness-era result — it predates the test-harness hardening
+(`tests/bootstrap.php` hard-forcing testing/sqlite/:memory: plus the
+`force="true"` phpunit.xml env, both landed in the remediation commit
+`925bbba`). The independent re-review reproduced the current
+hardened-harness result: Cms 209/209 PASS. History is NOT rewritten:
+the earlier observation stands as the pre-hardening record; the current
+result stands as the post-hardening record. No architecture change was
+required of this IMP for either observation; CMS remains out of
+IMP-009 scope and unmodified.
 
 ---
 
@@ -326,31 +335,38 @@ rounding (exact-divisibility guard → typed
 `provider_amount_not_representable`), never cross-unit comparison (oracle
 tests prove a raw-canonical echo into a provider-unit field mismatches).
 
-### F-01..F-21 closure (read from the actual patch + test markers)
+### F-01..F-16 closure (read from the actual patch + code/test markers)
 
 | Finding | Disposition | Evidence |
 |---------|-------------|----------|
 | F-01 (BLOCKER: provider call only on inserting call) | CLOSED | `$created` flag in `PaymentCreationService`; replay-counting test |
 | F-02 (auth creation policy) | CLOSED | `createOwn` check in `PublicPaymentController::store` + 4 HTTP denial tests |
 | F-03 (guest creation guest-donation only) | CLOSED | `donor_principal_id === null` gate + denial test |
-| F-04 (in-flow status read) | CLOSED | creation-session binding, 404 otherwise; client_secret test |
-| F-05 (guest evidence, HD-IMP009-04) | CLOSED — stop condition NOT triggered | session-bound guest upload, no bearer token invented; spec "Authorization" expressly gives evidence the creation guest-access shape |
+| F-04 (creation-flow status read, HD-IMP009-04) | CLOSED | persistent creation-session possession, 404 otherwise; client_secret test |
+| F-05 (guest evidence, HD-IMP009-04) | CLOSED — stop condition NOT triggered | session-bound guest upload (same persistent possession concept as F-04), no bearer token invented; spec "Authorization" expressly gives evidence the creation guest-access shape |
 | F-06 (canonical credential payload) | CLOSED | `ProviderCredentialPayload` + round-trip/malformed tests |
 | F-07 (pre-row provider/currency gate) | CLOSED | gate + no-row/no-call tests; manual_transfer static-list exemption (regression found + fixed this session) |
-| F-08 (canonical Money conversion) | CLOSED | converter unit (12 tests) + oracle feature (10 tests) |
-| F-09 (forensic signature_valid) | CLOSED | `signatureValid` field; pre-verification paths verified false-by-construction |
+| F-08 (canonical Money conversion) | CLOSED | converter unit (11 tests) + oracle feature (10 tests) |
+| F-09 (forensic signature_valid) | CLOSED | `signatureValid` field; post-verification failures verified true, pre-verification paths verified false-by-construction |
 | F-10 (OWN listing resolver) | CLOSED | `PaymentOwnScopeResolver` in `viewOwnList` + semantics test |
-| F-11 (bank-accounts route) | CLOSED | route ordering + `where()` + controller test |
+| F-11 (bank-accounts route) | CLOSED | route ordering + `where()` constraint + controller test |
 | F-12 (unmarked minor — covered by adapter hardening) | CLOSED | per-provider required-field credential decode on every adapter path |
-| F-13 (lock order + late outcome) | CLOSED | sweep lock order; terminal-review tests |
+| F-13 (lock order + late outcome) | CLOSED | Donation-then-Payment sweep lock order; terminal-review tests |
 | F-14 (webhook.received subject) | CLOSED | event-row subject assertion |
 | F-15 (dual-constraint disambiguation) | CLOSED | `active_attempt_exists` vs replay test coverage |
 | F-16 (unmarked minor — channel requirement) | CLOSED | `channel_required` typed rejection for Tripay/Xendit |
-| F-17..F-21 (editorial/governance) | CLOSED | this evidence record; harness hardening; docblock contracts |
 
 BLOCKER remaining: 0. MAJOR remaining: 0. MINOR remaining: 0.
 EDITORIAL remaining: 0. GATE-IMPACT remaining: 0. New Human Decision
 required: NONE.
+
+Correction note (post-review micro-remediation): the prior revision of
+this table carried the heading "F-01..F-21" and a catch-all
+"F-17..F-21 (editorial/governance)" row. No F-17..F-21 findings exist
+in the independent review record; the code anchors at most F-01..F-16
+(F-12 and F-16 are unmarked minors closed by adapter hardening). The
+heading and rows above are corrected to F-01..F-16. No historical test
+evidence is altered by this correction.
 
 ### Recovery-session corrections to the inherited work
 

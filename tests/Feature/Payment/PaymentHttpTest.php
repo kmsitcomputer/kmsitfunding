@@ -279,7 +279,7 @@ class PaymentHttpTest extends TestCase
         $this->get("/donations/{$donation->ulid}/payments/{$payment->ulid}")->assertNotFound();
     }
 
-    public function test_public_status_read_is_single_use_in_flow_information(): void
+    public function test_public_status_read_survives_ordinary_subsequent_requests(): void
     {
         $donation = $this->makePendingGuestDonation();
 
@@ -298,7 +298,57 @@ class PaymentHttpTest extends TestCase
         $inFlow->assertJsonPath('ulid', $payment->ulid);
         $inFlow->assertJsonPath('status', 'PENDING');
 
+        $this->get('/payments/'.$payment->ulid)->assertNotFound();
+
+        $later = $this->get($url);
+        $later->assertOk();
+        $later->assertJsonPath('ulid', $payment->ulid);
+    }
+
+    public function test_public_status_read_from_a_different_anonymous_session_is_not_found(): void
+    {
+        $donation = $this->makePendingGuestDonation();
+
+        $create = $this->post(
+            "/donations/{$donation->ulid}/payments",
+            ['provider' => 'manual_transfer'],
+            ['Idempotency-Key' => 'http-pay-crosssess-'.uniqid()]
+        );
+        $create->assertRedirect();
+
+        $payment = Payment::query()->first();
+        $url = "/donations/{$donation->ulid}/payments/{$payment->ulid}";
+
+        $this->get($url)->assertOk();
+
+        $this->flushSession();
+
         $this->get($url)->assertNotFound();
+    }
+
+    public function test_two_guest_payments_in_one_session_do_not_invalidate_each_other(): void
+    {
+        $firstDonation = $this->makePendingGuestDonation();
+        $secondDonation = $this->makePendingGuestDonation();
+
+        $this->post(
+            "/donations/{$firstDonation->ulid}/payments",
+            ['provider' => 'manual_transfer'],
+            ['Idempotency-Key' => 'http-pay-multi-a-'.uniqid()]
+        )->assertRedirect();
+
+        $this->post(
+            "/donations/{$secondDonation->ulid}/payments",
+            ['provider' => 'manual_transfer'],
+            ['Idempotency-Key' => 'http-pay-multi-b-'.uniqid()]
+        )->assertRedirect();
+
+        $first = Payment::query()->where('donation_id', $firstDonation->id)->firstOrFail();
+        $second = Payment::query()->where('donation_id', $secondDonation->id)->firstOrFail();
+
+        $this->get("/donations/{$firstDonation->ulid}/payments/{$first->ulid}")->assertOk();
+        $this->get("/donations/{$secondDonation->ulid}/payments/{$second->ulid}")->assertOk();
+        $this->get("/donations/{$firstDonation->ulid}/payments/{$first->ulid}")->assertOk();
     }
 
     public function test_client_secret_never_leaks_through_an_unrestricted_get(): void
@@ -316,7 +366,7 @@ class PaymentHttpTest extends TestCase
         $this->get("/donations/{$donation->ulid}/payments/{$payment->ulid}")->assertNotFound();
     }
 
-    public function test_guest_evidence_upload_through_the_creation_session_is_accepted(): void
+    public function test_guest_evidence_upload_after_ordinary_intermediate_requests_is_accepted(): void
     {
         Storage::fake('local');
 
@@ -331,6 +381,10 @@ class PaymentHttpTest extends TestCase
 
         $payment = Payment::query()->first();
 
+        $this->get("/donations/{$donation->ulid}/payments/{$payment->ulid}")->assertOk();
+        $this->get('/payments/'.$payment->ulid)->assertNotFound();
+        $this->get("/donations/{$donation->ulid}/payments/{$payment->ulid}")->assertOk();
+
         $upload = $this->post(
             "/donations/{$donation->ulid}/payments/{$payment->ulid}/manual-transfer/evidence",
             ['evidence' => UploadedFile::fake()->image('receipt.jpg')->size(100)]
@@ -342,6 +396,51 @@ class PaymentHttpTest extends TestCase
         $this->assertNotNull($evidence);
         $this->assertSame($payment->id, $evidence->payment_id);
         $this->assertNull($evidence->submitted_by_principal_id);
+    }
+
+    public function test_guest_evidence_upload_from_a_different_anonymous_session_is_denied(): void
+    {
+        Storage::fake('local');
+
+        $donation = $this->makePendingGuestDonation();
+
+        $this->post(
+            "/donations/{$donation->ulid}/payments",
+            ['provider' => 'manual_transfer'],
+            ['Idempotency-Key' => 'http-pay-guestev-x-'.uniqid()]
+        )->assertRedirect();
+
+        $payment = Payment::query()->first();
+
+        $this->flushSession();
+
+        $upload = $this->post(
+            "/donations/{$donation->ulid}/payments/{$payment->ulid}/manual-transfer/evidence",
+            ['evidence' => UploadedFile::fake()->image('receipt.jpg')->size(100)]
+        );
+
+        $upload->assertForbidden();
+        $this->assertSame(0, ManualTransferEvidence::query()->count());
+    }
+
+    public function test_guest_evidence_upload_shows_identifier_knowledge_alone_grants_nothing(): void
+    {
+        Storage::fake('local');
+
+        $donation = $this->makePendingGuestDonation();
+        $payment = app(PaymentCreationService::class)->create(
+            $donation, ['provider' => 'manual_transfer'], null, 'http-pub-evidonly-'.uniqid()
+        );
+
+        $this->get("/donations/{$donation->ulid}/payments/{$payment->ulid}")->assertNotFound();
+
+        $upload = $this->post(
+            "/donations/{$donation->ulid}/payments/{$payment->ulid}/manual-transfer/evidence",
+            ['evidence' => UploadedFile::fake()->image('receipt.jpg')->size(100)]
+        );
+
+        $upload->assertForbidden();
+        $this->assertSame(0, ManualTransferEvidence::query()->count());
     }
 
     public function test_guest_evidence_upload_without_the_creation_session_is_denied(): void
@@ -372,7 +471,7 @@ class PaymentHttpTest extends TestCase
             $donation, ['provider' => 'manual_transfer'], $owner, 'http-pub-evowned-'.uniqid()
         );
 
-        $upload = $this->withSession(['payment_created_ulid' => $payment->ulid])->post(
+        $upload = $this->withSession(['guest_payment_ulids' => [$payment->ulid]])->post(
             "/donations/{$donation->ulid}/payments/{$payment->ulid}/manual-transfer/evidence",
             ['evidence' => UploadedFile::fake()->image('receipt.jpg')->size(100)]
         );
@@ -391,7 +490,7 @@ class PaymentHttpTest extends TestCase
         );
         $payment->forceFill(['provider' => 'tripay'])->save();
 
-        $upload = $this->withSession(['payment_created_ulid' => $payment->ulid])->post(
+        $upload = $this->withSession(['guest_payment_ulids' => [$payment->ulid]])->post(
             "/donations/{$donation->ulid}/payments/{$payment->ulid}/manual-transfer/evidence",
             ['evidence' => UploadedFile::fake()->image('receipt.jpg')->size(100)]
         );
