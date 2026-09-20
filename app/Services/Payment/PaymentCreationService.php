@@ -10,6 +10,7 @@ use App\Services\Payment\Exceptions\PaymentValidationException;
 use App\Support\Money\CurrencyMinorUnits;
 use App\Support\Money\Exceptions\UnknownCurrencyException;
 use App\Support\Money\Money;
+use App\Support\Money\ProviderAmountConverter;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
@@ -37,6 +38,13 @@ use Illuminate\Support\Facades\DB;
  * existing, no second provider call; payload differ -> typed conflict),
  * never a check-then-insert race. The key namespace is deliberately
  * SEPARATE from donations.idempotency_key.
+ *
+ * F-01: a provider createTransaction() call is issued ONLY when THIS
+ * call inserted the Payment row. An idempotent replay (same key +
+ * matching payload, whether resolved inside the creation transaction
+ * or through the unique-violation catch path) returns the EXISTING
+ * row with NO second provider call — never an orphan provider
+ * transaction.
  *
  * Money: amount_minor/currency are copied from and validated EQUAL to
  * the owning Donation's own values via Money::ofMinorUnits() (BR-2) —
@@ -70,7 +78,9 @@ class PaymentCreationService
         $adapter = $this->adapters->for($provider);
 
         try {
-            $payment = DB::transaction(function () use ($donation, $provider, $payload, $actor, $key) {
+            $created = null;
+
+            $payment = DB::transaction(function () use ($donation, $provider, $payload, $actor, $key, $adapter, &$created) {
                 $lockedDonation = Donation::query()->whereKey($donation->id)->lockForUpdate()->firstOrFail();
 
                 // Idempotent replay takes precedence over the
@@ -94,6 +104,10 @@ class PaymentCreationService
                         );
                     }
 
+                    // F-01: replay of THIS key — the row was created by
+                    // an earlier call, so this call provisions nothing.
+                    $created = false;
+
                     return $existingByKey;
                 }
 
@@ -112,6 +126,30 @@ class PaymentCreationService
                 }
 
                 $this->assertValidMoney($lockedDonation->amount_minor, $lockedDonation->currency);
+
+                // F-07: provider + currency support is validated BEFORE
+                // the Payment row is created and before any provider API
+                // call. An unsupported pairing is a typed rejection with
+                // NO row and NO provider call — never PENDING-then-
+                // FAILED. The representability conversion below doubles
+                // as the HD-IMP009-13 pre-row amount-unit gate: a
+                // canonical value the provider unit cannot represent
+                // exactly is rejected here, not rounded downstream.
+                // manual_transfer is exempt from the static-list gate:
+                // its supported list is operational config (seeded bank
+                // accounts), not a static provider capability — an empty
+                // catalog must not block creation (baseline behavior:
+                // instructions render with an empty account list).
+                // Currency validity for manual_transfer is still enforced
+                // by the converter gate below (registered currency only).
+                if ($provider !== 'manual_transfer' && ! in_array($lockedDonation->currency, $adapter->supportedCurrencies(), true)) {
+                    throw new PaymentValidationException(
+                        'provider_currency_unsupported',
+                        "Provider '{$provider}' does not support currency '{$lockedDonation->currency}'."
+                    );
+                }
+
+                ProviderAmountConverter::toProviderUnits($lockedDonation->amount_minor, $lockedDonation->currency, $provider);
 
                 if (Payment::query()->where('donation_id', $lockedDonation->id)
                     ->whereIn('status', ['PENDING', 'REQUIRES_ACTION'])
@@ -135,6 +173,10 @@ class PaymentCreationService
                 ]);
                 $payment->save();
 
+                // F-01: THIS call inserted the row — only this path
+                // authorizes a provider provisioning operation.
+                $created = true;
+
                 $this->auditLogger->recordAttemptCreated($payment->id, [
                     'donation_ulid' => $lockedDonation->ulid,
                     'provider' => $provider,
@@ -152,7 +194,35 @@ class PaymentCreationService
 
             $donationRow = Donation::query()->whereKey($donation->id)->first();
 
+            // F-15: TWO distinct unique constraints guard creation —
+            // UNIQUE(idempotency_key) and UNIQUE(donation_id,
+            // active_slot). A violation with NO row carrying THIS key
+            // came from the one-active-attempt backstop, not from an
+            // idempotent replay: report the approved typed conflict
+            // active_attempt_exists, never idempotency_unresolved.
+            if ($donationRow !== null && ! Payment::query()->where('idempotency_key', $key)->exists()) {
+                $activeSibling = Payment::query()->where('donation_id', $donationRow->id)
+                    ->whereIn('status', ['PENDING', 'REQUIRES_ACTION'])
+                    ->first();
+
+                if ($activeSibling !== null) {
+                    throw new PaymentTransitionConflictException(
+                        'active_attempt_exists',
+                        'An active payment attempt already exists for this donation.'
+                    );
+                }
+            }
+
             return $this->resolveIdempotentReplay($key, $donationRow, $provider, $payload['channel'] ?? null);
+        }
+
+        // F-01: the in-transaction replay path resolved an EXISTING
+        // row (created by an earlier call) — return it WITHOUT another
+        // provider createTransaction() call. Only a row THIS call
+        // inserted is provisioned, per the safe contract: one canonical
+        // Payment, one provider provisioning operation.
+        if ($created !== true) {
+            return $payment->fresh();
         }
 
         $this->provisionProviderTransaction($payment);

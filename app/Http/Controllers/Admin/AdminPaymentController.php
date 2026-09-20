@@ -9,6 +9,7 @@ use App\Policies\PaymentPolicy;
 use App\Services\Payment\Exceptions\PaymentTransitionConflictException;
 use App\Services\Payment\Exceptions\PaymentValidationException;
 use App\Services\Payment\ManualTransferVerificationService;
+use App\Services\Payment\PaymentTransitionService;
 use App\Services\Rbac\PrincipalService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,10 @@ use Inertia\Response;
  * verification (docs/implementation/IMP-009-payment-hub.md "Routes /
  * API Boundary": GET /admin/payment/payments, GET
  * /admin/payment/payments/{ulid}, POST
- * /admin/payment/payments/{ulid}/manual-transfer/{approve,reject,hold}).
+ * /admin/payment/payments/{ulid}/manual-transfer/{approve,reject,hold},
+ * POST /admin/payment/payments/{ulid}/cancel — the authorized
+ * support-controlled cancellation surface HD-IMP009-04 permits for
+ * freeing an abandoned attempt's ACTIVE slot).
  * ORGANIZATION scope throughout, mirroring the admin/donation/*
  * convention. Approve/reject/hold additionally require
  * financial_approver Business Authority (PaymentPolicy) — the
@@ -114,6 +118,20 @@ class AdminPaymentController extends Controller
         }
 
         return redirect()->route('payment.admin.show', $payment)->with('status', 'manual-transfer-held');
+    }
+
+    public function cancel(Request $request, PaymentPolicy $policy, Payment $payment, PaymentTransitionService $service): RedirectResponse
+    {
+        $actor = $this->resolveActingPrincipal($request);
+        abort_unless($policy->cancelAny($actor, $payment), 403);
+
+        try {
+            $service->cancel($payment, $actor);
+        } catch (PaymentTransitionConflictException $e) {
+            throw ValidationException::withMessages(['payment' => $e->getMessage()]);
+        }
+
+        return redirect()->route('payment.admin.show', $payment)->with('status', 'payment-cancelled');
     }
 
     /**

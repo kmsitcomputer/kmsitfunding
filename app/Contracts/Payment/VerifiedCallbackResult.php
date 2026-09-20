@@ -22,6 +22,7 @@ final class VerifiedCallbackResult
         public readonly ?int $amountMinor = null,
         public readonly ?string $currency = null,
         public readonly string $failureReason = '',
+        public readonly bool $signatureValid = false,
     ) {}
 
     public static function passed(
@@ -31,11 +32,11 @@ final class VerifiedCallbackResult
         ?int $amountMinor = null,
         ?string $currency = null,
     ): self {
-        return new self(true, $payload, $providerReference, $providerEventId, $amountMinor, $currency);
+        return new self(true, $payload, $providerReference, $providerEventId, $amountMinor, $currency, signatureValid: true);
     }
 
-    public static function failed(string $failureReason, array $payload = []): self
+    public static function failed(string $failureReason, array $payload = [], bool $signatureValid = false): self
     {
-        return new self(false, $payload, failureReason: $failureReason);
+        return new self(false, $payload, failureReason: $failureReason, signatureValid: $signatureValid);
     }
 }

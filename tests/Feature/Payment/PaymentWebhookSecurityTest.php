@@ -6,6 +6,7 @@ use App\Models\Payment\Payment;
 use App\Models\Payment\PaymentProviderCredential;
 use App\Models\Payment\PaymentProviderEvent;
 use App\Services\Payment\PaymentCreationService;
+use App\Services\Payment\ProviderCredentialPayload;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
@@ -57,7 +58,11 @@ class PaymentWebhookSecurityTest extends TestCase
         PaymentProviderCredential::create([
             'provider' => 'tripay',
             'mode' => 'SANDBOX',
-            'encrypted_secret' => Crypt::encryptString(json_encode(['private_key' => $privateKey])),
+            'encrypted_secret' => Crypt::encryptString(ProviderCredentialPayload::encode('tripay', [
+                'merchant_code' => 'T0001',
+                'api_key' => 'tripay-test-api-key',
+                'private_key' => $privateKey,
+            ])),
             'is_enabled' => true,
         ]);
 
@@ -71,7 +76,10 @@ class PaymentWebhookSecurityTest extends TestCase
         PaymentProviderCredential::create([
             'provider' => 'xendit',
             'mode' => 'SANDBOX',
-            'encrypted_secret' => Crypt::encryptString(json_encode(['api_key' => 'xnd_test_key', 'callback_token' => $token])),
+            'encrypted_secret' => Crypt::encryptString(ProviderCredentialPayload::encode('xendit', [
+                'api_key' => 'xnd_test_key',
+                'callback_token' => $token,
+            ])),
             'is_enabled' => true,
         ]);
 
@@ -85,7 +93,10 @@ class PaymentWebhookSecurityTest extends TestCase
         PaymentProviderCredential::create([
             'provider' => 'stripe',
             'mode' => 'SANDBOX',
-            'encrypted_secret' => Crypt::encryptString(json_encode(['secret_key' => 'sk_test_key', 'webhook_secret' => $secret])),
+            'encrypted_secret' => Crypt::encryptString(ProviderCredentialPayload::encode('stripe', [
+                'secret_key' => 'sk_test_key',
+                'webhook_secret' => $secret,
+            ])),
             'is_enabled' => true,
         ]);
 
@@ -97,7 +108,7 @@ class PaymentWebhookSecurityTest extends TestCase
         $donation = $this->makePendingGuestDonation();
 
         $payment = app(PaymentCreationService::class)->create(
-            $donation, ['provider' => 'tripay'], null, 'hook-tripay-'.uniqid()
+            $donation, ['provider' => 'tripay', 'channel' => 'BRIVA'], null, 'hook-tripay-'.uniqid()
         );
         $payment->forceFill(['provider_reference' => $reference])->save();
 
@@ -139,7 +150,7 @@ class PaymentWebhookSecurityTest extends TestCase
             'reference' => 'TRIPAY-REF-001',
             'merchant_ref' => $payment->ulid,
             'status' => 'PAID',
-            'amount' => $payment->amount_minor,
+            'total_amount' => (int) ($payment->amount_minor / 100),
         ]);
 
         $response = $this->postRaw('/webhooks/payments/tripay', $callback['body'], $callback['headers']);
@@ -158,6 +169,20 @@ class PaymentWebhookSecurityTest extends TestCase
             'subject_id' => $payment->id,
             'actor_principal_kind' => 'integration',
         ]);
+
+        // F-14: webhook.received carries the actual provider-event row
+        // as its subject (registry demands non-null), never null.
+        $eventId = PaymentProviderEvent::query()
+            ->where('payment_id', $payment->id)
+            ->where('processing_result', 'ACCEPTED')
+            ->value('id');
+
+        $this->assertNotNull($eventId);
+        $this->assertDatabaseHas('audit_records', [
+            'event_type' => 'webhook.received',
+            'subject_type' => 'payment_provider_event',
+            'subject_id' => $eventId,
+        ]);
     }
 
     public function test_forged_tripay_signature_changes_nothing(): void
@@ -169,7 +194,7 @@ class PaymentWebhookSecurityTest extends TestCase
             'reference' => 'TRIPAY-REF-002',
             'merchant_ref' => $payment->ulid,
             'status' => 'PAID',
-            'amount' => $payment->amount_minor,
+            'total_amount' => (int) ($payment->amount_minor / 100),
         ]);
 
         $response = $this->postRaw('/webhooks/payments/tripay', $body, [
@@ -183,6 +208,7 @@ class PaymentWebhookSecurityTest extends TestCase
         $this->assertDatabaseHas('payment_provider_events', [
             'provider' => 'tripay',
             'processing_result' => 'REJECTED_INVALID_SIGNATURE',
+            'signature_valid' => false,
         ]);
         $this->assertDatabaseHas('audit_records', [
             'event_type' => 'webhook.verification_failed',
@@ -200,7 +226,7 @@ class PaymentWebhookSecurityTest extends TestCase
             'reference' => 'TRIPAY-REF-003',
             'merchant_ref' => $payment->ulid,
             'status' => 'PAID',
-            'amount' => $payment->amount_minor - 1,
+            'total_amount' => (int) ($payment->amount_minor / 100) - 1,
         ]);
 
         $this->postRaw('/webhooks/payments/tripay', $callback['body'], $callback['headers'])
@@ -210,6 +236,7 @@ class PaymentWebhookSecurityTest extends TestCase
         $this->assertDatabaseHas('payment_provider_events', [
             'provider' => 'tripay',
             'processing_result' => 'REJECTED_AMOUNT_MISMATCH',
+            'signature_valid' => true,
         ]);
     }
 
@@ -222,7 +249,7 @@ class PaymentWebhookSecurityTest extends TestCase
             'reference' => 'TRIPAY-NOPE-'.uniqid(),
             'merchant_ref' => 'nope',
             'status' => 'PAID',
-            'amount' => 10000,
+            'total_amount' => 100,
         ]);
 
         $this->postRaw('/webhooks/payments/tripay', $callback['body'], $callback['headers'])
@@ -233,6 +260,23 @@ class PaymentWebhookSecurityTest extends TestCase
             'provider' => 'tripay',
             'payment_id' => null,
             'processing_result' => 'REJECTED_UNKNOWN_REFERENCE',
+            'signature_valid' => true,
+        ]);
+    }
+
+    public function test_malformed_payload_after_a_valid_signature_preserves_signature_valid(): void
+    {
+        $privateKey = $this->seedTripayCredential();
+
+        $body = 'this is not json';
+        $this->postRaw('/webhooks/payments/tripay', $body, [
+            'X-Callback-Signature' => hash_hmac('sha256', $body, $privateKey),
+        ])->assertStatus(400);
+
+        $this->assertDatabaseHas('payment_provider_events', [
+            'provider' => 'tripay',
+            'processing_result' => 'REJECTED_MALFORMED',
+            'signature_valid' => true,
         ]);
     }
 
@@ -245,7 +289,7 @@ class PaymentWebhookSecurityTest extends TestCase
             'reference' => 'TRIPAY-REF-004',
             'merchant_ref' => $payment->ulid,
             'status' => 'PAID',
-            'amount' => $payment->amount_minor,
+            'total_amount' => (int) ($payment->amount_minor / 100),
         ]);
 
         $this->postRaw('/webhooks/payments/tripay', $callback['body'], $callback['headers'])->assertStatus(200);
@@ -271,7 +315,7 @@ class PaymentWebhookSecurityTest extends TestCase
             'reference' => 'TRIPAY-REF-005',
             'merchant_ref' => $payment->ulid,
             'status' => 'PAID',
-            'amount' => $payment->amount_minor,
+            'total_amount' => (int) ($payment->amount_minor / 100),
         ]);
         $this->postRaw('/webhooks/payments/tripay', $paid['body'], $paid['headers'])->assertStatus(200);
         $this->assertSame('SUCCEEDED', $payment->fresh()->status);
@@ -280,7 +324,7 @@ class PaymentWebhookSecurityTest extends TestCase
             'reference' => 'TRIPAY-REF-005',
             'merchant_ref' => $payment->ulid,
             'status' => 'UNPAID',
-            'amount' => $payment->amount_minor,
+            'total_amount' => (int) ($payment->amount_minor / 100),
         ]);
         $this->postRaw('/webhooks/payments/tripay', $late['body'], $late['headers'])->assertStatus(200);
 
@@ -292,16 +336,25 @@ class PaymentWebhookSecurityTest extends TestCase
         $token = $this->seedXenditCredential();
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
-            $donation, ['provider' => 'xendit'], null, 'hook-xendit-'.uniqid()
+            $donation, ['provider' => 'xendit', 'channel' => 'QRIS'], null, 'hook-xendit-'.uniqid()
         );
         $payment->forceFill(['provider_reference' => 'xnd-req-001'])->save();
 
+        // Official PaymentRequest webhook envelope: data.request_amount
+        // is denominated in MAJOR units (100 = Rp 100 for the 10000
+        // canonical minor fixture), correlated via
+        // data.payment_request_id.
         $body = json_encode([
-            'id' => 'xnd-req-001',
-            'event_id' => 'evt-'.uniqid(),
-            'status' => 'SUCCEEDED',
-            'amount' => $payment->amount_minor,
-            'currency' => $payment->currency,
+            'event' => 'payment.capture',
+            'business_id' => 'test-business',
+            'created' => gmdate('Y-m-d\TH:i:s\Z'),
+            'data' => [
+                'payment_request_id' => 'xnd-req-001',
+                'reference_id' => $payment->ulid,
+                'currency' => $payment->currency,
+                'request_amount' => (int) ($payment->amount_minor / 100),
+                'status' => 'SUCCEEDED',
+            ],
         ]);
 
         $this->postRaw('/webhooks/payments/xendit', $body, [
@@ -375,6 +428,42 @@ class PaymentWebhookSecurityTest extends TestCase
         $response->assertStatus(400);
     }
 
+    public function test_stripe_amount_mismatch_is_rejected_before_any_transition(): void
+    {
+        $secret = $this->seedStripeCredential();
+        $donation = $this->makePendingGuestDonation();
+        $payment = app(PaymentCreationService::class)->create(
+            $donation, ['provider' => 'stripe'], null, 'hook-stripe-mm-'.uniqid()
+        );
+        $payment->forceFill(['provider_reference' => 'pi_test_mm'])->save();
+
+        $body = json_encode([
+            'id' => 'evt_test_mm',
+            'type' => 'payment_intent.succeeded',
+            'data' => ['object' => [
+                'id' => 'pi_test_mm',
+                'status' => 'succeeded',
+                'amount' => $payment->amount_minor - 1,
+                'currency' => strtolower($payment->currency),
+            ]],
+        ]);
+
+        $timestamp = (string) time();
+        $signature = hash_hmac('sha256', $timestamp.'.'.$body, $secret);
+
+        $this->call('POST', '/webhooks/payments/stripe', [], [], [], [
+            'HTTP_Stripe-Signature' => "t={$timestamp},v1={$signature}",
+            'CONTENT_TYPE' => 'application/json',
+        ], $body)->assertStatus(400);
+
+        $this->assertSame('PENDING', $payment->fresh()->status);
+        $this->assertDatabaseHas('payment_provider_events', [
+            'provider' => 'stripe',
+            'processing_result' => 'REJECTED_AMOUNT_MISMATCH',
+            'signature_valid' => true,
+        ]);
+    }
+
     public function test_late_success_after_donation_terminal_records_review_event(): void
     {
         $privateKey = $this->seedTripayCredential();
@@ -388,7 +477,7 @@ class PaymentWebhookSecurityTest extends TestCase
             'reference' => 'TRIPAY-REF-LATE',
             'merchant_ref' => $payment->ulid,
             'status' => 'PAID',
-            'amount' => $payment->amount_minor,
+            'total_amount' => (int) ($payment->amount_minor / 100),
         ]);
 
         $this->postRaw('/webhooks/payments/tripay', $callback['body'], $callback['headers'])
@@ -397,6 +486,41 @@ class PaymentWebhookSecurityTest extends TestCase
         // Payment fact recorded; Donation untouched; review flagged.
         $this->assertSame('SUCCEEDED', $payment->fresh()->status);
         $this->assertSame('EXPIRED', $donation->fresh()->status);
+        $this->assertDatabaseHas('audit_records', [
+            'event_type' => 'payment.donation_transition_rejected',
+            'subject_id' => $payment->id,
+            'actor_principal_kind' => 'system',
+        ]);
+    }
+
+    public function test_late_success_against_an_expired_payment_records_fact_without_regression(): void
+    {
+        $privateKey = $this->seedTripayCredential();
+        $payment = $this->makeTripayPayment('TRIPAY-REF-EXPIRED');
+        $donation = $payment->donation()->first();
+
+        $payment->forceFill(['status' => 'EXPIRED', 'expired_at' => now()])->save();
+
+        $callback = $this->tripayCallback($privateKey, [
+            'reference' => 'TRIPAY-REF-EXPIRED',
+            'merchant_ref' => $payment->ulid,
+            'status' => 'PAID',
+            'total_amount' => (int) ($payment->amount_minor / 100),
+        ]);
+
+        $this->postRaw('/webhooks/payments/tripay', $callback['body'], $callback['headers'])
+            ->assertStatus(200);
+
+        // Provider fact recorded; Payment never regressed out of
+        // EXPIRED; Donation never forced; controlled review flagged.
+        $this->assertSame('EXPIRED', $payment->fresh()->status);
+        $this->assertSame('PENDING', $donation->fresh()->status);
+        $this->assertDatabaseHas('payment_provider_events', [
+            'provider' => 'tripay',
+            'payment_id' => $payment->id,
+            'processing_result' => 'ACCEPTED',
+            'signature_valid' => true,
+        ]);
         $this->assertDatabaseHas('audit_records', [
             'event_type' => 'payment.donation_transition_rejected',
             'subject_id' => $payment->id,

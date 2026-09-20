@@ -73,7 +73,13 @@ class PaymentWebhookHandler
         $verified = $adapter->verifyCallback($request);
 
         if (! $verified->valid) {
-            $this->recordRejection($provider, null, $verified->failureReason, $request->getContent(), $integrationActor);
+            // F-09: the forensic signature_valid flag reflects the
+            // cryptographic fact, not the downstream outcome. A failed
+            // cryptographic verification records false; a verified
+            // signature followed by a post-verification rejection
+            // (malformed shape, unknown reference, amount/currency
+            // mismatch) preserves true.
+            $this->recordRejection($provider, null, $verified->failureReason, $request->getContent(), $integrationActor, $verified->signatureValid);
 
             return ['outcome' => self::OUTCOME_REJECTED, 'http_status' => $this->rejectionStatus($provider)];
         }
@@ -83,19 +89,19 @@ class PaymentWebhookHandler
             : null;
 
         if ($payment === null) {
-            $this->recordRejection($provider, null, 'unknown_reference', $request->getContent(), $integrationActor);
+            $this->recordRejection($provider, null, 'unknown_reference', $request->getContent(), $integrationActor, true);
 
             return ['outcome' => self::OUTCOME_REJECTED, 'http_status' => $this->rejectionStatus($provider)];
         }
 
         if ($verified->amountMinor !== null && $verified->amountMinor !== $payment->amount_minor) {
-            $this->recordRejection($provider, $payment->id, 'amount_mismatch', $request->getContent(), $integrationActor);
+            $this->recordRejection($provider, $payment->id, 'amount_mismatch', $request->getContent(), $integrationActor, true);
 
             return ['outcome' => self::OUTCOME_REJECTED, 'http_status' => $this->rejectionStatus($provider)];
         }
 
         if ($verified->currency !== null && strtoupper($verified->currency) !== strtoupper($payment->currency)) {
-            $this->recordRejection($provider, $payment->id, 'currency_mismatch', $request->getContent(), $integrationActor);
+            $this->recordRejection($provider, $payment->id, 'currency_mismatch', $request->getContent(), $integrationActor, true);
 
             return ['outcome' => self::OUTCOME_REJECTED, 'http_status' => $this->rejectionStatus($provider)];
         }
@@ -112,8 +118,8 @@ class PaymentWebhookHandler
             // for forensics with a NULL provider_event_id (NULL-distinct
             // unique semantics admit unlimited such rows) and DUPLICATE
             // outcome; no Payment/Donation state changes.
-            $this->recordEvent($provider, $payment->id, null, 'webhook', true, 'DUPLICATE', $request->getContent());
-            $this->auditLogger->recordWebhookReceived(null, [
+            $duplicate = $this->recordEvent($provider, $payment->id, null, 'webhook', true, 'DUPLICATE', $request->getContent());
+            $this->auditLogger->recordWebhookReceived($duplicate->id, [
                 'provider' => $provider,
                 'processing_result' => 'DUPLICATE',
             ], $integrationActor);
@@ -124,7 +130,7 @@ class PaymentWebhookHandler
         try {
             $canonical = $adapter->normalizeStatus($this->providerStatusFrom($verified->payload, $provider));
         } catch (PaymentAdapterError) {
-            $this->recordRejection($provider, $payment->id, 'malformed_payload', $request->getContent(), $integrationActor);
+            $this->recordRejection($provider, $payment->id, 'malformed_payload', $request->getContent(), $integrationActor, true);
 
             return ['outcome' => self::OUTCOME_REJECTED, 'http_status' => $this->rejectionStatus($provider)];
         }
@@ -137,13 +143,33 @@ class PaymentWebhookHandler
                 $lockedPayment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
 
                 if ($lockedPayment->status === $canonical) {
-                    $this->recordEvent($provider, $lockedPayment->id, $eventId, 'webhook', true, 'DUPLICATE', $request->getContent());
+                    $duplicate = $this->recordEvent($provider, $lockedPayment->id, $eventId, 'webhook', true, 'DUPLICATE', $request->getContent());
+                    $this->auditLogger->recordWebhookReceived($duplicate->id, [
+                        'provider' => $provider,
+                        'processing_result' => 'DUPLICATE',
+                    ], $integrationActor);
 
                     return;
                 }
 
                 if ($lockedPayment->isTerminal()) {
+                    // F-13 / HD-IMP009-02 late-outcome case: the verified
+                    // provider fact is recorded, the terminal Payment is
+                    // never regressed, no Donation transition is forced.
+                    // A late terminal outcome (SUCCEEDED/FAILED) against
+                    // a differently-terminal Payment is flagged for
+                    // controlled exception/manual review through the
+                    // approved CRITICAL signal — never silently dropped.
                     $this->recordEvent($provider, $lockedPayment->id, $eventId, 'webhook', true, 'ACCEPTED', $request->getContent());
+
+                    if (in_array($canonical, ['SUCCEEDED', 'FAILED'], true)) {
+                        $this->auditLogger->recordDonationTransitionRejected($lockedPayment->id, [
+                            'payment_ulid' => $lockedPayment->ulid,
+                            'donation_ulid' => $lockedDonation->ulid,
+                            'attempted_outcome' => $canonical,
+                            'donation_status_observed' => $lockedDonation->status,
+                        ], $consequenceActor);
+                    }
 
                     return;
                 }
@@ -162,8 +188,8 @@ class PaymentWebhookHandler
                     'provider_reference' => $verified->providerReference,
                 ]);
 
-                $this->recordEvent($provider, $lockedPayment->id, $eventId, 'webhook', true, 'ACCEPTED', $request->getContent());
-                $this->auditLogger->recordWebhookReceived(null, [
+                $accepted = $this->recordEvent($provider, $lockedPayment->id, $eventId, 'webhook', true, 'ACCEPTED', $request->getContent());
+                $this->auditLogger->recordWebhookReceived($accepted->id, [
                     'provider' => $provider,
                     'processing_result' => 'ACCEPTED',
                 ], $integrationActor);
@@ -185,8 +211,8 @@ class PaymentWebhookHandler
                 throw $e;
             }
 
-            $this->recordEvent($provider, $payment->id, null, 'webhook', true, 'DUPLICATE', $request->getContent());
-            $this->auditLogger->recordWebhookReceived(null, [
+            $raceDuplicate = $this->recordEvent($provider, $payment->id, null, 'webhook', true, 'DUPLICATE', $request->getContent());
+            $this->auditLogger->recordWebhookReceived($raceDuplicate->id, [
                 'provider' => $provider,
                 'processing_result' => 'DUPLICATE',
             ], $integrationActor);
@@ -219,7 +245,10 @@ class PaymentWebhookHandler
     {
         return match ($provider) {
             'tripay' => (string) ($payload['status'] ?? ''),
-            'xendit' => (string) ($payload['status'] ?? ''),
+            // Xendit delivers the PaymentRequest envelope: the status
+            // lives at data.status — the top-level event
+            // (payment.capture) is not itself the status.
+            'xendit' => (string) ($payload['data']['status'] ?? ''),
             // Stripe delivers an Event envelope: the PaymentIntent's own
             // status lives at data.object.status — the envelope type
             // (payment_intent.succeeded) is not itself the status.
@@ -228,7 +257,7 @@ class PaymentWebhookHandler
         };
     }
 
-    private function recordRejection(string $provider, ?int $paymentId, string $reason, string $rawBody, Principal $actor): void
+    private function recordRejection(string $provider, ?int $paymentId, string $reason, string $rawBody, Principal $actor, bool $signatureValid): void
     {
         $result = match ($reason) {
             'invalid_signature' => 'REJECTED_INVALID_SIGNATURE',
@@ -238,7 +267,7 @@ class PaymentWebhookHandler
             default => 'REJECTED_MALFORMED',
         };
 
-        $this->recordEvent($provider, $paymentId, null, 'webhook', false, $result, $rawBody);
+        $this->recordEvent($provider, $paymentId, null, 'webhook', $signatureValid, $result, $rawBody);
         $this->auditLogger->recordWebhookVerificationFailed([
             'provider' => $provider,
             'reason' => $result,
@@ -253,7 +282,7 @@ class PaymentWebhookHandler
         bool $signatureValid,
         string $processingResult,
         string $rawBody,
-    ): void {
+    ): PaymentProviderEvent {
         $event = new PaymentProviderEvent;
         $event->forceFill([
             'payment_id' => $paymentId,
@@ -266,6 +295,8 @@ class PaymentWebhookHandler
             'received_at' => now(),
         ]);
         $event->save();
+
+        return $event;
     }
 
     private function rejectionStatus(string $provider): int

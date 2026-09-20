@@ -126,6 +126,27 @@ class PaymentAuthorizationTest extends TestCase
         $this->assertFalse(app(PaymentPolicy::class)->viewAny($admin));
     }
 
+    public function test_own_list_uses_own_scope_semantics(): void
+    {
+        $policy = app(PaymentPolicy::class);
+
+        $owner = $this->makeUnauthorizedActor();
+        $this->ownPayment($owner);
+        $this->grant($owner, [PermissionRegistry::PAYMENT_VIEW], ScopeType::Own);
+        $this->assertTrue($policy->viewOwnList($owner));
+
+        $ungranted = $this->makeUnauthorizedActor();
+        $this->assertFalse($policy->viewOwnList($ungranted));
+
+        $orgOnly = $this->makeUnauthorizedActor();
+        $this->grant($orgOnly, [PermissionRegistry::PAYMENT_VIEW], ScopeType::Organization);
+        $this->assertFalse($policy->viewOwnList($orgOnly));
+
+        $platform = $this->makeUnauthorizedActor();
+        $this->grant($platform, [PermissionRegistry::PAYMENT_VIEW], ScopeType::GlobalPlatform);
+        $this->assertTrue($policy->viewOwnList($platform));
+    }
+
     public function test_donor_cancels_own_pending_payment(): void
     {
         $owner = $this->makeUnauthorizedActor();

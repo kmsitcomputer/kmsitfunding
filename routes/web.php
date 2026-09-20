@@ -290,16 +290,19 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
     Route::prefix('admin/payment/payments')->name('payment.admin.')->group(function () {
         Route::get('/', [AdminPaymentController::class, 'index'])->name('index');
         Route::get('/{payment}', [AdminPaymentController::class, 'show'])->name('show');
+        Route::post('/{payment}/cancel', [AdminPaymentController::class, 'cancel'])->name('cancel');
         Route::post('/{payment}/manual-transfer/approve', [AdminPaymentController::class, 'approve'])->name('approve');
         Route::post('/{payment}/manual-transfer/reject', [AdminPaymentController::class, 'reject'])->name('reject');
         Route::post('/{payment}/manual-transfer/hold', [AdminPaymentController::class, 'hold'])->name('hold');
     });
 
-    Route::prefix('admin/payment/provider-config')->name('payment.admin.')->group(function () {
+    Route::prefix('admin/payment/provider-config')->name('payment.admin.config.')->group(function () {
         Route::get('/', [AdminPaymentProviderConfigController::class, 'index'])->name('provider-config');
-        Route::post('/{provider}', [AdminPaymentProviderConfigController::class, 'updateCredential'])->name('provider-config.update');
         Route::post('/bank-accounts', [AdminPaymentProviderConfigController::class, 'storeBankAccount'])->name('bank-accounts.store');
         Route::post('/bank-accounts/{account}/toggle', [AdminPaymentProviderConfigController::class, 'toggleBankAccount'])->name('bank-accounts.toggle');
+        Route::post('/{provider}', [AdminPaymentProviderConfigController::class, 'updateCredential'])
+            ->where('provider', 'tripay|xendit|stripe')
+            ->name('provider-config.update');
     });
 });
 
@@ -323,9 +326,10 @@ Route::post('/campaigns/{campaign:slug}/donations', [PublicDonationController::c
 // IMP-009 — public Payment entry point (docs/implementation/
 // IMP-009-payment-hub.md "Routes / API Boundary": POST
 // /donations/{ulid}/payments — the intentional
-// guest-or-authenticated creation endpoint, plus the live-status
-// read within the original response/redirect flow — never a
-// bearer-token/identifier-as-credential mechanism, HD-IMP009-04).
+// guest-or-authenticated creation endpoint, plus the in-flow
+// creation-response read and the in-flow guest evidence upload —
+// both session-bound to the creating browser flow, never
+// bearer-token/identifier-as-credential mechanisms, HD-IMP009-04).
 // Idempotency-Key header REQUIRED. Registered before the IMP-006
 // catch-all below.
 //
@@ -337,6 +341,9 @@ Route::post('/donations/{donation}/payments', [PublicPaymentController::class, '
     ->name('public.payments.store');
 Route::get('/donations/{donation}/payments/{payment}', [PublicPaymentController::class, 'show'])
     ->name('public.payments.show');
+Route::post('/donations/{donation}/payments/{payment}/manual-transfer/evidence', [PublicPaymentController::class, 'storeEvidence'])
+    ->middleware('throttle:6,1')
+    ->name('public.payments.evidence.store');
 
 Route::prefix('webhooks/payments')->name('webhooks.payments.')->group(function () {
     Route::post('/tripay', [TripayWebhookController::class, 'handle'])->name('tripay');

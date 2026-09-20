@@ -8,29 +8,47 @@ use App\Contracts\Payment\ProviderTransactionResult;
 use App\Contracts\Payment\VerifiedCallbackResult;
 use App\Models\Payment\Payment;
 use App\Models\Payment\PaymentProviderCredential;
+use App\Services\Payment\Exceptions\PaymentValidationException;
+use App\Services\Payment\ProviderCredentialPayload;
+use App\Support\Money\Exceptions\UnknownCurrencyException;
+use App\Support\Money\ProviderAmountConverter;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 
 /**
  * IMP-009 — Xendit adapter, PaymentRequest API baseline
  * (docs/implementation/IMP-009-payment-hub.md "Xendit" / "State
  * Machines", HD-IMP009-05 FINAL / LOCKED — NOT the legacy Invoice
- * API). Xendit-specific concepts (Payment Request, Payment Method,
- * Payment Session, capture semantics) remain isolated here — no
- * Xendit vocabulary leaks into the canonical state machine.
+ * API). Xendit-specific concepts remain isolated here — no Xendit
+ * vocabulary leaks into the canonical state machine.
  *
- * Webhooks are verified via the x-callback-token header compared
- * (constant-time) against the configured callback verification token
- * — a second secret distinct from the API key, never a
- * request-supplied value trusted at face value. The webhook payload's
- * own event/notification id is the provider_event_id dedupe key.
+ * Provider-unit contract (HD-IMP009-13, verified against Xendit's
+ * official PaymentRequest documentation, https://docs.xendit.co
+ * "Create a payment request" + "Payment webhook notification",
+ * 2026-09-20): `request_amount` is denominated in MAJOR units (e.g.
+ * 100000 for Rp 100.000) on BOTH the create call and the webhook
+ * `data.request_amount`. Canonical amount_minor is converted
+ * explicitly through ProviderAmountConverter on the way IN and OUT —
+ * never compared cross-unit.
  *
- * Exact endpoint/version/field shapes MUST be verified against
- * Xendit's current authoritative documentation at integration time
- * (HD-IMP009-05 "External Verification") — the mapping table below is
- * the PaymentRequest API's documented status vocabulary, implemented
- * as an explicit allow-list, never a bare pass-through.
+ * Official create shape: POST /v3/payment_requests with reference_id
+ * (merchant reference), type=PAY, currency, request_amount,
+ * channel_code, capture_method=AUTOMATIC; HTTP basic auth with the
+ * secret key. The webhook envelope is
+ * {event, business_id, created, data: {payment_request_id,
+ * reference_id, currency, request_amount, status, ...}} verified via
+ * the x-callback-token header (constant-time) against the configured
+ * callback verification token — a second secret distinct from the
+ * API key, never a request-supplied value trusted at face value.
+ *
+ * The official webhook envelope carries no provider-native event id,
+ * so the dedupe key is the stable derivation
+ * payment_request_id:status:first-capture-id (documented here, same
+ * acknowledged-narrower-defense posture as Tripay).
+ *
+ * Exact endpoint/version/field shapes were verified against Xendit's
+ * current authoritative documentation at implementation time
+ * (HD-IMP009-05 "External Verification").
  */
 class XenditAdapter implements PaymentProviderAdapter
 {
@@ -42,15 +60,27 @@ class XenditAdapter implements PaymentProviderAdapter
     public function createTransaction(Payment $payment): ProviderTransactionResult
     {
         $credential = $this->credential();
+        $fields = ProviderCredentialPayload::decode('xendit', $credential);
 
-        $response = Http::baseUrl($this->baseUrl($credential?->mode ?? 'SANDBOX'))
+        if ($payment->channel === null || trim($payment->channel) === '') {
+            throw new PaymentValidationException(
+                'channel_required',
+                'Xendit requires a payment channel code.'
+            );
+        }
+
+        $requestAmount = ProviderAmountConverter::toProviderUnits($payment->amount_minor, $payment->currency, 'xendit');
+
+        $response = Http::baseUrl($this->baseUrl($credential->mode))
             ->timeout(30)
-            ->withBasicAuth($this->apiKey($credential), '')
-            ->post('/payment_requests', [
-                'external_id' => $payment->ulid,
-                'amount' => $payment->amount_minor,
+            ->withBasicAuth($fields['api_key'], '')
+            ->post('/v3/payment_requests', [
+                'reference_id' => $payment->ulid,
+                'type' => 'PAY',
                 'currency' => $payment->currency,
-                'payment_method' => ['type' => $payment->channel ?? 'VIRTUAL_ACCOUNT'],
+                'request_amount' => $requestAmount,
+                'channel_code' => $payment->channel,
+                'capture_method' => 'AUTOMATIC',
             ]);
 
         if (! $response->successful()) {
@@ -60,11 +90,11 @@ class XenditAdapter implements PaymentProviderAdapter
         $data = $response->json();
 
         return new ProviderTransactionResult(
-            providerReference: (string) ($data['id'] ?? ''),
-            channel: isset($data['payment_method']['type']) ? (string) $data['payment_method']['type'] : null,
+            providerReference: (string) ($data['payment_request_id'] ?? $data['id'] ?? ''),
+            channel: isset($data['channel_code']) ? (string) $data['channel_code'] : null,
             instructionsPayload: array_filter([
                 'type' => 'xendit_payment_request',
-                'id' => $data['id'] ?? null,
+                'id' => $data['payment_request_id'] ?? $data['id'] ?? null,
                 'status' => $data['status'] ?? null,
             ], fn ($value) => $value !== null),
             expiresAt: isset($data['expires_at']) ? new \DateTimeImmutable((string) $data['expires_at']) : null,
@@ -86,35 +116,66 @@ class XenditAdapter implements PaymentProviderAdapter
             return VerifiedCallbackResult::failed('invalid_signature');
         }
 
-        if (! hash_equals($this->callbackToken($credential), $token)) {
+        try {
+            $fields = ProviderCredentialPayload::decode('xendit', $credential);
+        } catch (PaymentAdapterError) {
+            return VerifiedCallbackResult::failed('invalid_signature');
+        }
+
+        if (! hash_equals($fields['callback_token'], $token)) {
             return VerifiedCallbackResult::failed('invalid_signature');
         }
 
         $payload = json_decode($rawBody, true);
 
         if (! is_array($payload)) {
-            return VerifiedCallbackResult::failed('malformed_payload');
+            return VerifiedCallbackResult::failed('malformed_payload', signatureValid: true);
         }
 
-        $reference = $payload['id'] ?? $payload['payment_request_id'] ?? null;
+        $data = $payload['data'] ?? null;
+
+        if (! is_array($data)) {
+            return VerifiedCallbackResult::failed('malformed_payload', signatureValid: true);
+        }
+
+        $reference = $data['payment_request_id'] ?? $data['reference_id'] ?? null;
 
         if (! is_string($reference) || $reference === '') {
-            return VerifiedCallbackResult::failed('unknown_reference');
+            return VerifiedCallbackResult::failed('unknown_reference', signatureValid: true);
         }
+
+        $status = strtoupper((string) ($data['status'] ?? ''));
+        $currency = isset($data['currency']) ? strtoupper((string) $data['currency']) : null;
+
+        $amountMinor = null;
+
+        if (isset($data['request_amount'])) {
+            if (! is_numeric($data['request_amount']) || $currency === null || $currency === '') {
+                return VerifiedCallbackResult::failed('malformed_payload', signatureValid: true);
+            }
+
+            try {
+                $amountMinor = ProviderAmountConverter::toCanonicalMinor((int) $data['request_amount'], $currency, 'xendit');
+            } catch (PaymentValidationException|UnknownCurrencyException) {
+                return VerifiedCallbackResult::failed('malformed_payload', signatureValid: true);
+            }
+        }
+
+        $captureId = $data['captures'][0]['capture_id'] ?? '';
 
         return VerifiedCallbackResult::passed(
             payload: $payload,
             providerReference: $reference,
-            providerEventId: isset($payload['event_id']) ? (string) $payload['event_id'] : null,
-            amountMinor: isset($payload['amount']) ? (int) $payload['amount'] : null,
-            currency: isset($payload['currency']) ? (string) $payload['currency'] : null,
+            providerEventId: $reference.':'.$status.':'.(is_string($captureId) ? $captureId : ''),
+            amountMinor: $amountMinor,
+            currency: $currency,
         );
     }
 
     public function normalizeStatus(string $providerStatus): string
     {
         return match (strtoupper($providerStatus)) {
-            'PENDING' => 'PENDING',
+            'PENDING', 'AUTHORIZED' => 'PENDING',
             'REQUIRES_ACTION' => 'REQUIRES_ACTION',
             'SUCCEEDED' => 'SUCCEEDED',
             'FAILED' => 'FAILED',
@@ -153,26 +214,8 @@ class XenditAdapter implements PaymentProviderAdapter
         return PaymentProviderCredential::query()->where('provider', 'xendit')->first();
     }
 
-    private function apiKey(?PaymentProviderCredential $credential): string
-    {
-        if ($credential === null) {
-            return '';
-        }
-
-        $decoded = json_decode(Crypt::decryptString($credential->encrypted_secret), true);
-
-        return is_array($decoded) ? (string) ($decoded['api_key'] ?? '') : '';
-    }
-
-    private function callbackToken(PaymentProviderCredential $credential): string
-    {
-        $decoded = json_decode(Crypt::decryptString($credential->encrypted_secret), true);
-
-        return is_array($decoded) ? (string) ($decoded['callback_token'] ?? '') : '';
-    }
-
     private function baseUrl(string $mode): string
     {
-        return $mode === 'PRODUCTION' ? 'https://api.xendit.co' : 'https://api.xendit.co';
+        return 'https://api.xendit.co';
     }
 }

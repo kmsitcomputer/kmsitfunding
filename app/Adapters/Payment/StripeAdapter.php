@@ -8,8 +8,11 @@ use App\Contracts\Payment\ProviderTransactionResult;
 use App\Contracts\Payment\VerifiedCallbackResult;
 use App\Models\Payment\Payment;
 use App\Models\Payment\PaymentProviderCredential;
+use App\Services\Payment\Exceptions\PaymentValidationException;
+use App\Services\Payment\ProviderCredentialPayload;
+use App\Support\Money\Exceptions\UnknownCurrencyException;
+use App\Support\Money\ProviderAmountConverter;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -25,6 +28,15 @@ use Illuminate\Support\Facades\Http;
  * a Stripe-side canceled maps to canonical CANCELLED, never EXPIRED.
  * The native Idempotency-Key request header is passed on creation,
  * derived from payments.idempotency_key.
+ *
+ * Provider-unit contract (HD-IMP009-13, verified against Stripe's
+ * official API documentation, https://docs.stripe.com 2026-09-20): a
+ * PaymentIntent `amount` is denominated in the SMALLEST currency unit
+ * (100 cents for $1.00; 100 for ¥100, a zero-decimal currency). IDR
+ * is NOT a Stripe zero-decimal currency, so Stripe IDR amounts are
+ * sen — identical in magnitude to canonical amount_minor for every
+ * currently-supported currency, but still converted EXPLICITLY
+ * through ProviderAmountConverter (never assumed equal).
  *
  * PCI boundary (hard architectural constraint): the platform NEVER
  * collects, transmits through its own backend, or stores raw card
@@ -44,14 +56,15 @@ class StripeAdapter implements PaymentProviderAdapter
     public function createTransaction(Payment $payment): ProviderTransactionResult
     {
         $credential = $this->credential();
+        $fields = ProviderCredentialPayload::decode('stripe', $credential);
 
-        $response = Http::baseUrl($this->baseUrl($credential?->mode ?? 'SANDBOX'))
+        $response = Http::baseUrl($this->baseUrl($credential->mode))
             ->timeout(30)
-            ->withBasicAuth($this->secretKey($credential), '')
+            ->withBasicAuth($fields['secret_key'], '')
             ->withHeaders(['Idempotency-Key' => $payment->idempotency_key])
             ->asForm()
             ->post('/payment_intents', [
-                'amount' => $payment->amount_minor,
+                'amount' => ProviderAmountConverter::toProviderUnits($payment->amount_minor, $payment->currency, 'stripe'),
                 'currency' => strtolower($payment->currency),
                 'metadata[donation_ulid]' => $payment->donation()->first()?->ulid ?? '',
                 'metadata[payment_ulid]' => $payment->ulid,
@@ -90,6 +103,12 @@ class StripeAdapter implements PaymentProviderAdapter
             return VerifiedCallbackResult::failed('invalid_signature');
         }
 
+        try {
+            $fields = ProviderCredentialPayload::decode('stripe', $credential);
+        } catch (PaymentAdapterError) {
+            return VerifiedCallbackResult::failed('invalid_signature');
+        }
+
         $parts = [];
 
         foreach (explode(',', $header) as $segment) {
@@ -108,7 +127,7 @@ class StripeAdapter implements PaymentProviderAdapter
             return VerifiedCallbackResult::failed('invalid_signature');
         }
 
-        $expected = hash_hmac('sha256', $parts['t'].'.'.$rawBody, $this->webhookSecret($credential));
+        $expected = hash_hmac('sha256', $parts['t'].'.'.$rawBody, $fields['webhook_secret']);
 
         if (! hash_equals($expected, $parts['v1'])) {
             return VerifiedCallbackResult::failed('invalid_signature');
@@ -117,7 +136,7 @@ class StripeAdapter implements PaymentProviderAdapter
         $payload = json_decode($rawBody, true);
 
         if (! is_array($payload)) {
-            return VerifiedCallbackResult::failed('malformed_payload');
+            return VerifiedCallbackResult::failed('malformed_payload', signatureValid: true);
         }
 
         $object = is_array($payload['data'] ?? null) && is_array($payload['data']['object'] ?? null)
@@ -127,15 +146,30 @@ class StripeAdapter implements PaymentProviderAdapter
         $reference = $object['id'] ?? null;
 
         if (! is_string($reference) || $reference === '') {
-            return VerifiedCallbackResult::failed('unknown_reference');
+            return VerifiedCallbackResult::failed('unknown_reference', signatureValid: true);
+        }
+
+        $currency = isset($object['currency']) ? strtoupper((string) $object['currency']) : null;
+        $amountMinor = null;
+
+        if (isset($object['amount'])) {
+            if (! is_numeric($object['amount']) || $currency === null || $currency === '') {
+                return VerifiedCallbackResult::failed('malformed_payload', signatureValid: true);
+            }
+
+            try {
+                $amountMinor = ProviderAmountConverter::toCanonicalMinor((int) $object['amount'], $currency, 'stripe');
+            } catch (PaymentValidationException|UnknownCurrencyException) {
+                return VerifiedCallbackResult::failed('malformed_payload', signatureValid: true);
+            }
         }
 
         return VerifiedCallbackResult::passed(
             payload: $payload,
             providerReference: $reference,
             providerEventId: isset($payload['id']) ? (string) $payload['id'] : null,
-            amountMinor: isset($object['amount']) ? (int) $object['amount'] : null,
-            currency: isset($object['currency']) ? strtoupper((string) $object['currency']) : null,
+            amountMinor: $amountMinor,
+            currency: $currency,
         );
     }
 
@@ -171,24 +205,6 @@ class StripeAdapter implements PaymentProviderAdapter
     private function credential(): ?PaymentProviderCredential
     {
         return PaymentProviderCredential::query()->where('provider', 'stripe')->first();
-    }
-
-    private function secretKey(?PaymentProviderCredential $credential): string
-    {
-        if ($credential === null) {
-            return '';
-        }
-
-        $decoded = json_decode(Crypt::decryptString($credential->encrypted_secret), true);
-
-        return is_array($decoded) ? (string) ($decoded['secret_key'] ?? '') : '';
-    }
-
-    private function webhookSecret(PaymentProviderCredential $credential): string
-    {
-        $decoded = json_decode(Crypt::decryptString($credential->encrypted_secret), true);
-
-        return is_array($decoded) ? (string) ($decoded['webhook_secret'] ?? '') : '';
     }
 
     private function baseUrl(string $mode): string

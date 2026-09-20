@@ -3,6 +3,7 @@
 namespace App\Policies;
 
 use App\Enums\ScopeType;
+use App\Models\Donation\Donation;
 use App\Models\Payment\Payment;
 use App\Models\Rbac\AuthorityType;
 use App\Models\Rbac\Permission;
@@ -94,15 +95,28 @@ class PaymentPolicy
 
     public function viewOwnList(Principal $actingPrincipal): bool
     {
+        // F-10: OWN listing uses the OWN resolver (donation ownership
+        // correlation), never the Organization resolver — requesting
+        // OWN while resolving Organization would admit
+        // Organization-only grants into an OWN capability. Mirrors
+        // DonationPolicy::viewOwnList: a transient self-owned anchor
+        // (a Payment whose owning Donation belongs to the acting
+        // Principal) plus the ownership check, so the evaluator's
+        // scope term is satisfied through the OWN resolver only.
+        $anchorDonation = (new Donation)->forceFill([
+            'donor_principal_id' => $actingPrincipal->id,
+        ]);
         $anchor = (new Payment)->forceFill(['donation_id' => -1]);
+        $anchor->setRelation('donation', $anchorDonation);
 
         return $this->authorizeRbac(
             principal: $actingPrincipal,
             permissionCode: PermissionRegistry::PAYMENT_VIEW,
             resource: $anchor,
-            scopeResolver: new PaymentScopeResolver,
+            scopeResolver: new PaymentOwnScopeResolver,
             requestedScopeType: ScopeType::Own,
             requestedScopeId: null,
+            ownershipCheck: fn (Payment $payment, Principal $principal): bool => $this->ownPayment($principal, $payment),
         );
     }
 

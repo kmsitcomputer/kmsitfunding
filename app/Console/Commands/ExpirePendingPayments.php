@@ -5,10 +5,12 @@ namespace App\Console\Commands;
 use App\Models\Payment\Payment;
 use App\Models\Rbac\Principal;
 use App\Models\Rbac\SystemPrincipal;
+use App\Services\Payment\Exceptions\PaymentTransitionConflictException;
 use App\Services\Payment\PaymentTransitionService;
 use App\Services\Rbac\PrincipalService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * IMP-009 — Payment expiration sweep (docs/implementation/
@@ -87,8 +89,24 @@ class ExpirePendingPayments extends Command
         }
 
         try {
-            $transitions->markExpired($payment, $systemActor);
-            $expired++;
+            // F-13: the sweep acquires the SAME fixed Donation-then-
+            // Payment lock order as every other multi-aggregate Payment
+            // operation (webhook processing, manual verification),
+            // so a concurrent webhook and the sweep contend on one
+            // global order — never deadlock. markExpired() then
+            // re-verifies state under its own nested lock.
+            DB::transaction(function () use ($payment, $transitions, $systemActor, &$expired) {
+                $payment->donation()->lockForUpdate()->first();
+                Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+
+                $transitions->markExpired($payment, $systemActor);
+                $expired++;
+            });
+        } catch (PaymentTransitionConflictException $e) {
+            // Expected lost race: a concurrent webhook/verification won
+            // the row and moved it terminal between candidate selection
+            // and this commit. Not an error — the row needs no sweep.
+            $this->info("Payment #{$id} already resolved ({$e->reason}); skipping.");
         } catch (\Throwable $e) {
             logger()->error('Payment expiration failed for one payment; will retry next run.', [
                 'payment_id' => $id,

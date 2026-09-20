@@ -8,6 +8,7 @@ use App\Models\Payment\PaymentProviderCredential;
 use App\Models\Rbac\Principal;
 use App\Policies\PaymentPolicy;
 use App\Services\Payment\PaymentAuditLogger;
+use App\Services\Payment\ProviderCredentialPayload;
 use App\Services\Rbac\PrincipalService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -62,16 +63,29 @@ class AdminPaymentProviderConfigController extends Controller
 
         abort_unless(in_array($provider, ['tripay', 'xendit', 'stripe'], true), 404);
 
-        $validated = $request->validate([
+        // F-06: the admin write path shares the ONE canonical
+        // credential payload contract with the adapters — typed,
+        // validated per provider. Raw unstructured secret text is
+        // never accepted.
+        $rules = [
             'mode' => ['required', 'string', 'in:SANDBOX,PRODUCTION'],
-            'secret' => ['required', 'string', 'min:1', 'max:8192'],
             'is_enabled' => ['sometimes', 'boolean'],
-        ]);
+        ];
+
+        foreach (ProviderCredentialPayload::requiredFields($provider) as $field) {
+            $rules[$field] = ['required', 'string', 'min:1', 'max:8192'];
+        }
+
+        foreach (ProviderCredentialPayload::optionalFields($provider) as $field) {
+            $rules[$field] = ['nullable', 'string', 'max:8192'];
+        }
+
+        $validated = $request->validate($rules);
 
         $credential = PaymentProviderCredential::query()->where('provider', $provider)->firstOrFail();
         $credential->forceFill([
             'mode' => $validated['mode'],
-            'encrypted_secret' => Crypt::encryptString($validated['secret']),
+            'encrypted_secret' => Crypt::encryptString(ProviderCredentialPayload::encode($provider, $validated)),
             'is_enabled' => (bool) ($validated['is_enabled'] ?? $credential->is_enabled),
         ])->save();
 
@@ -81,7 +95,7 @@ class AdminPaymentProviderConfigController extends Controller
             'is_enabled' => $credential->is_enabled ? 1 : 0,
         ], $actor);
 
-        return redirect()->route('payment.admin.provider-config')->with('status', 'provider-credential-updated');
+        return redirect()->route('payment.admin.config.provider-config')->with('status', 'provider-credential-updated');
     }
 
     public function storeBankAccount(Request $request, PaymentPolicy $policy): RedirectResponse
@@ -98,7 +112,7 @@ class AdminPaymentProviderConfigController extends Controller
 
         ManualTransferBankAccount::create(array_merge($validated, ['is_active' => true]));
 
-        return redirect()->route('payment.admin.provider-config')->with('status', 'bank-account-created');
+        return redirect()->route('payment.admin.config.provider-config')->with('status', 'bank-account-created');
     }
 
     public function toggleBankAccount(Request $request, PaymentPolicy $policy, ManualTransferBankAccount $account): RedirectResponse
@@ -108,7 +122,7 @@ class AdminPaymentProviderConfigController extends Controller
 
         $account->forceFill(['is_active' => ! $account->is_active])->save();
 
-        return redirect()->route('payment.admin.provider-config')->with('status', 'bank-account-updated');
+        return redirect()->route('payment.admin.config.provider-config')->with('status', 'bank-account-updated');
     }
 
     private function resolveActingPrincipal(Request $request): Principal

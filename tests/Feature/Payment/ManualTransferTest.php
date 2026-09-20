@@ -14,6 +14,7 @@ use App\Services\Payment\Exceptions\PaymentValidationException;
 use App\Services\Payment\ManualTransferEvidenceService;
 use App\Services\Payment\ManualTransferVerificationService;
 use App\Services\Payment\PaymentCreationService;
+use App\Services\Payment\ProviderCredentialPayload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Crypt;
@@ -230,7 +231,11 @@ class ManualTransferTest extends TestCase
         PaymentProviderCredential::create([
             'provider' => 'tripay',
             'mode' => 'SANDBOX',
-            'encrypted_secret' => Crypt::encryptString(json_encode(['private_key' => 'k'])),
+            'encrypted_secret' => Crypt::encryptString(ProviderCredentialPayload::encode('tripay', [
+                'merchant_code' => 'T0001',
+                'api_key' => 'k-api',
+                'private_key' => 'k',
+            ])),
             'is_enabled' => true,
         ]);
 

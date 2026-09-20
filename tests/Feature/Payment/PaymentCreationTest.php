@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Payment;
 
+use App\Adapters\Payment\ManualTransferAdapter;
+use App\Contracts\Payment\ProviderTransactionResult;
 use App\Models\Payment\Payment;
 use App\Services\Payment\Exceptions\PaymentTransitionConflictException;
 use App\Services\Payment\Exceptions\PaymentValidationException;
@@ -135,6 +137,35 @@ class PaymentCreationTest extends TestCase
         $second = $service->create($donation, ['provider' => 'manual_transfer'], null, $key);
 
         $this->assertSame($first->id, $second->id);
+        $this->assertSame(1, Payment::query()->where('idempotency_key', $key)->count());
+    }
+
+    public function test_same_key_replay_does_not_invoke_provider_create_transaction_again(): void
+    {
+        $donation = $this->makePendingGuestDonation();
+        $service = app(PaymentCreationService::class);
+        $key = 'replay-count-'.uniqid();
+
+        $counting = new class extends ManualTransferAdapter
+        {
+            public int $calls = 0;
+
+            public function createTransaction(Payment $payment): ProviderTransactionResult
+            {
+                $this->calls++;
+
+                return parent::createTransaction($payment);
+            }
+        };
+        app()->instance(ManualTransferAdapter::class, $counting);
+
+        $first = $service->create($donation, ['provider' => 'manual_transfer'], null, $key);
+        $this->assertSame(1, $counting->calls);
+
+        $second = $service->create($donation, ['provider' => 'manual_transfer'], null, $key);
+
+        $this->assertSame($first->id, $second->id);
+        $this->assertSame(1, $counting->calls);
         $this->assertSame(1, Payment::query()->where('idempotency_key', $key)->count());
     }
 
