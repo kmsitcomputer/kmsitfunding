@@ -407,8 +407,12 @@ Clean child-process env (`APP_ENV=testing`, `DB_CONNECTION=sqlite`,
   Exit code: 0 — PASS.**
 - The 4 skips are the expected MySQL-only tests (concurrency + XOR CHECK).
 - Delta vs Pass 2 (778/6): +11 auth tests, +5 XOR tests, −8 removed engine
-  tests (6 RecurringPlan + 2 concurrency), +1 FAILED-terminal state test,
-  −2 engine skips.
+  tests (6 RecurringPlan + 2 concurrency), −2 engine skips. Net:
+  778 + 11 + 5 − 8 = 786. (The FAILED-terminal state test
+  `a_failed_occurrence_is_terminal_state_only` was a rename/patch of the
+  existing `failed_occurrence_is_never_retried…` test, NOT a newly added
+  test — see section 13.2. DEEPSEEK-IMP008-POSTCODEX-01: CLOSED —
+  EVIDENCE WORDING CORRECTED.)
 
 ### 13.7 Pass 3 MySQL IMP-008 tests (disposable DBs only, never `kmsitdonation`)
 
@@ -468,4 +472,137 @@ No unrelated file changed. Global test harness untouched (`TruncatesInMemorySqli
 - Architectural escalation: NO. New human decision: NO.
 - Application source modified: YES. Global test harness modified: NO.
 - Development DB modified: NO (historical safety: INDETERMINATE).
+- Push: NOT PERFORMED. Merge: NOT PERFORMED.
+
+---
+
+## 16. Pass 4 — final regression evidence refresh (DeepSeek post-Codex closure)
+
+> Evidence only. No application source, test, migration, specification,
+> ADR, governance, RECON, or harness change. The ONLY file modified in
+> this pass is this EVIDENCE.md.
+
+| Field | Value |
+|---|---|
+| Baseline HEAD | `54565911c40af61307680efe7101605739caa6c7` on `master`, clean tree — matched |
+| Model | `meta/muse-spark-1.3-contributor` |
+| DeepSeek post-Codex re-review | PASS — BLOCKER 0, MAJOR 0, MINOR 0, GATE-IMPACT 0 |
+| Final implementation commit | `54565911c40af61307680efe7101605739caa6c7` (unchanged — evidence-only pass) |
+
+### 16.1 DEEPSEEK-IMP008-POSTCODEX-01 — CLOSED (evidence wording corrected)
+
+DeepSeek flagged the Pass 3 delta narrative ("+11 auth tests, +5 XOR
+tests, −8 removed engine tests, +1 FAILED-terminal state test") as
+arithmetically implying 787. The FAILED-terminal state test
+(`RecurringPlanTest::test_a_failed_occurrence_is_terminal_state_only`)
+was a rename/patch of the existing
+`failed_occurrence_is_never_retried…` test (see section 13.2), NOT a
+newly added test. Correct net: 778 + 11 + 5 − 8 = 786. The wording in
+section 13.6 is corrected accordingly. The actual regression result is
+UNCHANGED. **DEEPSEEK-IMP008-POSTCODEX-01: CLOSED — EVIDENCE WORDING
+CORRECTED.**
+
+### 16.2 True SQLite environment proof (clean child-process env)
+
+Inherited process environment was verified polluted
+(`APP_ENV=local`, `DB_CONNECTION=mysql`, `DB_DATABASE=kmsitdonation`)
+so every test process below ran with scrubbed + forced values. A
+temporary probe test (deleted afterwards) confirmed from inside the
+application runtime:
+
+- `APP_ENV = testing`
+- `DB_CONNECTION = sqlite`
+- `DB_DATABASE = :memory:`
+- `CACHE_STORE = array`, `SESSION_DRIVER = array`,
+  `QUEUE_CONNECTION = sync`, `MAIL_MAILER = array`
+- `Application::runningUnitTests() = true`
+
+Probe: **PASS** (1 test, 4 assertions). The development database
+`kmsitdonation` was NEVER selected as a target by any process in this
+pass.
+
+### 16.3 Genuine SQLite full regression (sequential shards, same clean env)
+
+A single-process full run was attempted but the shared host stalled
+under parallel load; each suite directory was therefore executed
+sequentially in the foreground under the identical clean
+child-process environment, plus a single-process full-suite
+confirmation run (exit 0). No failure anywhere.
+
+| Shard | Tests | Assertions | Failed | Skipped |
+|---|---|---|---|---|
+| `tests/Unit` + `tests/Feature/FoundationSmokeTest.php` | 96 | 137 | 0 | 0 |
+| `tests/Feature/Rbac` | 130 | 282 | 0 | 0 |
+| `tests/Feature/Theme` | 46 | 233 | 0 | 0 |
+| `tests/Feature/Identity` | 114 | 363 | 0 | 0 |
+| `tests/Feature/Audit` | 35 | 259 | 0 | 1 (MySQL-only concurrency) |
+| `tests/Feature/Campaign` | 74 | 226 | 0 | 1 (`CampaignLifecycleServiceTest::test_concurrent_publish_attempts_yield_exactly_one_success` — MySQL-only) |
+| `tests/Feature/Cms` | 209 | 742 | 0 | 0 |
+| `tests/Feature/Donation` | 82 | 295 | 0 | 0 (MySQL XOR + concurrency EXECUTED — see 16.4) |
+| **Total** | **786** | **2537** | **0** | **2** |
+
+Suite total: **786 tests, 0 failures**. Skips are 2 here (not 4 as in
+Pass 3) because the disposable MySQL databases were reachable in this
+environment, so the 2 Donation MySQL-gated tests executed and passed
+instead of self-skipping. No failure hidden, reclassified, or patched.
+
+### 16.4 MySQL IMP-008 final check (disposable DBs only, never `kmsitdonation`)
+
+A. Donor-path XOR (`DonationDonorPathCheckTest`,
+`kmsitdonation_imp008_xor`): **5 tests, 12 assertions — PASS**
+(authenticated-only ACCEPTED, guest-only ACCEPTED, neither REJECTED
+with MySQL error 3819, both REJECTED with 3819).
+B. Approved concurrency (`DonationConcurrencyTest`,
+`kmsitdonation_imp008_test`): **2 tests, 9 assertions — PASS**.
+C. Migration UP → DOWN → UP: **PASS** (table gone after DOWN,
+re-created after UP, re-created CHECK still rejects BOTH-populated
+rows — proven inside the XOR test).
+Repository-wide MySQL regression: NOT attempted (pre-existing harness
+not MySQL-safe — unchanged, already documented).
+
+### 16.5 Authorization HTTP smoke (final)
+
+`DonationDashboardAuthorizationTest`: **11 tests, 20 assertions —
+PASS** — permissionless denial (donation list, plan list, plan
+create), ORGANIZATION-only denial (list + create where OWN required),
+suspended/disabled denial despite valid grants, valid OWN success
+(list sees own ULID only; create yields ACTIVE donor-owned plan),
+cross-donor denial.
+
+### 16.6 Deferred engine absence — confirmed
+
+- `GenerateRecurringOccurrences`: absent (no hits in `app/`, `routes/`).
+- `donation:generate-occurrences`: absent from `routes/console.php`
+  (only approved sweeps scheduled: `content:run-scheduled-transitions`,
+  `content:cleanup-media`, `donation:expire-pending`).
+- `generateOccurrence` runtime method: absent
+  (`RecurringPlanService.php` documents create/pause/resume/cancel
+  only, "no automatic occurrence generation").
+- Automatic occurrence-generation job/listener/endpoint: absent
+  (no `app/Jobs` directory; no scheduler/generator references).
+**DEFERRED ENGINE ABSENT: YES.** Nothing modified.
+
+### 16.7 Static validation — all PASS
+
+| Check | Result |
+|---|---|
+| `Pint --test` | PASS — 404 files, exit 0 |
+| `vue-tsc --noEmit` (`npm run type-check`) | PASS — exit 0, no output |
+| `Vite production build` (`npm run build`) | PASS — exit 0, built in 4.43s |
+| `Composer Audit` | PASS — "No security vulnerability advisories found", exit 0 |
+| `git diff --check` | PASS — exit 0, no whitespace errors |
+
+### 16.8 Pass 4 finding status
+
+- CODEX FINAL-01: CLOSED. FINAL-02: CLOSED. FINAL-03: CLOSED.
+- DeepSeek post-Codex: PASS. DEEPSEEK-IMP008-POSTCODEX-01: CLOSED.
+- REVIEW-17 / REVIEW-18: CLOSED BY SCOPE REMOVAL.
+- REVIEW-12 / REVIEW-16: accepted non-gating editorial debt (NOT
+  closed, NOT claimed closed).
+- BLOCKER 0, MAJOR 0, MINOR 0, GATE-IMPACT 0.
+- Application source modified: NO. Tests modified: NO. Migrations: NO.
+  Spec/ADR/governance/RECON/harness: NO. Evidence modified: YES (this
+  file only).
+- Development DB touched during this run: NO. Historical safety:
+  INDETERMINATE (unchanged, not rewritten).
 - Push: NOT PERFORMED. Merge: NOT PERFORMED.
