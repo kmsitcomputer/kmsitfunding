@@ -300,3 +300,108 @@ unknown reference, duplicate event, out-of-order event — all covered.
 - Secrets: encrypted at rest, `$hidden` on the model, write-only admin path,
   never logged/audited/returned (credential-changed audit carries only
   provider/mode/is_enabled).
+
+---
+
+## 15. DeepSeek Remediation Evidence (recovery session, 2026-09-20)
+
+**Remediation Owner:** Muse Spark 1.3 Contributor — ASSERTED (session model
+identity; recovery brief EXPECTED MODEL `meta/muse-spark-1.3-contributor`).
+**Mode:** PATCH — resumed the prior session's uncommitted working tree; no
+`reset`/`restore`/`clean`/checkout performed at any point.
+**Starting HEAD:** `c5499e0e6d07b48775debabf0cb6113fd8f78e54` (pre-remediation
+evidence commit, working tree dirty as expected).
+**Remediation commit:** `925bbba fix(imp-009): remediate independent review
+findings` (this session). NO PUSH. NO MERGE.
+
+### HD-IMP009-13 status: IMPLEMENTED (APPROVED decision, executed)
+
+Canonical Money remains `amount_minor` + `CurrencyMinorUnits`; locked IDR
+digits = 2, so Rp 10,000 = 1,000,000 canonical `amount_minor`. Explicit
+integer-only canonical↔provider conversion at the adapter boundary
+(`app/Support/Money/ProviderAmountConverter.php`): Tripay whole-IDR,
+Xendit major units, Stripe smallest unit (sen for IDR — IDR is NOT a Stripe
+zero-decimal currency), manual_transfer identity. No floats, no silent
+rounding (exact-divisibility guard → typed
+`provider_amount_not_representable`), never cross-unit comparison (oracle
+tests prove a raw-canonical echo into a provider-unit field mismatches).
+
+### F-01..F-21 closure (read from the actual patch + test markers)
+
+| Finding | Disposition | Evidence |
+|---------|-------------|----------|
+| F-01 (BLOCKER: provider call only on inserting call) | CLOSED | `$created` flag in `PaymentCreationService`; replay-counting test |
+| F-02 (auth creation policy) | CLOSED | `createOwn` check in `PublicPaymentController::store` + 4 HTTP denial tests |
+| F-03 (guest creation guest-donation only) | CLOSED | `donor_principal_id === null` gate + denial test |
+| F-04 (in-flow status read) | CLOSED | creation-session binding, 404 otherwise; client_secret test |
+| F-05 (guest evidence, HD-IMP009-04) | CLOSED — stop condition NOT triggered | session-bound guest upload, no bearer token invented; spec "Authorization" expressly gives evidence the creation guest-access shape |
+| F-06 (canonical credential payload) | CLOSED | `ProviderCredentialPayload` + round-trip/malformed tests |
+| F-07 (pre-row provider/currency gate) | CLOSED | gate + no-row/no-call tests; manual_transfer static-list exemption (regression found + fixed this session) |
+| F-08 (canonical Money conversion) | CLOSED | converter unit (12 tests) + oracle feature (10 tests) |
+| F-09 (forensic signature_valid) | CLOSED | `signatureValid` field; pre-verification paths verified false-by-construction |
+| F-10 (OWN listing resolver) | CLOSED | `PaymentOwnScopeResolver` in `viewOwnList` + semantics test |
+| F-11 (bank-accounts route) | CLOSED | route ordering + `where()` + controller test |
+| F-12 (unmarked minor — covered by adapter hardening) | CLOSED | per-provider required-field credential decode on every adapter path |
+| F-13 (lock order + late outcome) | CLOSED | sweep lock order; terminal-review tests |
+| F-14 (webhook.received subject) | CLOSED | event-row subject assertion |
+| F-15 (dual-constraint disambiguation) | CLOSED | `active_attempt_exists` vs replay test coverage |
+| F-16 (unmarked minor — channel requirement) | CLOSED | `channel_required` typed rejection for Tripay/Xendit |
+| F-17..F-21 (editorial/governance) | CLOSED | this evidence record; harness hardening; docblock contracts |
+
+BLOCKER remaining: 0. MAJOR remaining: 0. MINOR remaining: 0.
+EDITORIAL remaining: 0. GATE-IMPACT remaining: 0. New Human Decision
+required: NONE.
+
+### Recovery-session corrections to the inherited work
+
+1. **F-07 regression (found by running the suite):** the new pre-row gate
+   rejected `manual_transfer` creation whenever no bank accounts were
+   seeded (55 errors + 3 failures). Fixed narrowly: manual_transfer is
+   exempt from the static-list gate (operational config, baseline
+   behavior); converter-gate currency validity still applies. Suite
+   returned to green; no other file touched.
+2. **Stripe webhook test field bug:** the inherited test sent
+   `total_amount` while the adapter reads `amount`, silently skipping the
+   amount gate. Corrected to `amount` + added
+   `test_stripe_amount_mismatch_is_rejected_before_any_transition`.
+3. **Workspace hygiene:** removed stray `100` file (103-byte accidental
+   `php -r` shell artifact: a PHP parse-error string; no project
+   purpose, not IMP-009 content).
+4. **Pint:** 3 style issues in inherited files auto-fixed (imports/
+   whitespace only); final `pint --test` PASS (473 files).
+
+### Validation (this session, effective environment proven by
+`TestHarnessEnvironmentTest`: testing / sqlite / :memory:)
+
+| Check | Result |
+|-------|--------|
+| Feature suite (803 tests, excl. 2 MySQL payment files) | PASS, exit 0, 2 pre-existing SQLite skips (audit/campaign concurrency) |
+| `PaymentSchemaConstraintsTest` (disposable `kmsitdonation_imp009_test`, UP/DOWN/UP) | 5/5 PASS |
+| `PaymentConcurrencyTest` (disposable DB, genuine 1205 overlap ×3 + backstop) | 4/4 PASS |
+| `tests/Unit` | 137/137 PASS |
+| Payment feature incl. new tests | 118→119 PASS (Stripe mismatch added) |
+| Donation + Rbac + Audit integration | 247 PASS (1 pre-existing skip) |
+| Campaign | 74 PASS (1 pre-existing skip) |
+| `vendor/bin/pint --test` | PASS |
+| `composer audit` | no advisories |
+| `git diff --check` | clean |
+| Frontend checks | NOT APPLICABLE — no `resources/` changes |
+
+Full-suite single-process note: `php vendor/bin/phpunit` as one
+invocation stalls in this Windows shell (no CPU, no output; pipe-EOF
+held open); the identical test set passes as documented chunks above
+plus the file-redirected 803-test Feature run (exit 0). No test was
+excluded from evidence except the 9 MySQL tests, which ran separately
+against the disposable DB and pass.
+
+Development DB: NOT TOUCHED DURING RECOVERY/REMEDIATION. Historical dev
+DB: ENVIRONMENT SIDE EFFECT YES / DATA LOSS INDETERMINATE / SCHEMA
+RESIDUE YES (unchanged, §12/§13.6).
+
+Scope leakage: NONE (no Ledger/commission/refund/Moota/auto-charge code;
+no Redis/Kafka/microservice/tenant additions; no invented rates, limits,
+or accounting entries). Working tree after this commit: CLEAN except
+this EVIDENCE.md update (committed separately below). PUSH: NOT
+PERFORMED. MERGE: NOT PERFORMED.
+
+FINAL VERDICT: REMEDIATION COMPLETE — READY FOR DEEPSEEK RE-REVIEW
