@@ -68,6 +68,22 @@ class ManualTransferVerificationService
                 throw new PaymentTransitionConflictException('evidence_already_reviewed', 'This evidence has already been reviewed.');
             }
 
+            // CODEX-F-01 / HD-IMP009-07: APPROVE is fail-closed on the
+            // canonical amount. The declared evidence amount MUST
+            // exactly equal the immutable Payment amount (integer
+            // minor units, no floats, no rounding); a mismatch MUST
+            // NOT transition the Payment to SUCCEEDED — route the
+            // verifier through holdForAmountMismatch() instead (the
+            // existing controlled exception/manual-review mechanism).
+            // No refund/credit/balance/allocation, no Donation amount
+            // mutation, no Ledger posting is invented here.
+            if ($evidence->declared_amount_minor === null || $evidence->declared_amount_minor !== $lockedPayment->amount_minor) {
+                throw new PaymentValidationException(
+                    'amount_mismatch_requires_hold',
+                    'The declared evidence amount differs from the payment amount; approval is not permitted — use the amount-mismatch hold path.'
+                );
+            }
+
             $evidence->forceFill([
                 'reviewed_by_principal_id' => $verifier->id,
                 'reviewed_at' => now(),

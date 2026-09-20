@@ -274,7 +274,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'http-pub-nosess-'.uniqid()
-        );
+        )->payment;
 
         $this->get("/donations/{$donation->ulid}/payments/{$payment->ulid}")->assertNotFound();
     }
@@ -351,12 +351,72 @@ class PaymentHttpTest extends TestCase
         $this->get("/donations/{$firstDonation->ulid}/payments/{$first->ulid}")->assertOk();
     }
 
+    public function test_same_session_replay_keeps_possession_without_a_second_row(): void
+    {
+        $donation = $this->makePendingGuestDonation();
+        $key = 'http-pay-samereplay-'.uniqid();
+        $url = "/donations/{$donation->ulid}/payments";
+
+        $first = $this->post($url, ['provider' => 'manual_transfer'], ['Idempotency-Key' => $key]);
+        $first->assertRedirect();
+
+        $payment = Payment::query()->firstOrFail();
+        $statusUrl = "{$url}/{$payment->ulid}";
+
+        $replay = $this->post($url, ['provider' => 'manual_transfer'], ['Idempotency-Key' => $key]);
+        $replay->assertRedirect();
+
+        $this->assertSame(1, Payment::query()->where('idempotency_key', $key)->count());
+        $this->get($statusUrl)->assertOk();
+
+        $upload = $this->post(
+            "{$statusUrl}/manual-transfer/evidence",
+            ['evidence' => UploadedFile::fake()->image('receipt.jpg')->size(100)]
+        );
+        $upload->assertRedirect();
+        $this->assertSame(1, ManualTransferEvidence::query()->where('payment_id', $payment->id)->count());
+    }
+
+    public function test_fresh_session_replay_gains_no_possession(): void
+    {
+        Storage::fake('local');
+
+        $donation = $this->makePendingGuestDonation();
+        $key = 'http-pay-freshreplay-'.uniqid();
+        $url = "/donations/{$donation->ulid}/payments";
+
+        $this->post($url, ['provider' => 'manual_transfer'], ['Idempotency-Key' => $key])
+            ->assertRedirect();
+
+        $payment = Payment::query()->firstOrFail();
+        $statusUrl = "{$url}/{$payment->ulid}";
+
+        $this->get($statusUrl)->assertOk();
+
+        $this->flushSession();
+
+        $replay = $this->post($url, ['provider' => 'manual_transfer'], ['Idempotency-Key' => $key]);
+        $replay->assertRedirect();
+
+        $this->assertSame(1, Payment::query()->where('idempotency_key', $key)->count());
+        $this->assertSame($payment->id, Payment::query()->where('idempotency_key', $key)->firstOrFail()->id);
+
+        $this->get($statusUrl)->assertNotFound();
+
+        $upload = $this->post(
+            "{$statusUrl}/manual-transfer/evidence",
+            ['evidence' => UploadedFile::fake()->image('receipt.jpg')->size(100)]
+        );
+        $upload->assertForbidden();
+        $this->assertSame(0, ManualTransferEvidence::query()->count());
+    }
+
     public function test_client_secret_never_leaks_through_an_unrestricted_get(): void
     {
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'http-pub-secret-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['instructions_payload' => [
             'type' => 'stripe_payment_intent',
             'id' => 'pi_test_secret',
@@ -430,7 +490,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'http-pub-evidonly-'.uniqid()
-        );
+        )->payment;
 
         $this->get("/donations/{$donation->ulid}/payments/{$payment->ulid}")->assertNotFound();
 
@@ -450,7 +510,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'http-pub-evnosess-'.uniqid()
-        );
+        )->payment;
 
         $upload = $this->post(
             "/donations/{$donation->ulid}/payments/{$payment->ulid}/manual-transfer/evidence",
@@ -469,7 +529,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingOwnedDonation($owner);
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], $owner, 'http-pub-evowned-'.uniqid()
-        );
+        )->payment;
 
         $upload = $this->withSession(['guest_payment_ulids' => [$payment->ulid]])->post(
             "/donations/{$donation->ulid}/payments/{$payment->ulid}/manual-transfer/evidence",
@@ -487,7 +547,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'http-pub-evnonman-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['provider' => 'tripay'])->save();
 
         $upload = $this->withSession(['guest_payment_ulids' => [$payment->ulid]])->post(
@@ -542,7 +602,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingOwnedDonation($owner);
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], $owner, 'http-admincancel-'.uniqid()
-        );
+        )->payment;
 
         $response = $this->post("/admin/payment/payments/{$payment->ulid}/cancel");
 
@@ -558,7 +618,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'http-admincancel-noperm-'.uniqid()
-        );
+        )->payment;
 
         $this->post("/admin/payment/payments/{$payment->ulid}/cancel")->assertForbidden();
         $this->assertSame('PENDING', $payment->fresh()->status);
@@ -571,7 +631,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'http-admincancel-term-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['status' => 'SUCCEEDED', 'succeeded_at' => now()])->save();
 
         $this->post("/admin/payment/payments/{$payment->ulid}/cancel")->assertForbidden();
@@ -598,7 +658,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingOwnedDonation($principal);
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], $principal, 'http-admincancel-own-'.uniqid()
-        );
+        )->payment;
 
         $this->post("/admin/payment/payments/{$payment->ulid}/cancel")->assertForbidden();
         $this->assertSame('PENDING', $payment->fresh()->status);
@@ -612,7 +672,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingOwnedDonation($principal);
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], $principal, 'http-ev-'.uniqid()
-        );
+        )->payment;
 
         $role = Role::create(['code' => 'pay_ev_'.uniqid(), 'name' => 'Payment Evidence Test Role']);
         $permission = Permission::firstOrCreate(
@@ -669,7 +729,7 @@ class PaymentHttpTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'http-ev-guest-'.uniqid()
-        );
+        )->payment;
 
         $evidence = ManualTransferEvidence::create([
             'ulid' => (string) Str::ulid(),

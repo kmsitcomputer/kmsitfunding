@@ -65,7 +65,7 @@ class PaymentCreationService
     /**
      * @param  array{provider:string, channel?:?string}  $payload
      */
-    public function create(Donation $donation, array $payload, ?Principal $actor, mixed $idempotencyKey): Payment
+    public function create(Donation $donation, array $payload, ?Principal $actor, mixed $idempotencyKey): PaymentCreationOutcome
     {
         $key = self::normalizeIdempotencyKey($idempotencyKey);
 
@@ -77,9 +77,9 @@ class PaymentCreationService
 
         $adapter = $this->adapters->for($provider);
 
-        try {
-            $created = null;
+        $created = false;
 
+        try {
             $payment = DB::transaction(function () use ($donation, $provider, $payload, $actor, $key, $adapter, &$created) {
                 $lockedDonation = Donation::query()->whereKey($donation->id)->lockForUpdate()->firstOrFail();
 
@@ -213,21 +213,27 @@ class PaymentCreationService
                 }
             }
 
-            return $this->resolveIdempotentReplay($key, $donationRow, $provider, $payload['channel'] ?? null);
+            return new PaymentCreationOutcome(
+                $this->resolveIdempotentReplay($key, $donationRow, $provider, $payload['channel'] ?? null),
+                false,
+            );
         }
 
         // F-01: the in-transaction replay path resolved an EXISTING
         // row (created by an earlier call) — return it WITHOUT another
         // provider createTransaction() call. Only a row THIS call
         // inserted is provisioned, per the safe contract: one canonical
-        // Payment, one provider provisioning operation.
+        // Payment, one provider provisioning operation. R-01: the
+        // outcome contract carries created=false explicitly so the
+        // caller can never mistake a replay for a creation (no
+        // timestamp/heuristic inference, no possession on replay).
         if ($created !== true) {
-            return $payment->fresh();
+            return new PaymentCreationOutcome($payment->fresh(), false);
         }
 
         $this->provisionProviderTransaction($payment);
 
-        return $payment->fresh();
+        return new PaymentCreationOutcome($payment->fresh(), true);
     }
 
     public static function normalizeIdempotencyKey(mixed $key): string

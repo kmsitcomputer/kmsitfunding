@@ -109,7 +109,7 @@ class PaymentWebhookSecurityTest extends TestCase
 
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'tripay', 'channel' => 'BRIVA'], null, 'hook-tripay-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['provider_reference' => $reference])->save();
 
         return $payment->fresh();
@@ -337,7 +337,7 @@ class PaymentWebhookSecurityTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'xendit', 'channel' => 'QRIS'], null, 'hook-xendit-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['provider_reference' => 'xnd-req-001'])->save();
 
         // Official PaymentRequest webhook envelope: data.request_amount
@@ -382,7 +382,7 @@ class PaymentWebhookSecurityTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'stripe'], null, 'hook-stripe-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['provider_reference' => 'pi_test_001'])->save();
 
         $body = json_encode([
@@ -434,7 +434,7 @@ class PaymentWebhookSecurityTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'stripe'], null, 'hook-stripe-mm-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['provider_reference' => 'pi_test_mm'])->save();
 
         $body = json_encode([

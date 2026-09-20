@@ -52,7 +52,7 @@ class PaymentTransitionTest extends TestCase
             ['provider' => 'manual_transfer'],
             null,
             'trans-'.uniqid()
-        );
+        )->payment;
     }
 
     public function test_full_forward_transition_matrix(): void
@@ -128,7 +128,7 @@ class PaymentTransitionTest extends TestCase
     {
         $donation = $this->makePendingGuestDonation();
         $service = app(PaymentCreationService::class);
-        $payment = $service->create($donation, ['provider' => 'manual_transfer'], null, 'int-suc-'.uniqid());
+        $payment = $service->create($donation, ['provider' => 'manual_transfer'], null, 'int-suc-'.uniqid())->payment;
 
         $consequenceActor = $this->makeSystemActor('system.payment-outcome-consequence');
 
@@ -148,7 +148,7 @@ class PaymentTransitionTest extends TestCase
     {
         $donation = $this->makePendingGuestDonation();
         $service = app(PaymentCreationService::class);
-        $payment = $service->create($donation, ['provider' => 'manual_transfer'], null, 'int-late-'.uniqid());
+        $payment = $service->create($donation, ['provider' => 'manual_transfer'], null, 'int-late-'.uniqid())->payment;
 
         // The Donation independently reaches a terminal state first
         // (its own sweep/cancel path — simulated here directly).
@@ -185,7 +185,7 @@ class PaymentTransitionTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'int-man-'.uniqid()
-        );
+        )->payment;
 
         $evidence = ManualTransferEvidence::create([
             'ulid' => (string) Str::ulid(),
@@ -193,6 +193,8 @@ class PaymentTransitionTest extends TestCase
             'file_path' => 'evidence/manual-probe.jpg',
             'mime_type' => 'image/jpeg',
             'size_bytes' => 1024,
+            'declared_amount_minor' => $payment->amount_minor,
+            'declared_currency' => $payment->currency,
         ]);
 
         app(ManualTransferVerificationService::class)->approve($payment, $verifier, $evidence->id);

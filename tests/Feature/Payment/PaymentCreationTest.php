@@ -38,7 +38,7 @@ class PaymentCreationTest extends TestCase
             ['provider' => 'manual_transfer'],
             null,
             'create-guest-'.uniqid()
-        );
+        )->payment;
 
         $this->assertSame('PENDING', $payment->status);
         $this->assertSame($donation->id, $payment->donation_id);
@@ -67,7 +67,7 @@ class PaymentCreationTest extends TestCase
             ['provider' => 'manual_transfer'],
             $owner,
             'create-owned-'.uniqid()
-        );
+        )->payment;
 
         $this->assertSame('PENDING', $payment->status);
 
@@ -133,11 +133,25 @@ class PaymentCreationTest extends TestCase
         $service = app(PaymentCreationService::class);
         $key = 'replay-same-'.uniqid();
 
-        $first = $service->create($donation, ['provider' => 'manual_transfer'], null, $key);
-        $second = $service->create($donation, ['provider' => 'manual_transfer'], null, $key);
+        $first = $service->create($donation, ['provider' => 'manual_transfer'], null, $key)->payment;
+        $second = $service->create($donation, ['provider' => 'manual_transfer'], null, $key)->payment;
 
         $this->assertSame($first->id, $second->id);
         $this->assertSame(1, Payment::query()->where('idempotency_key', $key)->count());
+    }
+
+    public function test_same_key_replay_reports_idempotent_replay_not_creation(): void
+    {
+        $donation = $this->makePendingGuestDonation();
+        $service = app(PaymentCreationService::class);
+        $key = 'replay-flag-'.uniqid();
+
+        $first = $service->create($donation, ['provider' => 'manual_transfer'], null, $key);
+        $second = $service->create($donation, ['provider' => 'manual_transfer'], null, $key);
+
+        $this->assertTrue($first->created);
+        $this->assertFalse($second->created);
+        $this->assertSame($first->payment->id, $second->payment->id);
     }
 
     public function test_same_key_replay_does_not_invoke_provider_create_transaction_again(): void
@@ -159,10 +173,10 @@ class PaymentCreationTest extends TestCase
         };
         app()->instance(ManualTransferAdapter::class, $counting);
 
-        $first = $service->create($donation, ['provider' => 'manual_transfer'], null, $key);
+        $first = $service->create($donation, ['provider' => 'manual_transfer'], null, $key)->payment;
         $this->assertSame(1, $counting->calls);
 
-        $second = $service->create($donation, ['provider' => 'manual_transfer'], null, $key);
+        $second = $service->create($donation, ['provider' => 'manual_transfer'], null, $key)->payment;
 
         $this->assertSame($first->id, $second->id);
         $this->assertSame(1, $counting->calls);
@@ -210,10 +224,10 @@ class PaymentCreationTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $service = app(PaymentCreationService::class);
 
-        $first = $service->create($donation, ['provider' => 'manual_transfer'], null, 'seq-1-'.uniqid());
+        $first = $service->create($donation, ['provider' => 'manual_transfer'], null, 'seq-1-'.uniqid())->payment;
         $first->forceFill(['status' => 'FAILED', 'failed_at' => now()])->save();
 
-        $second = $service->create($donation, ['provider' => 'manual_transfer'], null, 'seq-2-'.uniqid());
+        $second = $service->create($donation, ['provider' => 'manual_transfer'], null, 'seq-2-'.uniqid())->payment;
 
         $this->assertSame('PENDING', $second->status);
         $this->assertSame(2, Payment::query()->where('donation_id', $donation->id)->count());
@@ -225,11 +239,11 @@ class PaymentCreationTest extends TestCase
         $service = app(PaymentCreationService::class);
 
         for ($i = 0; $i < 3; $i++) {
-            $attempt = $service->create($donation, ['provider' => 'manual_transfer'], null, 'nolimit-'.$i.'-'.uniqid());
+            $attempt = $service->create($donation, ['provider' => 'manual_transfer'], null, 'nolimit-'.$i.'-'.uniqid())->payment;
             $attempt->forceFill(['status' => 'FAILED', 'failed_at' => now()])->save();
         }
 
-        $final = $service->create($donation, ['provider' => 'manual_transfer'], null, 'nolimit-final-'.uniqid());
+        $final = $service->create($donation, ['provider' => 'manual_transfer'], null, 'nolimit-final-'.uniqid())->payment;
 
         $this->assertSame('PENDING', $final->status);
         $this->assertSame(4, Payment::query()->where('donation_id', $donation->id)->count());

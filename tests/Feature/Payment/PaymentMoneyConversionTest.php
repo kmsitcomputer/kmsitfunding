@@ -71,7 +71,7 @@ class PaymentMoneyConversionTest extends TestCase
 
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'oracle-manual-'.uniqid()
-        );
+        )->payment;
 
         $this->assertSame(self::CANONICAL_RP_10K, $payment->instructions_payload['amount_minor']);
     }
@@ -92,7 +92,7 @@ class PaymentMoneyConversionTest extends TestCase
 
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'tripay', 'channel' => 'BRIVA'], null, 'oracle-tripay-'.uniqid()
-        );
+        )->payment;
 
         Http::assertSent(function ($request) use ($payment) {
             return $request['method'] === 'BRIVA'
@@ -118,7 +118,7 @@ class PaymentMoneyConversionTest extends TestCase
         $donation = $this->makeOracleDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'tripay', 'channel' => 'BRIVA'], null, 'oracle-tripay-cb-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['provider_reference' => 'T-ORACLE-CB'])->save();
 
         $send = function (array $payload) use ($privateKey) {
@@ -154,7 +154,7 @@ class PaymentMoneyConversionTest extends TestCase
         $donation = $this->makeOracleDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'tripay', 'channel' => 'BRIVA'], null, 'oracle-tripay-raw-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['provider_reference' => 'T-ORACLE-RAW'])->save();
 
         // 1000000 in the whole-IDR field converts to 100000000
@@ -193,7 +193,7 @@ class PaymentMoneyConversionTest extends TestCase
 
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'xendit', 'channel' => 'QRIS'], null, 'oracle-xendit-'.uniqid()
-        );
+        )->payment;
 
         Http::assertSent(function ($request) use ($payment) {
             return $request['reference_id'] === $payment->ulid
@@ -215,7 +215,7 @@ class PaymentMoneyConversionTest extends TestCase
         $donation = $this->makeOracleDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'xendit', 'channel' => 'QRIS'], null, 'oracle-xendit-cb-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['provider_reference' => 'pr-oracle-cb'])->save();
 
         $send = function (int $requestAmount) use ($token) {
@@ -262,7 +262,7 @@ class PaymentMoneyConversionTest extends TestCase
 
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'stripe'], null, 'oracle-stripe-'.uniqid()
-        );
+        )->payment;
 
         Http::assertSent(function ($request) {
             return (int) $request['amount'] === 1000000
@@ -282,7 +282,7 @@ class PaymentMoneyConversionTest extends TestCase
         $donation = $this->makeOracleDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'stripe'], null, 'oracle-stripe-cb-'.uniqid()
-        );
+        )->payment;
         $payment->forceFill(['provider_reference' => 'pi_oracle_cb'])->save();
 
         $send = function (int $amount) use ($secret) {

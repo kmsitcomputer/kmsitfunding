@@ -36,7 +36,12 @@ use Illuminate\Validation\ValidationException;
  * Payment to THIS browser session via persistent server-side session
  * possession (session()->put() of the created Payment ULIDs — never
  * flash state, never a ULID/email bearer token, never the server-side
- * session id as a credential). The identifier-keyed GET
+ * session id as a credential). R-01: possession is established ONLY
+ * when THIS call created the Payment (PaymentCreationOutcome::$created);
+ * an idempotent replay returns the same Payment per idempotency
+ * semantics but grants a fresh anonymous session NOTHING — the
+ * Idempotency-Key is request deduplication, never a recovery
+ * credential (HD-IMP009-04). The identifier-keyed GET
  * and the guest evidence POST below are reachable ONLY through that
  * session binding: knowing ULIDs alone exposes nothing, a different
  * anonymous session exposes nothing, and no
@@ -82,7 +87,7 @@ class PublicPaymentController extends Controller
         }
 
         try {
-            $payment = $service->create($donation, $validated, $actor, $idempotencyKey);
+            $outcome = $service->create($donation, $validated, $actor, $idempotencyKey);
         } catch (UnknownCurrencyException $e) {
             throw ValidationException::withMessages(['currency' => $e->getMessage()]);
         } catch (PaymentValidationException $e) {
@@ -91,7 +96,17 @@ class PublicPaymentController extends Controller
             throw ValidationException::withMessages(['idempotency_key' => $e->getMessage()]);
         }
 
-        $this->rememberGuestPayment($request, $payment);
+        $payment = $outcome->payment;
+
+        // R-01: NEW guest creation establishes session possession;
+        // an idempotent replay MUST NOT grant a fresh anonymous
+        // session possession of the existing Payment (the
+        // Idempotency-Key is request deduplication, never a recovery
+        // credential). Same-session replay stays usable through the
+        // possession already stored in guest_payment_ulids.
+        if ($outcome->created) {
+            $this->rememberGuestPayment($request, $payment);
+        }
 
         return redirect()->route('public.payments.show', [
             'donation' => $donation->ulid,

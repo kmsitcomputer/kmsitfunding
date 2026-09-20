@@ -46,7 +46,7 @@ class ManualTransferTest extends TestCase
 
         return app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'manual-'.uniqid()
-        );
+        )->payment;
     }
 
     private function fakeUpload(): UploadedFile
@@ -179,6 +179,48 @@ class ManualTransferTest extends TestCase
         ]);
     }
 
+    public function test_direct_approve_of_mismatched_evidence_cannot_bypass_the_hold(): void
+    {
+        foreach ([-1, 1, -500, 500] as $delta) {
+            $payment = $this->makeManualPayment();
+            $verifier = $this->verifierWithAuthority();
+
+            $evidence = app(ManualTransferEvidenceService::class)->submit($payment, $this->fakeUpload(), [
+                'declared_amount_minor' => $payment->amount_minor + $delta,
+                'declared_currency' => $payment->currency,
+            ], null);
+
+            try {
+                app(ManualTransferVerificationService::class)->approve($payment->fresh(), $verifier, $evidence->id);
+                $this->fail("Direct approve() of a {$delta}-unit mismatch must fail closed (HD-IMP009-07).");
+            } catch (PaymentValidationException $e) {
+                $this->assertSame('amount_mismatch_requires_hold', $e->reason);
+            }
+
+            $this->assertSame('PENDING', $payment->fresh()->status);
+            $this->assertSame('PENDING', $payment->fresh()->donation()->first()->status);
+            $this->assertNull($evidence->fresh()->review_outcome);
+        }
+    }
+
+    public function test_direct_approve_without_a_declared_amount_cannot_succeed(): void
+    {
+        $payment = $this->makeManualPayment();
+        $verifier = $this->verifierWithAuthority();
+
+        $evidence = app(ManualTransferEvidenceService::class)->submit($payment, $this->fakeUpload(), [], null);
+
+        try {
+            app(ManualTransferVerificationService::class)->approve($payment->fresh(), $verifier, $evidence->id);
+            $this->fail('Direct approve() with no declared amount must fail closed.');
+        } catch (PaymentValidationException $e) {
+            $this->assertSame('amount_mismatch_requires_hold', $e->reason);
+        }
+
+        $this->assertSame('PENDING', $payment->fresh()->status);
+        $this->assertSame('PENDING', $payment->fresh()->donation()->first()->status);
+    }
+
     public function test_resubmission_while_eligible_appends_without_overwriting(): void
     {
         $payment = $this->makeManualPayment();
@@ -241,7 +283,7 @@ class ManualTransferTest extends TestCase
 
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'tripay'], null, 'manual-wrong-'.uniqid()
-        );
+        )->payment;
 
         try {
             app(ManualTransferEvidenceService::class)->submit($payment, $this->fakeUpload(), [], null);

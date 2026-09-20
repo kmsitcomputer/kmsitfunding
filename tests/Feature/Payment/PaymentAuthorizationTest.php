@@ -74,7 +74,7 @@ class PaymentAuthorizationTest extends TestCase
 
         return app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], $owner, 'auth-'.uniqid()
-        );
+        )->payment;
     }
 
     public function test_donor_views_own_payment_with_permission_and_own_scope(): void

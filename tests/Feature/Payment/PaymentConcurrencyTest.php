@@ -234,7 +234,7 @@ class PaymentConcurrencyTest extends TestCase
             $this->releaseContender(commit: true);
         }
 
-        $replayed = app(PaymentCreationService::class)->create($donation, ['provider' => 'manual_transfer'], null, $key);
+        $replayed = app(PaymentCreationService::class)->create($donation, ['provider' => 'manual_transfer'], null, $key)->payment;
 
         $this->assertSame(1, Payment::query()->where('idempotency_key', $key)->count());
         $this->assertSame(Payment::query()->where('idempotency_key', $key)->first()->id, $replayed->id);
@@ -356,7 +356,7 @@ class PaymentConcurrencyTest extends TestCase
         $donation = $this->makeGuestDonation('race-don-d-'.uniqid());
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'race-d-'.uniqid()
-        );
+        )->payment;
         $system = $this->makeSystemActor();
         $service = app(PaymentTransitionService::class);
 

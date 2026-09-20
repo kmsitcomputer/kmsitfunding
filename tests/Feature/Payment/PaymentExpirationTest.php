@@ -39,7 +39,7 @@ class PaymentExpirationTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'exp-'.uniqid()
-        );
+        )->payment;
 
         if ($expiresAt !== null) {
             $payment->forceFill(['expires_at' => $expiresAt])->save();

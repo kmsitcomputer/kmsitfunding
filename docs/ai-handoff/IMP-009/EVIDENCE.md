@@ -421,3 +421,88 @@ this EVIDENCE.md update (committed separately below). PUSH: NOT
 PERFORMED. MERGE: NOT PERFORMED.
 
 FINAL VERDICT: REMEDIATION COMPLETE — READY FOR DEEPSEEK RE-REVIEW
+
+---
+
+## 16. Codex Final Semantic Audit — FAIL → Remediation (2026-09-20)
+
+**Codex verdict on HEAD `b1938a4`:** FAIL — REMEDIATION REQUIRED
+(BLOCKER 0 / MAJOR 2 / MINOR 0 / EDITORIAL 1). Gate-impacting:
+R-01 (guest idempotent replay establishes session possession) and
+CODEX-F-01 (Manual Transfer amount mismatch approvable to
+SUCCEEDED). No new Human Decision required. This section records
+the patch only; all §§1–15 history above is preserved unchanged.
+
+### R-01 remediated: replay is not recovery
+
+- `PaymentCreationService::create()` now returns the explicit
+  `PaymentCreationOutcome { Payment $payment; bool $created }`
+  contract (new file
+  `app/Services/Payment/PaymentCreationOutcome.php`) — CREATED vs
+  IDEMPOTENT_REPLAY is carried explicitly, never inferred from
+  timestamps or heuristics. Both the in-transaction replay path and
+  the unique-violation catch path return `created: false`.
+- `PublicPaymentController::store()` calls `rememberGuestPayment()`
+  ONLY when `$outcome->created` is true. Same-session replay stays
+  usable through the possession already in `guest_payment_ulids`;
+  a fresh anonymous session replaying Donation ULID + provider +
+  valid Idempotency-Key receives the same Payment per idempotency
+  semantics but gains NO session possession (status → 404,
+  evidence → 403).
+- Idempotency semantics preserved: same key → same Payment, one
+  provider transaction, one Payment row.
+- Tests: service-level created/replay flag test; same-session
+  replay keeps possession without a second row; fresh-session
+  replay gains no possession (status denied, evidence denied).
+
+### R-01 audit metadata: STOP — locked contract conflict reported
+
+Codex asked to minimize the raw Idempotency-Key in
+`payment.attempt_created` audit metadata if no approved contract
+requires it. The approved spec EXPLICITLY requires it
+(IMP-009-payment-hub.md §Audit: "payload: donation_ulid, provider,
+amount_minor, currency, idempotency_key") and the locked
+`PaymentAuditEventRegistrar` allow-list encodes
+`'idempotency_key' => 'string'`. Changing to hash/omission would
+conflict with the locked audit contract — therefore NOT changed.
+Compensating fact: after the R-01 fix the key is provably NOT a
+credential (replay grants no possession), so its audited presence
+creates no authorization capability.
+
+### CODEX-F-01 remediated: approve() is fail-closed on amount
+
+- `ManualTransferVerificationService::approve()` now rejects with
+  typed `amount_mismatch_requires_hold` unless the evidence's
+  `declared_amount_minor` exactly equals the immutable Payment
+  `amount_minor` (canonical integer minor units; a null declared
+  amount also fails closed). No SUCCEEDED transition, no Donation
+  consequence, no amount mutation on mismatch — the verifier uses
+  the existing `holdForAmountMismatch()` controlled-review path.
+  No refund/credit/balance/allocation, no Ledger posting invented.
+- Tests: direct-approve bypass across −1/+1/−500/+500 canonical
+  units (Payment stays PENDING, Donation stays PENDING, evidence
+  unreviewed); direct approve with no declared amount fails
+  closed; exact-match path still succeeds (pre-existing
+  `test_submit_approve_full_path` plus the corrected
+  `test_manual_approve_drives_payment_and_donation_to_succeeded_in_one_path`,
+  whose fixture now declares the exact amount).
+
+### Validation (this session, testing / sqlite / :memory:)
+
+| Check | Result |
+|-------|--------|
+| `tests/Feature/Payment` | 128/128 PASS (713 assertions) |
+| `tests/Unit` | 137/137 PASS (217 assertions) |
+| `vendor/bin/pint --test` | PASS (474 files) |
+| `composer audit` | no advisories |
+| `git diff --check` | clean |
+
+MySQL concurrency NOT rerun: the patch changes no database
+uniqueness, locking, transaction, migration, or schema behavior
+(same transactions, same constraints, same lock order) — the
+prior gate's 9/9 disposable-DB result stands.
+
+Development DB `kmsitdonation`: NOT TOUCHED. R-02/R-03/R-04
+residuals: untouched per instruction (no churn).
+
+FINAL VERDICT: REMEDIATION COMPLETE — READY FOR INDEPENDENT RE-REVIEW

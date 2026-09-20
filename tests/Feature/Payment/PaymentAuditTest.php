@@ -144,7 +144,7 @@ class PaymentAuditTest extends TestCase
         $donation = $this->makePendingGuestDonation();
         $payment = app(PaymentCreationService::class)->create(
             $donation, ['provider' => 'manual_transfer'], null, 'failclosed-'.uniqid()
-        );
+        )->payment;
 
         $catalog = SystemPrincipal::firstOrCreate(
             ['code' => 'test.payment.failclosed'],
