@@ -71,6 +71,16 @@ class PermissionRegistry
 
     public const THEME_MEDIA_UPLOAD = 'theme.media.upload';
 
+    // CR-001-B — Draft Site Design Preview authorization (docs/change-requests/
+    // CR-001-public-experience-cms-ziswaf-admin-v2.md Section 30): "DRAFT
+    // Site Design must only be viewable through an authorized Preview
+    // action, never a public URL guessable by an anonymous visitor."
+    // Permission constant + ThemePolicy::preview() are created by CR-001-B;
+    // the controller endpoint that calls it belongs to CR-001-C. Included
+    // in the super_admin bulk grant below like every other non-audit
+    // permission — no bypass.
+    public const THEME_PREVIEW = 'theme.preview';
+
     // IMP-007 Campaign/Program/Fund permission family (docs/implementation/
     // IMP-007-campaign-program-fund.md section 14). CAMPAIGN_APPROVE and
     // CAMPAIGN_PUBLISH are kept independently enforceable per HD-IMP007-01 —
@@ -252,6 +262,10 @@ class PermissionRegistry
             ],
             self::THEME_MEDIA_UPLOAD => [
                 'description' => 'Upload intake of theme assets — the security-sensitive write, kept separate from theme.update.',
+                'module' => 'theme',
+            ],
+            self::THEME_PREVIEW => [
+                'description' => 'View a DRAFT Site Design through an authorized Preview action — never a guessable public URL.',
                 'module' => 'theme',
             ],
             self::PROGRAM_VIEW => [
