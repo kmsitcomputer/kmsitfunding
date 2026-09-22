@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AdminPaymentController;
 use App\Http\Controllers\Admin\AdminPaymentProviderConfigController;
+use App\Http\Controllers\Admin\SiteDesignController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\ConfirmablePasswordController;
 use App\Http\Controllers\Auth\EmailChangeController;
@@ -194,6 +195,26 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
 
         Route::post('/{theme}/assets', [ThemeController::class, 'uploadAsset'])->name('assets.upload');
         Route::post('/assets/{asset}/archive', [ThemeController::class, 'archiveAsset'])->name('assets.archive');
+    });
+
+    // CR-001-C — Site Design operator abstraction over the Theme Engine
+    // (docs/ai-handoff/CR-001/C-RECON.md §47.1). Thin orchestration over
+    // canonical services; Advanced/Debug remains at /admin/theme/* above
+    // (HD-CR001-05). {theme}/{menu} bound by ULID.
+    Route::prefix('admin/site-design')->name('site-design.')->group(function () {
+        Route::get('/', [SiteDesignController::class, 'index'])->name('index');
+        Route::post('/{theme}/clone', [SiteDesignController::class, 'cloneToDraft'])->name('clone');
+        Route::get('/{theme}/preview', [SiteDesignController::class, 'preview'])->name('preview');
+        Route::post('/{theme}/publish', [SiteDesignController::class, 'publish'])->name('publish');
+        Route::get('/{theme}/branding', [SiteDesignController::class, 'showBrand'])->name('branding.show');
+        Route::post('/{theme}/branding', [SiteDesignController::class, 'saveBrand'])->name('branding.save');
+        Route::post('/{theme}/logo', [SiteDesignController::class, 'uploadLogo'])->name('logo.upload');
+        Route::get('/{theme}/menus', [SiteDesignController::class, 'indexMenus'])->name('menus.index');
+        Route::post('/{theme}/menus', [SiteDesignController::class, 'saveMenu'])->name('menus.save');
+        Route::get('/menus/{menu}', [SiteDesignController::class, 'showMenu'])->name('menus.show');
+        Route::post('/menus/{menu}/items', [SiteDesignController::class, 'createNavigationItem'])->name('menus.items.store');
+        Route::patch('/navigation-items/{item}', [SiteDesignController::class, 'updateNavigationItem'])->name('menus.items.update');
+        Route::delete('/navigation-items/{item}', [SiteDesignController::class, 'deleteNavigationItem'])->name('menus.items.delete');
     });
 
     // IMP-007 — Campaign/Program/Fund admin UI (docs/implementation/
