@@ -153,10 +153,11 @@ Execution routing (Human-approved, C through J):
 
 ## Finalization Commit
 
-`<PENDING — recorded in a follow-up evidence commit after this
-implementation/finalization commit is created>`
+`b72323dc832369dcfe5ae377fe5aaa50ae7ce9f2` — `feat(site-design): finalize CR-001-C foundation`
 
 ## Push / Remote Verification
 
-`<PENDING — recorded in a follow-up evidence commit after push and
-`local HEAD == origin/master` are verified>`
+`<PENDING — push to origin/master and `local HEAD == origin/master`
+verification occur after this evidence commit; see the CR-001-C
+finalization task record for the resulting push/remote-verification
+result>`
