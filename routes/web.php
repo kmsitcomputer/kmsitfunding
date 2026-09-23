@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AdminPaymentController;
 use App\Http\Controllers\Admin\AdminPaymentProviderConfigController;
+use App\Http\Controllers\Admin\PageBuilderController;
 use App\Http\Controllers\Admin\SiteDesignController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\ConfirmablePasswordController;
@@ -215,6 +216,27 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::post('/menus/{menu}/items', [SiteDesignController::class, 'createNavigationItem'])->name('menus.items.store');
         Route::patch('/navigation-items/{item}', [SiteDesignController::class, 'updateNavigationItem'])->name('menus.items.update');
         Route::delete('/navigation-items/{item}', [SiteDesignController::class, 'deleteNavigationItem'])->name('menus.items.delete');
+    });
+
+    // CR-001-D — Visual Page Builder operator surface over the Theme Engine
+    // (docs/implementation/CR-001-D-visual-page-builder.md §42). Additive
+    // group only; shares this file with FE-CHK-009 (public.payments.create),
+    // whose hunks above are preserved untouched. {theme}/{template}/
+    // {section} bound by ULID.
+    Route::prefix('admin/page-builder')->name('page-builder.')->group(function () {
+        // RA-01 — bounded, authenticated CMS selector pagination (page 2+ of
+        // the CMS content picker). Must be registered before the `/{theme}`
+        // wildcard below so "cms-content" is never captured as a theme ULID.
+        Route::get('/cms-content', [PageBuilderController::class, 'cmsContent'])->name('cms-content');
+        Route::get('/{theme}', [PageBuilderController::class, 'index'])->name('index');
+        Route::get('/templates/{template}', [PageBuilderController::class, 'show'])->name('show');
+        Route::post('/templates/{template}/blocks', [PageBuilderController::class, 'store'])->name('blocks.store');
+        Route::patch('/blocks/{section}', [PageBuilderController::class, 'update'])->name('blocks.update');
+        Route::delete('/templates/{template}/blocks/{section}', [PageBuilderController::class, 'destroy'])->name('blocks.destroy');
+        Route::post('/templates/{template}/blocks/{section}/duplicate', [PageBuilderController::class, 'duplicate'])->name('blocks.duplicate');
+        Route::patch('/blocks/{section}/visibility', [PageBuilderController::class, 'setVisibility'])->name('blocks.visibility');
+        Route::put('/templates/{template}/blocks/order', [PageBuilderController::class, 'reorder'])->name('blocks.reorder');
+        Route::post('/templates/{template}/blocks/place-reusable', [PageBuilderController::class, 'placeReusable'])->name('blocks.place-reusable');
     });
 
     // IMP-007 — Campaign/Program/Fund admin UI (docs/implementation/

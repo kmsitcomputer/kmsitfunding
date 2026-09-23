@@ -19,6 +19,14 @@ class ThemeComponent extends Model
 
     protected $guarded = ['id'];
 
+    /**
+     * CR-001-D F-04 — persist timestamps with microsecond precision so the
+     * Page Builder stale-edit comparison is meaningful. Schema already uses
+     * dateTime(..., 6); without this Eloquent writes Y-m-d H:i:s (.000000).
+     * No schema change, no migration.
+     */
+    protected $dateFormat = 'Y-m-d H:i:s.u';
+
     protected function casts(): array
     {
         return [
