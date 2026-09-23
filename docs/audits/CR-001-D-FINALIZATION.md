@@ -232,9 +232,16 @@ Governance ADR (additive schema extension, HD-CR001D-01):
 
 ## Finalization Commit
 
-`<PENDING — recorded immediately below after the selective commit is created>`
+`9929e4afa43fbd7077e42dac710fa9927a45b382` — `feat(page-builder): finalize CR-001-D visual page builder`
 
 ## Push / Remote Verification
 
-`<PENDING — recorded immediately below after push and `local HEAD == origin/master`
-are verified>`
+Pushed to `origin/master` (`eadc113..9929e4a  master -> master`). After
+`git fetch origin`, `git rev-parse HEAD` and `git rev-parse origin/master`
+both resolve to `9929e4afa43fbd7077e42dac710fa9927a45b382` — confirmed
+equal. Protected FE-CHK-009 dirty working-tree files (16 modified + 6
+untracked) remained present and unstaged after push, byte-identical to
+their pre-finalization state — expected, since a clean worktree is not
+the closure criterion for this phase (protected parallel work
+intentionally remains, per the same discipline `docs/audits/CR-001-C-FINALIZATION.md`
+established).
