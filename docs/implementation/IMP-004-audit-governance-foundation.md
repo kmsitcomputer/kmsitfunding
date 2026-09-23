@@ -505,6 +505,12 @@ execution_context      string, NULLABLE — REQUIRED (NOT NULL) precisely when
 
 ### Canonical Actor (Pre-Principal Cases)
 
+**Amended by [ADR-002](../adr/ADR-002-donation-unauthenticated-actor-scope-amendment.md)
+(HD-IMP008-06, Human-approved, `FINAL / LOCKED`):** `actor_principal_kind = 'unauthenticated'`'s
+legitimate-use scope below is widened from one category to two — see the amended bullet. No enum
+value is added or removed (`app/Enums/AuditActorKind.php` is unchanged); no other actor kind's
+rules on this page are affected.
+
 ```
 actor_principal_kind = 'human' | 'system' | 'integration'
     -> actor_principal_id MUST be non-null (enforced by the writer/registry, not merely
@@ -514,11 +520,21 @@ actor_principal_kind = 'unauthenticated'
     -> actor_principal_id MUST be null.
     -> execution_context is a FIXED, registry-supplied constant identifying the unauthenticated
        entry point (e.g. "http:login_attempt") — never free-form caller input.
-    -> Legitimate ONLY for an event that is itself evidence of a failed/incomplete
-       authentication attempt (currently: identity.session.login_failed). An attempted
-       identifier (e.g. the normalized email that was typed) MAY appear in that event's own
-       allow-listed metadata as data-about-the-attempt — it is never promoted to
-       actor_principal_id, because it is unverified.
+    -> Legitimate for exactly two registered categories (widened by ADR-002/HD-IMP008-06 from the
+       original single category; NOT a general-purpose "nobody was authenticated" bucket — every
+       use remains its own explicitly registered (event_type, execution_context) pair, per event
+       registrar, never inferred or caller-selectable):
+         1. An event that is itself evidence of a failed/incomplete authentication attempt
+            (the ORIGINAL, still-valid category; currently: identity.session.login_failed). An
+            attempted identifier (e.g. the normalized email that was typed) MAY appear in that
+            event's own allow-listed metadata as data-about-the-attempt — it is never promoted to
+            actor_principal_id, because it is unverified.
+         2. A legitimate, successful action performed through an explicitly registered public
+            unauthenticated entry point (NEW, per ADR-002; currently: donation.created when the
+            acting party is a guest, IMP-008, execution_context "http:donation:guest_created").
+            actor_principal_id remains null for the same reason as category 1 — no verified
+            identity exists to promote — but the event itself is NOT evidence of a failure; it is
+            an intentionally-unauthenticated, successful business action.
 
 actor_principal_kind = 'pre_principal_system'
     -> actor_principal_id MUST be null.

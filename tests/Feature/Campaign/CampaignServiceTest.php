@@ -61,6 +61,75 @@ class CampaignServiceTest extends TestCase
         app(CampaignService::class)->update($campaign, ['name' => 'D'], 999, $actor);
     }
 
+    public function test_create_rejects_an_unregistered_currency_even_without_a_target_amount(): void
+    {
+        // Completion-phase remediation: the registry check previously ran only
+        // when an amount accompanied the currency, so an unregistered code
+        // could be persisted and would later break Money::ofMinorUnits()
+        // (section 13 / AC-007-021).
+        $actor = $this->makeUnauthorizedActor();
+
+        $this->expectException(CampaignValidationException::class);
+        app(CampaignService::class)->create(['name' => 'C', 'currency' => 'XXX'], $actor);
+    }
+
+    public function test_update_rejects_an_unregistered_currency_without_a_target_amount(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $campaign = app(CampaignService::class)->create(['name' => 'C'], $actor);
+
+        $this->expectException(CampaignValidationException::class);
+        app(CampaignService::class)->update($campaign, ['currency' => 'XXX'], 0, $actor);
+    }
+
+    public function test_create_rejects_an_ends_at_before_starts_at(): void
+    {
+        // section 13: "if both present, ends_at must be >= starts_at".
+        $actor = $this->makeUnauthorizedActor();
+
+        $this->expectException(CampaignValidationException::class);
+        app(CampaignService::class)->create([
+            'name' => 'C', 'starts_at' => '2026-06-01', 'ends_at' => '2026-05-01',
+        ], $actor);
+    }
+
+    public function test_update_rejects_an_ends_at_before_the_persisted_starts_at(): void
+    {
+        // Completion-phase remediation: a partial update supplying only
+        // ends_at is a case the request-level `after_or_equal` rule alone
+        // cannot cover.
+        $actor = $this->makeUnauthorizedActor();
+        $campaign = app(CampaignService::class)->create(['name' => 'C', 'starts_at' => '2026-06-01'], $actor);
+
+        $this->expectException(CampaignValidationException::class);
+        app(CampaignService::class)->update($campaign, ['ends_at' => '2026-05-01'], 0, $actor);
+    }
+
+    public function test_update_accepts_a_valid_period(): void
+    {
+        $actor = $this->makeUnauthorizedActor();
+        $campaign = app(CampaignService::class)->create(['name' => 'C', 'starts_at' => '2026-06-01'], $actor);
+
+        $updated = app(CampaignService::class)->update($campaign, ['ends_at' => '2026-06-30'], 0, $actor);
+
+        $this->assertSame('2026-06-30', $updated->ends_at->toDateString());
+    }
+
+    public function test_update_rejects_assigning_an_archived_fund(): void
+    {
+        // BR-5: an ARCHIVED Fund cannot be SELECTED at assignment time. The
+        // publish-time guard (BR-1) is a second, independent check — never the
+        // only one — and the admin UI's ACTIVE-only selector is presentation,
+        // not enforcement.
+        $actor = $this->makeUnauthorizedActor();
+        $campaign = app(CampaignService::class)->create(['name' => 'C'], $actor);
+        $fund = app(FundService::class)->create(['name' => 'F', 'code' => 'f-'.uniqid()], $actor);
+        app(FundService::class)->archive($fund, $actor);
+
+        $this->expectException(CampaignValidationException::class);
+        app(CampaignService::class)->update($campaign, ['fund_ulid' => $fund->ulid], 0, $actor);
+    }
+
     public function test_update_assigning_a_fund_records_fund_assigned_audit_event(): void
     {
         $actor = $this->makeUnauthorizedActor();

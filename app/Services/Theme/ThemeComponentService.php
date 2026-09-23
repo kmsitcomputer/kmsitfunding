@@ -5,20 +5,25 @@ namespace App\Services\Theme;
 use App\Models\Rbac\Principal;
 use App\Models\Theme\ThemeComponent;
 use App\Models\Theme\ThemeSection;
+use App\Services\Content\ContentSanitizer;
+use App\Services\Content\Exceptions\ContentSanitizationException;
 use App\Services\Theme\Exceptions\ThemeValidationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * IMP-006 — Component CRUD within a Section (docs/implementation/
  * IMP-006-theme-engine.md section 11/24). Every config write passes through
  * ComponentConfigValidator BEFORE persistence — never persisted
- * unvalidated (section 21).
+ * unvalidated (section 21). ADR-004 custom_html additionally passes through
+ * ContentSanitizer here, for every caller including Advanced/Debug.
  */
 class ThemeComponentService
 {
     public function __construct(
         private readonly ComponentConfigValidator $configValidator,
         private readonly ThemeAuditLogger $auditLogger,
+        private readonly ContentSanitizer $sanitizer,
     ) {}
 
     /**
@@ -28,6 +33,7 @@ class ThemeComponentService
     {
         return DB::transaction(function () use ($section, $type, $config, $actor) {
             $this->configValidator->assertValid($type, $config);
+            $config = $this->sanitizeCustomHtml($type, $config);
 
             $lockedSection = ThemeSection::query()->whereKey($section->id)->lockForUpdate()->firstOrFail();
             $nextPosition = (int) ($lockedSection->components()->max('position') ?? 0) + 1;
@@ -60,6 +66,7 @@ class ThemeComponentService
             $locked = ThemeComponent::query()->whereKey($component->id)->lockForUpdate()->firstOrFail();
 
             $this->configValidator->assertValid($locked->type, $config);
+            $config = $this->sanitizeCustomHtml($locked->type, $config);
 
             $locked->config = $config;
             $locked->save();
@@ -72,6 +79,29 @@ class ThemeComponentService
 
             return $locked;
         });
+    }
+
+    /**
+     * @param  array<string, mixed>  $config
+     * @return array<string, mixed>
+     */
+    private function sanitizeCustomHtml(string $type, array $config): array
+    {
+        if ($type !== 'rich_text' || ($config['source'] ?? null) !== 'custom_html') {
+            return $config;
+        }
+
+        try {
+            $config['body_html'] = $this->sanitizer->sanitize($config['body_html']);
+        } catch (ContentSanitizationException $e) {
+            throw ValidationException::withMessages(['body_html' => $e->getMessage()]);
+        }
+
+        // Sanitization can remove all content (e.g. a comment-only body).
+        // The stored config must still satisfy required_if:source,custom_html.
+        $this->configValidator->assertValid($type, $config);
+
+        return $config;
     }
 
     public function delete(ThemeComponent $component, Principal $actor): void

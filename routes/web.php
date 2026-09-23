@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\Admin\AdminPaymentController;
+use App\Http\Controllers\Admin\AdminPaymentProviderConfigController;
+use App\Http\Controllers\Admin\PageBuilderController;
+use App\Http\Controllers\Admin\SiteDesignController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\ConfirmablePasswordController;
 use App\Http\Controllers\Auth\EmailChangeController;
@@ -18,10 +22,18 @@ use App\Http\Controllers\Cms\ArticleController;
 use App\Http\Controllers\Cms\HomepageController;
 use App\Http\Controllers\Cms\MediaController;
 use App\Http\Controllers\Cms\PageController;
+use App\Http\Controllers\DashboardPaymentController;
+use App\Http\Controllers\Donation\AdminDonationController;
+use App\Http\Controllers\Donation\DashboardDonationController;
 use App\Http\Controllers\PublicCampaignController;
 use App\Http\Controllers\PublicContentController;
+use App\Http\Controllers\PublicDonationController;
+use App\Http\Controllers\PublicPaymentController;
 use App\Http\Controllers\PublicProgramController;
 use App\Http\Controllers\Theme\ThemeController;
+use App\Http\Controllers\Webhooks\StripeWebhookController;
+use App\Http\Controllers\Webhooks\TripayWebhookController;
+use App\Http\Controllers\Webhooks\XenditWebhookController;
 use App\Models\Campaign\Campaign;
 use App\Models\Campaign\Fund;
 use App\Models\Campaign\Program;
@@ -186,6 +198,47 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::post('/assets/{asset}/archive', [ThemeController::class, 'archiveAsset'])->name('assets.archive');
     });
 
+    // CR-001-C — Site Design operator abstraction over the Theme Engine
+    // (docs/ai-handoff/CR-001/C-RECON.md §47.1). Thin orchestration over
+    // canonical services; Advanced/Debug remains at /admin/theme/* above
+    // (HD-CR001-05). {theme}/{menu} bound by ULID.
+    Route::prefix('admin/site-design')->name('site-design.')->group(function () {
+        Route::get('/', [SiteDesignController::class, 'index'])->name('index');
+        Route::post('/{theme}/clone', [SiteDesignController::class, 'cloneToDraft'])->name('clone');
+        Route::get('/{theme}/preview', [SiteDesignController::class, 'preview'])->name('preview');
+        Route::post('/{theme}/publish', [SiteDesignController::class, 'publish'])->name('publish');
+        Route::get('/{theme}/branding', [SiteDesignController::class, 'showBrand'])->name('branding.show');
+        Route::post('/{theme}/branding', [SiteDesignController::class, 'saveBrand'])->name('branding.save');
+        Route::post('/{theme}/logo', [SiteDesignController::class, 'uploadLogo'])->name('logo.upload');
+        Route::get('/{theme}/menus', [SiteDesignController::class, 'indexMenus'])->name('menus.index');
+        Route::post('/{theme}/menus', [SiteDesignController::class, 'saveMenu'])->name('menus.save');
+        Route::get('/menus/{menu}', [SiteDesignController::class, 'showMenu'])->name('menus.show');
+        Route::post('/menus/{menu}/items', [SiteDesignController::class, 'createNavigationItem'])->name('menus.items.store');
+        Route::patch('/navigation-items/{item}', [SiteDesignController::class, 'updateNavigationItem'])->name('menus.items.update');
+        Route::delete('/navigation-items/{item}', [SiteDesignController::class, 'deleteNavigationItem'])->name('menus.items.delete');
+    });
+
+    // CR-001-D — Visual Page Builder operator surface over the Theme Engine
+    // (docs/implementation/CR-001-D-visual-page-builder.md §42). Additive
+    // group only; shares this file with FE-CHK-009 (public.payments.create),
+    // whose hunks above are preserved untouched. {theme}/{template}/
+    // {section} bound by ULID.
+    Route::prefix('admin/page-builder')->name('page-builder.')->group(function () {
+        // RA-01 — bounded, authenticated CMS selector pagination (page 2+ of
+        // the CMS content picker). Must be registered before the `/{theme}`
+        // wildcard below so "cms-content" is never captured as a theme ULID.
+        Route::get('/cms-content', [PageBuilderController::class, 'cmsContent'])->name('cms-content');
+        Route::get('/{theme}', [PageBuilderController::class, 'index'])->name('index');
+        Route::get('/templates/{template}', [PageBuilderController::class, 'show'])->name('show');
+        Route::post('/templates/{template}/blocks', [PageBuilderController::class, 'store'])->name('blocks.store');
+        Route::patch('/blocks/{section}', [PageBuilderController::class, 'update'])->name('blocks.update');
+        Route::delete('/templates/{template}/blocks/{section}', [PageBuilderController::class, 'destroy'])->name('blocks.destroy');
+        Route::post('/templates/{template}/blocks/{section}/duplicate', [PageBuilderController::class, 'duplicate'])->name('blocks.duplicate');
+        Route::patch('/blocks/{section}/visibility', [PageBuilderController::class, 'setVisibility'])->name('blocks.visibility');
+        Route::put('/templates/{template}/blocks/order', [PageBuilderController::class, 'reorder'])->name('blocks.reorder');
+        Route::post('/templates/{template}/blocks/place-reusable', [PageBuilderController::class, 'placeReusable'])->name('blocks.place-reusable');
+    });
+
     // IMP-007 — Campaign/Program/Fund admin UI (docs/implementation/
     // IMP-007-campaign-program-fund.md section 21). {program}/{campaign}/
     // {fund} are bound by ULID, never the internal BIGINT id.
@@ -225,6 +278,75 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
         Route::post('/{campaign}/media', [AdminCampaignController::class, 'uploadAsset'])->name('media.upload');
         Route::post('/media/{asset}/archive', [AdminCampaignController::class, 'archiveAsset'])->name('media.archive');
     });
+
+    // IMP-008 — donor-owned Donation views/actions (docs/implementation/
+    // IMP-008-donation.md "API Impact"). {donation}/{plan} are bound by
+    // ULID, never the internal BIGINT id. Authenticated-only: there is no
+    // guest self-service cancellation endpoint in v1 (HD-IMP008-05B).
+    Route::prefix('me/donations')->name('donations.')->group(function () {
+        Route::get('/', [DashboardDonationController::class, 'index'])->name('index');
+        Route::get('/{donation}', [DashboardDonationController::class, 'show'])->name('show');
+        Route::post('/{donation}/cancel', [DashboardDonationController::class, 'cancel'])->name('cancel');
+    });
+
+    Route::prefix('me/recurring-plans')->name('donations.plans.')->group(function () {
+        Route::get('/', [DashboardDonationController::class, 'indexPlans'])->name('index');
+        Route::post('/', [DashboardDonationController::class, 'storePlan'])->name('store');
+        Route::get('/{plan}', [DashboardDonationController::class, 'showPlan'])->name('show');
+        Route::post('/{plan}/pause', [DashboardDonationController::class, 'pausePlan'])->name('pause');
+        Route::post('/{plan}/resume', [DashboardDonationController::class, 'resumePlan'])->name('resume');
+        Route::post('/{plan}/cancel', [DashboardDonationController::class, 'cancelPlan'])->name('cancel');
+    });
+
+    // IMP-008 — admin/backoffice Donation views/actions (ORGANIZATION
+    // scope; also the guest-cancellation support path, HD-IMP008-05B —
+    // no separate guest mechanism — and the recurring-plan admin
+    // override, HD-IMP008-03). Mirrors the admin/campaign/* convention.
+    Route::prefix('admin/donation/donations')->name('donation.admin.')->group(function () {
+        Route::get('/', [AdminDonationController::class, 'index'])->name('index');
+        Route::get('/{donation}', [AdminDonationController::class, 'show'])->name('show');
+        Route::post('/{donation}/cancel', [AdminDonationController::class, 'cancel'])->name('cancel');
+    });
+
+    Route::prefix('admin/donation/recurring-plans')->name('donation.admin.plans.')->group(function () {
+        Route::get('/{plan}', [AdminDonationController::class, 'showPlan'])->name('show');
+        Route::post('/{plan}/pause', [AdminDonationController::class, 'pausePlan'])->name('pause');
+        Route::post('/{plan}/resume', [AdminDonationController::class, 'resumePlan'])->name('resume');
+        Route::post('/{plan}/cancel', [AdminDonationController::class, 'cancelPlan'])->name('cancel');
+    });
+
+    // IMP-009 — donor-owned Payment views/actions (docs/implementation/
+    // IMP-009-payment-hub.md "Routes / API Boundary"). {donation}/
+    // {payment} are bound by ULID, never the internal BIGINT id.
+    // Authenticated-only: guest has no listing path (HD-IMP009-04).
+    Route::prefix('me/donations/{donation}/payments')->name('payments.')->group(function () {
+        Route::get('/', [DashboardPaymentController::class, 'index'])->name('index');
+        Route::get('/{payment}', [DashboardPaymentController::class, 'show'])->name('show');
+        Route::post('/{payment}/cancel', [DashboardPaymentController::class, 'cancel'])->name('cancel');
+        Route::post('/{payment}/manual-transfer/evidence', [DashboardPaymentController::class, 'storeEvidence'])->name('evidence.store');
+        Route::get('/{payment}/manual-transfer/evidence/{evidence}', [DashboardPaymentController::class, 'showEvidence'])->name('evidence.show');
+    });
+
+    // IMP-009 — admin/backoffice Payment views and manual-transfer
+    // verification (ORGANIZATION scope + financial_approver for
+    // verify actions). Mirrors the admin/donation/* convention.
+    Route::prefix('admin/payment/payments')->name('payment.admin.')->group(function () {
+        Route::get('/', [AdminPaymentController::class, 'index'])->name('index');
+        Route::get('/{payment}', [AdminPaymentController::class, 'show'])->name('show');
+        Route::post('/{payment}/cancel', [AdminPaymentController::class, 'cancel'])->name('cancel');
+        Route::post('/{payment}/manual-transfer/approve', [AdminPaymentController::class, 'approve'])->name('approve');
+        Route::post('/{payment}/manual-transfer/reject', [AdminPaymentController::class, 'reject'])->name('reject');
+        Route::post('/{payment}/manual-transfer/hold', [AdminPaymentController::class, 'hold'])->name('hold');
+    });
+
+    Route::prefix('admin/payment/provider-config')->name('payment.admin.config.')->group(function () {
+        Route::get('/', [AdminPaymentProviderConfigController::class, 'index'])->name('provider-config');
+        Route::post('/bank-accounts', [AdminPaymentProviderConfigController::class, 'storeBankAccount'])->name('bank-accounts.store');
+        Route::post('/bank-accounts/{account}/toggle', [AdminPaymentProviderConfigController::class, 'toggleBankAccount'])->name('bank-accounts.toggle');
+        Route::post('/{provider}', [AdminPaymentProviderConfigController::class, 'updateCredential'])
+            ->where('provider', 'tripay|xendit|stripe')
+            ->name('provider-config.update');
+    });
 });
 
 // IMP-007 — public Program/Campaign routes (docs/implementation/
@@ -233,6 +355,44 @@ Route::middleware(['auth', 'identity.active'])->group(function () {
 Route::get('/programs/{program:slug}', [PublicProgramController::class, 'show'])->name('public.programs.show');
 Route::get('/campaigns', [PublicCampaignController::class, 'index'])->name('public.campaigns.index');
 Route::get('/campaigns/{campaign:slug}', [PublicCampaignController::class, 'show'])->name('public.campaigns.show');
+
+// IMP-008 — public Donation entry point (docs/implementation/
+// IMP-008-donation.md "API Impact": POST /campaigns/{slug}/donations —
+// the intentional guest-or-authenticated creation endpoint). Bound by
+// `slug` like the Campaign routes; Idempotency-Key header REQUIRED.
+// Registered before the IMP-006 catch-all below.
+Route::get('/campaigns/{campaign:slug}/donate', [PublicDonationController::class, 'create'])->name('public.donations.create');
+Route::post('/campaigns/{campaign:slug}/donations', [PublicDonationController::class, 'store'])
+    ->middleware('throttle:6,1')
+    ->name('public.donations.store');
+
+// IMP-009 — public Payment entry point (docs/implementation/
+// IMP-009-payment-hub.md "Routes / API Boundary": POST
+// /donations/{ulid}/payments — the intentional
+// guest-or-authenticated creation endpoint, plus the in-flow
+// creation-response read and the in-flow guest evidence upload —
+// both session-bound to the creating browser flow, never
+// bearer-token/identifier-as-credential mechanisms, HD-IMP009-04).
+// Idempotency-Key header REQUIRED. Registered before the IMP-006
+// catch-all below.
+//
+// Provider webhooks (one route per provider, the ONE narrowly-scoped
+// CSRF exemption — see bootstrap/app.php): provider identity comes
+// from the route itself, never payload-shape inference.
+Route::post('/donations/{donation}/payments', [PublicPaymentController::class, 'store'])
+    ->middleware('throttle:6,1')
+    ->name('public.payments.store');
+Route::get('/donations/{donation}/payments/{payment}', [PublicPaymentController::class, 'show'])
+    ->name('public.payments.show');
+Route::post('/donations/{donation}/payments/{payment}/manual-transfer/evidence', [PublicPaymentController::class, 'storeEvidence'])
+    ->middleware('throttle:6,1')
+    ->name('public.payments.evidence.store');
+
+Route::prefix('webhooks/payments')->name('webhooks.payments.')->group(function () {
+    Route::post('/tripay', [TripayWebhookController::class, 'handle'])->name('tripay');
+    Route::post('/xendit', [XenditWebhookController::class, 'handle'])->name('xendit');
+    Route::post('/stripe', [StripeWebhookController::class, 'handle'])->name('stripe');
+});
 
 // IMP-006 — the public content catch-all (docs/implementation/
 // IMP-006-theme-engine.md section 13), registered LAST so every

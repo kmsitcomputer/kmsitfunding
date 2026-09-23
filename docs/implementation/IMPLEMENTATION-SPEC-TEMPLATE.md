@@ -10,13 +10,16 @@ Per [docs/00-governance/MULTI-MODEL-OWNERSHIP.md](../00-governance/MULTI-MODEL-O
 no implicit/default model substitution is permitted; if the assigned model/owner is unavailable,
 stop and report rather than substituting silently.
 
-**First determine the Stage Type — this decides which block below applies. Never fill both.**
+**First determine the Stage Type — this decides which block below applies. Never fill more than
+one.**
 
 ```
-Stage Type:   NORMAL IMPLEMENTATION STAGE  /  AUDIT-ONLY STAGE (IMP-030 only, see GOV-MM-001)
+Stage Type:   NORMAL IMPLEMENTATION STAGE (historical, pre-V3)  /
+              V3 PIPELINE STAGE (IMP-008 forward, see MULTI-MODEL-OWNERSHIP.md "Amendment V3")  /
+              AUDIT-ONLY STAGE (IMP-030 only, see GOV-MM-001)
 ```
 
-### If Stage Type = NORMAL IMPLEMENTATION STAGE (every IMP except IMP-030)
+### If Stage Type = NORMAL IMPLEMENTATION STAGE (historical, pre-V3)
 
 ```
 Primary Implementation Owner:
@@ -42,6 +45,61 @@ Human Model Binding Approval:
 Binding Status:                      UNBOUND / MODEL RESOLVED / AWAITING HUMAN MODEL APPROVAL /
                                       BOUND
 Model Change Requests against this binding: none / list
+```
+
+### If Stage Type = V3 PIPELINE STAGE (IMP-008 forward)
+
+Applies to **every** IMP-008-forward stage, including the Mission-Critical Claude Stages — V3's
+pipeline governs those too; they are not excluded from it (see MULTI-MODEL-OWNERSHIP.md
+"Precedence Over the Legacy Matrix," HD-V3-R2-03). Only IMP-030 uses the separate AUDIT-ONLY STAGE
+block below, because it implements nothing. Compact — do not expand this into a transcript; each
+field is a pointer to durable evidence, not the evidence itself.
+
+```
+V3 Claude Lead Architect Identity Binding (see MULTI-MODEL-OWNERSHIP.md "V3 Claude Lead Architect
+Identity Binding" — distinct from GOV-MM-002, required for EVERY IMP-008-forward stage before
+Human Spec Approval, regardless of Mission-Critical status):
+  Role:                    Claude Lead Architect / Specification Owner
+  Execution Environment:   Claude Code
+  Display Model:
+  Exact Model Identifier:
+  Verification Method:
+  Verification Status:     VERIFIED / EXTERNALLY HUMAN-CONFIRMED
+  Specification Revision:
+
+FAIL CLOSED: if this identity cannot be established, do not submit for Human Spec Approval below.
+
+Human Spec Approval:                     APPROVED / NOT APPROVED
+Approval Statement:                      <exact statement or durable reference — never fabricated>
+Approval Scope:                          <this IMP ID> + <specification revision above>
+Approval Evidence:                       <repository reference>
+
+Qwen Recon Binding:                      qwen/qwen3.7-flash (VERIFIED — see
+                                          MULTI-MODEL-OWNERSHIP.md "Model Binding Contract").
+                                          MUST NOT run before or concurrently with Human Spec
+                                          Approval above (HD-V3-R2-01).
+RECON Evidence:                          <docs/ai-handoff/IMP-XXX/RECON.md reference>
+
+Implementation Write Owner:              Muse Spark 1.3 Contributor
+                                          (meta/muse-spark-1.3-contributor, VERIFIED) — DEFAULT,
+                                          every stage except Mission-Critical Claude Stages
+                                          / Claude Code — MISSION-CRITICAL CLAUDE STAGES ONLY;
+                                          also record the GOV-MM-002 Claude Per-IMP Model Binding
+                                          block from the NORMAL IMPLEMENTATION STAGE section above
+                                          in addition to this V3 block when this applies
+Implementation Commit/Diff:              <commit(s)>
+Test Evidence:                           <summary + reference>
+
+DeepSeek Independent Review Binding:     deepseek/deepseek-v4.1-flash (VERIFIED)
+Findings:                                <reference>
+Remediation Owner:                       Implementation Write Owner above (default) / Claude
+                                          (architecture findings only, per Finding Routing)
+Remediation Evidence:                    <commit(s)/reference>
+Full Regression:                         <result + reference>
+
+Codex Closure Audit:                     <PASS / FAIL + reference>
+Human Stage Gate:                        <status>
+Finalization Status:                     <READY / IN PROGRESS / REVIEW / BLOCKED / PASS>
 ```
 
 ### If Stage Type = AUDIT-ONLY STAGE (IMP-030 only)
