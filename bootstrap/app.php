@@ -19,6 +19,17 @@ return Application::configure(basePath: dirname(__DIR__))
             HandleInertiaRequests::class,
         ]);
 
+        // IMP-009 — the ONE explicitly authorized CSRF exemption in the
+        // Payment Hub (docs/implementation/IMP-009-payment-hub.md
+        // "Webhook Security" step 1): a provider cannot supply a
+        // platform CSRF token. Scoped to exactly the three provider
+        // webhook routes — never generalized to any other route.
+        $middleware->validateCsrfTokens(except: [
+            'webhooks/payments/tripay',
+            'webhooks/payments/xendit',
+            'webhooks/payments/stripe',
+        ]);
+
         $middleware->alias([
             'identity.active' => EnsureIdentityIsActive::class,
             'elevated.assurance' => RequireElevatedAssurance::class,

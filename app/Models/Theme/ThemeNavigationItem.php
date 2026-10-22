@@ -26,6 +26,8 @@ class ThemeNavigationItem extends Model
     {
         return [
             'visible' => 'boolean',
+            'visible_desktop' => 'boolean',
+            'visible_mobile' => 'boolean',
         ];
     }
 

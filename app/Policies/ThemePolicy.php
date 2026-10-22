@@ -42,6 +42,25 @@ class ThemePolicy
         );
     }
 
+    /**
+     * CR-001-B (Section 30): "DRAFT Site Design must only be viewable
+     * through an authorized Preview action, never a public URL guessable
+     * by an anonymous visitor." Same ORGANIZATION-scope shape as every
+     * other ThemePolicy method. The controller endpoint that calls this
+     * belongs to CR-001-C — this method is the auth gate only.
+     */
+    public function preview(Principal $actingPrincipal, Theme $theme): bool
+    {
+        return $this->authorizeRbac(
+            principal: $actingPrincipal,
+            permissionCode: PermissionRegistry::THEME_PREVIEW,
+            resource: $theme,
+            scopeResolver: new ThemeScopeResolver,
+            requestedScopeType: ScopeType::Organization,
+            requestedScopeId: null,
+        );
+    }
+
     public function create(Principal $actingPrincipal): bool
     {
         return $this->authorizeRbac(

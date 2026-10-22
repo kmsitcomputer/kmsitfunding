@@ -130,4 +130,80 @@ class ComponentConfigValidatorTest extends TestCase
             'hero', 'rich_text', 'image', 'cta_button', 'content_list', 'stats', 'banner', 'card_grid', 'navigation_menu_slot',
         ], $this->validator()->componentTypes());
     }
+
+    /**
+     * CR-001-D (HD-CR001D-01 APPROVED, ADR-004): content_list gains the
+     * optional presentation-only display_mode hint (grid|carousel).
+     */
+    public function test_accepts_content_list_with_display_mode_grid(): void
+    {
+        $this->validator()->assertValid('content_list', ['content_kind' => 'campaign', 'limit' => 6, 'order' => 'latest', 'display_mode' => 'grid']);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_accepts_content_list_with_display_mode_carousel(): void
+    {
+        $this->validator()->assertValid('content_list', ['content_kind' => 'campaign', 'limit' => 6, 'order' => 'latest', 'display_mode' => 'carousel']);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_rejects_content_list_with_an_unregistered_display_mode(): void
+    {
+        $this->expectException(ThemeValidationException::class);
+        $this->validator()->assertValid('content_list', ['content_kind' => 'campaign', 'limit' => 6, 'order' => 'latest', 'display_mode' => 'masonry']);
+    }
+
+    /**
+     * CR-001-D (HD-CR001D-01 APPROVED, ADR-004): cta_button gains the
+     * optional presentation-only intent enum (general|donation|zakat).
+     */
+    public function test_accepts_cta_button_with_each_intent_value(): void
+    {
+        foreach (['general', 'donation', 'zakat'] as $intent) {
+            $this->validator()->assertValid('cta_button', [
+                'label' => 'Give',
+                'variant' => 'primary',
+                'intent' => $intent,
+                'destination_type' => 'EXTERNAL_URL',
+                'destination_external_url' => 'https://example.com',
+            ]);
+        }
+        $this->addToAssertionCount(3);
+    }
+
+    public function test_rejects_cta_button_with_an_unregistered_intent(): void
+    {
+        $this->expectException(ThemeValidationException::class);
+        $this->validator()->assertValid('cta_button', [
+            'label' => 'Give',
+            'variant' => 'primary',
+            'intent' => 'anything',
+            'destination_type' => 'EXTERNAL_URL',
+            'destination_external_url' => 'https://example.com',
+        ]);
+    }
+
+    /**
+     * CR-001-D (HD-CR001D-01 APPROVED, ADR-004): rich_text gains the
+     * source=custom_html variant with body_html (sanitized at write time by
+     * PageBuilderBlockService via ContentSanitizer — the validator ensures
+     * presence only).
+     */
+    public function test_accepts_rich_text_custom_html_with_body(): void
+    {
+        $this->validator()->assertValid('rich_text', ['source' => 'custom_html', 'body_html' => '<p>Hello</p>']);
+        $this->addToAssertionCount(1);
+    }
+
+    public function test_rejects_rich_text_custom_html_missing_body(): void
+    {
+        $this->expectException(ThemeValidationException::class);
+        $this->validator()->assertValid('rich_text', ['source' => 'custom_html']);
+    }
+
+    public function test_rejects_rich_text_with_an_unregistered_source(): void
+    {
+        $this->expectException(ThemeValidationException::class);
+        $this->validator()->assertValid('rich_text', ['source' => 'markdown', 'body_html' => 'x']);
+    }
 }

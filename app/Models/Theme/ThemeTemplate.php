@@ -17,6 +17,12 @@ class ThemeTemplate extends Model
 
     protected $guarded = ['id'];
 
+    /**
+     * CR-001-D F-04 — same microsecond persistence rationale as
+     * ThemeComponent::$dateFormat. No schema change, no migration.
+     */
+    protected $dateFormat = 'Y-m-d H:i:s.u';
+
     public function getRouteKeyName(): string
     {
         return 'ulid';

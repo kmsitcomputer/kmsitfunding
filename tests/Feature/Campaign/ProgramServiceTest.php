@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Campaign;
 
+use App\Models\Audit\AuditRecord;
 use App\Services\Campaign\Exceptions\CampaignValidationException;
 use App\Services\Campaign\ProgramService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -94,5 +95,27 @@ class ProgramServiceTest extends TestCase
 
         $this->expectException(CampaignValidationException::class);
         $service->archive($program->fresh(), $actor);
+    }
+
+    public function test_re_publishing_an_already_published_program_is_an_idempotent_no_op(): void
+    {
+        // Completion-phase remediation: a repeat publish must not record a
+        // second program.published transition event — the audit trail never
+        // records a transition that did not actually occur (no
+        // duplicate-transition side effects). Mirrors FundService::archive()'s
+        // own idempotency contract.
+        $actor = $this->makeUnauthorizedActor();
+        $service = app(ProgramService::class);
+        $program = $service->create(['name' => 'A'], $actor);
+
+        $service->publish($program, $actor);
+        $again = $service->publish($program->fresh(), $actor);
+
+        $this->assertSame('PUBLISHED', $again->status);
+        $this->assertSame(
+            1,
+            AuditRecord::where('event_type', 'program.published')->where('subject_id', $program->id)->count(),
+            'A repeated publish must not write a second transition event.'
+        );
     }
 }

@@ -73,4 +73,23 @@ class MoneyTest extends TestCase
         $this->assertIsInt($money->amountMinor());
         $this->assertIsString($money->format());
     }
+
+    public function test_format_performs_no_floating_point_arithmetic_beyond_double_precision(): void
+    {
+        // Completion-phase remediation (AC-007-021: "no floating-point
+        // arithmetic performed at any point in the request lifecycle").
+        // 9007199254740993 = 2**53 + 1, which is NOT exactly representable as
+        // a double: a float-based format() would render ...,409,92 while the
+        // exact integer split renders ...,409,93. This assertion therefore
+        // fails against any float-based implementation.
+        $money = Money::ofMinorUnits(9007199254740993, 'IDR');
+
+        $this->assertSame('IDR 90.071.992.547.409,93', $money->format());
+    }
+
+    public function test_format_pads_the_minor_part_to_the_registered_digit_count(): void
+    {
+        $this->assertSame('USD 10,05', Money::ofMinorUnits(1005, 'USD')->format());
+        $this->assertSame('KWD 1,005', Money::ofMinorUnits(1005, 'KWD')->format());
+    }
 }

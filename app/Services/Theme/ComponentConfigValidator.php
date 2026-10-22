@@ -9,11 +9,10 @@ use Illuminate\Support\Facades\Validator;
  * IMP-006 — validates a Component's `config` payload against its `type`'s
  * CLOSED schema (docs/implementation/IMP-006-theme-engine.md section 11/21)
  * BEFORE every save and again at theme activation. This is the single
- * enforcement point that makes "Theme configuration is data, never code"
- * true: no field validated here ever accepts raw HTML, Blade, Vue SFC, or
- * JavaScript source — every text field is a plain string with a length
- * ceiling, every destination is the closed union NavigationDestinationSpec
- * validates, every enum is a fixed `in:` list.
+ * structural validation point for "Theme configuration is data, never code".
+ * ADR-004 custom_html is additionally sanitized by ThemeComponentService
+ * before persistence; validation alone does not sanitize HTML. Every enum
+ * remains a fixed `in:` list.
  */
 class ComponentConfigValidator
 {
@@ -31,10 +30,15 @@ class ComponentConfigValidator
             'cta_label' => ['nullable', 'string', 'max:100'],
         ],
         'rich_text' => [
-            'source' => ['required', 'string', 'in:cms_content,caption'],
+            'source' => ['required', 'string', 'in:cms_content,caption,custom_html'],
             'content_kind' => ['required_if:source,cms_content', 'nullable', 'string', 'in:page,article'],
             'content_ulid' => ['required_if:source,cms_content', 'nullable', 'string', 'size:26'],
             'caption' => ['required_if:source,caption', 'nullable', 'string', 'max:1000'],
+            // CR-001-D (HD-CR001D-01 APPROVED, ADR-004): Safe Custom Content.
+            // Additive only — `body_html` is sanitized via the existing
+            // ContentSanitizer at write time (ThemeComponentService), never
+            // persisted raw. Validator ensures presence only.
+            'body_html' => ['required_if:source,custom_html', 'nullable', 'string'],
         ],
         'image' => [
             'source' => ['required', 'string', 'in:theme_asset,cms_media'],
@@ -45,6 +49,9 @@ class ComponentConfigValidator
         'cta_button' => [
             'label' => ['required', 'string', 'max:100'],
             'variant' => ['required', 'string', 'in:primary,secondary,outline'],
+            // CR-001-D (HD-CR001D-01 APPROVED, ADR-004): CTA intent is a
+            // closed presentation-only enum — never routing/business logic.
+            'intent' => ['nullable', 'string', 'in:general,donation,zakat'],
             'destination_type' => ['required', 'string', 'in:SYSTEM_ROUTE,CMS_CONTENT,EXTERNAL_URL'],
             'destination_route' => ['required_if:destination_type,SYSTEM_ROUTE', 'nullable', 'string', 'max:255'],
             'destination_content_kind' => ['required_if:destination_type,CMS_CONTENT', 'nullable', 'string', 'in:page,article'],
@@ -61,6 +68,9 @@ class ComponentConfigValidator
             'article_type' => ['nullable', 'string', 'in:ARTICLE,NEWS'],
             'limit' => ['required', 'integer', 'min:1', 'max:24'],
             'order' => ['required', 'string', 'in:latest,oldest'],
+            // CR-001-D (HD-CR001D-01 APPROVED, ADR-004): display hint only —
+            // same projection dataset, rendering differs (CR-001-E).
+            'display_mode' => ['nullable', 'string', 'in:grid,carousel'],
         ],
         'stats' => [
             'items' => ['required', 'array', 'min:1', 'max:8'],

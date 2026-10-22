@@ -113,7 +113,7 @@ class CampaignController extends Controller
             'target_amount_minor' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'currency' => ['sometimes', 'nullable', 'string', 'size:3'],
             'starts_at' => ['sometimes', 'nullable', 'date'],
-            'ends_at' => ['sometimes', 'nullable', 'date'],
+            'ends_at' => ['sometimes', 'nullable', 'date', 'after_or_equal:starts_at'],
             'expected_edit_version' => ['required', 'integer'],
         ]);
 
